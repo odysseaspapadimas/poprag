@@ -10,7 +10,6 @@ async function main() {
     name: "Kolm Start",
     email: "name@kolm.start",
     emailVerified: true,
-    isAnonymous: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

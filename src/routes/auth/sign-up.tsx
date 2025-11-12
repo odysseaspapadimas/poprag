@@ -17,12 +17,13 @@ import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
-const signInSchema = z.object({
+const signUpSchema = z.object({
+  name: z.string().min(1, "Name is required"),
   email: z.email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-export const Route = createFileRoute("/auth/sign-in")({
+export const Route = createFileRoute("/auth/sign-up")({
   component: RouteComponent,
 });
 
@@ -30,28 +31,32 @@ function RouteComponent() {
   const router = useRouter();
   const trpc = useTRPC();
 
-  const loginMutation = useMutation(trpc.auth.login.mutationOptions({
-    onSuccess: () => {
-      router.invalidate();
-    },
-    onError: (error) => {
-      toast.error("Invalid email or password");
-    }
-  }));
+  const signUpMutation = useMutation(
+    trpc.auth.signUp.mutationOptions({
+      onSuccess: () => {
+        router.invalidate();
+      },
+      onError: (error) => {
+        toast.error("Sign up failed: " + error.message);
+      },
+    })
+  );
 
   const form = useForm({
     defaultValues: {
+      name: "",
       email: "",
       password: "",
     },
     validators: {
-      onSubmit: signInSchema,
+      onSubmit: signUpSchema,
     },
     onSubmit: async ({ value }) => {
-        await loginMutation.mutateAsync({
-          email: value.email,
-          password: value.password,
-        });
+      await signUpMutation.mutateAsync({
+        name: value.name,
+        email: value.email,
+        password: value.password,
+      });
     },
   });
 
@@ -59,7 +64,7 @@ function RouteComponent() {
     <main className="flex-1 flex flex-col items-center justify-center gap-4 p-4">
       <header className="flex flex-col justify-center items-center gap-2">
         <Logo />
-        <h1 className="font-extrabold text-2xl">Sign In</h1>
+        <h1 className="font-extrabold text-2xl">Sign Up</h1>
       </header>
 
       <form
@@ -70,6 +75,31 @@ function RouteComponent() {
         className="w-full max-w-md space-y-4"
       >
         <FieldGroup>
+          <form.Field
+            name="name"
+            children={(field) => {
+              const isInvalid =
+                field.state.meta.isTouched && !field.state.meta.isValid;
+              return (
+                <Field data-invalid={isInvalid}>
+                  <FieldLabel htmlFor={field.name}>Name</FieldLabel>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    aria-invalid={isInvalid}
+                    placeholder="Your name"
+                    autoComplete="name"
+                  />
+                  <FieldDescription>Enter your full name.</FieldDescription>
+                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                </Field>
+              );
+            }}
+          />
+
           <form.Field
             name="email"
             children={(field) => {
@@ -90,7 +120,7 @@ function RouteComponent() {
                     autoComplete="email"
                   />
                   <FieldDescription>
-                    Enter your email address.
+                    We'll use this to create your account.
                   </FieldDescription>
                   {isInvalid && <FieldError errors={field.state.meta.errors} />}
                 </Field>
@@ -115,10 +145,10 @@ function RouteComponent() {
                     onChange={(e) => field.handleChange(e.target.value)}
                     aria-invalid={isInvalid}
                     placeholder="••••••••"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                   />
                   <FieldDescription>
-                    Enter your password.
+                    Must be at least 6 characters.
                   </FieldDescription>
                   {isInvalid && <FieldError errors={field.state.meta.errors} />}
                 </Field>
@@ -127,15 +157,15 @@ function RouteComponent() {
           />
         </FieldGroup>
 
-        <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
-          Sign In
+        <Button type="submit" className="w-full" disabled={signUpMutation.isPending}>
+          Sign Up
         </Button>
       </form>
 
       <p className="text-sm text-muted-foreground">
-        Don't have an account?{" "}
-        <Link to="/auth/sign-up" className="text-primary hover:underline">
-          Sign up
+        Already have an account?{" "}
+        <Link to="/auth/sign-in" className="text-primary hover:underline">
+          Sign in
         </Link>
       </p>
     </main>

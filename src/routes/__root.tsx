@@ -14,10 +14,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
+import { auth } from "@/auth/server";
 import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
-import { auth } from "@/lib/auth";
+import { Toaster } from "@/components/ui/sonner";
+import type { AppRouter } from "@/integrations/trpc/router";
 import appCss from "@/styles/app.css?url";
-import type { AppRouter } from "@/trpc/router";
 import { seo } from "@/utils/seo";
 
 const getServerSession = createServerFn({ method: "GET" }).handler(async () => {
@@ -90,6 +91,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body className="antialiased font-display min-h-screen flex flex-col">
         {children}
+        <Toaster />
+
         <TanStackDevtools
           plugins={[
             {
