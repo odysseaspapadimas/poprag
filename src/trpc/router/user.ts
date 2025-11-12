@@ -1,6 +1,6 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 
-import { protectedProcedure } from "~/trpc/init";
+import { protectedProcedure } from "@/trpc/init";
 
 export const userRouter = {
   getAll: protectedProcedure.query(

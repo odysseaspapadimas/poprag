@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ragbot",
+  "compatibility_date": "2025-10-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "poprag",
+      "database_id": "61d8695d-37c8-483c-b46d-7e840958b1b0",
+      "migrations_dir": "drizzle/migrations",
+      "remote": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "poprag",
+      "remote": true
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "poprag",
+      "remote": true
+    }
+  ]
+}

@@ -14,11 +14,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
-import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
-import { auth } from "~/lib/auth";
-import appCss from "~/styles/app.css?url";
-import type { AppRouter } from "~/trpc/router";
-import { seo } from "~/utils/seo";
+import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
+import { auth } from "@/lib/auth";
+import appCss from "@/styles/app.css?url";
+import type { AppRouter } from "@/trpc/router";
+import { seo } from "@/utils/seo";
 
 const getServerSession = createServerFn({ method: "GET" }).handler(async () => {
   const headers = getRequestHeaders();
@@ -84,7 +84,7 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>

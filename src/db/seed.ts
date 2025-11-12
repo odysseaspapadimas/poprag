@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { db } from "~/db";
+import { db } from "@/db";
 
 import * as schema from "./schema";
 

@@ -7,9 +7,9 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 
-import { Button } from "~/components/button";
-import { Logo } from "~/components/logo";
-import { signOut } from "~/lib/auth-client";
+import { Logo } from "@/components/logo";
+import { Button } from "@/components/ui/button";
+import { signOut } from "@/lib/auth-client";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: ({ context: { session } }) => {
