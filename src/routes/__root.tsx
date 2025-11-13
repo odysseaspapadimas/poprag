@@ -10,43 +10,21 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { createServerFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
-import { auth } from "@/auth/server";
 import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
 import { Toaster } from "@/components/ui/sonner";
+import { $getSession } from "@/fn/auth";
 import type { AppRouter } from "@/integrations/trpc/router";
 import appCss from "@/styles/app.css?url";
 import { seo } from "@/utils/seo";
-
-const getServerSession = createServerFn({ method: "GET" }).handler(async () => {
-  const headers = getRequestHeaders();
-
-  const serverSession = await auth.api.getSession({
-    headers,
-    query: {
-      disableCookieCache: true,
-    },
-  });
-
-  if (serverSession) {
-    const { session, user } = serverSession;
-
-    return {
-      session,
-      user,
-    };
-  }
-});
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
   trpc: TRPCOptionsProxy<AppRouter>;
 }>()({
-  beforeLoad: async () => {
-    const session = await getServerSession();
+  beforeLoad: async ({ context }) => {
+    const { session } = await $getSession(context.queryClient);
 
     return { session };
   },
@@ -91,7 +69,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body className="antialiased font-display min-h-screen flex flex-col">
         {children}
-        <Toaster />
+        <Toaster richColors />
 
         <TanStackDevtools
           plugins={[

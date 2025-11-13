@@ -15,6 +15,20 @@
       "when": 1762980908492,
       "tag": "0001_violet_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1762986997140,
+      "tag": "0002_brave_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1763054358028,
+      "tag": "0003_third_vampiro",
+      "breakpoints": true
     }
   ]
 }

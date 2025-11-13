@@ -4,7 +4,14 @@ import superjson from "superjson";
 import { auth } from "@/auth/server";
 import { db } from "@/db";
 
-export const createTRPCContext = async ({ request, headers }: { request: Request; headers: Headers }) => {
+export const createTRPCContext = async ({
+  request,
+  resHeaders,
+}: {
+  request: Request;
+  resHeaders: Headers;
+}) => {
+  const headers = request.headers;
   const session = await auth.api.getSession({
     headers,
   });
@@ -13,11 +20,9 @@ export const createTRPCContext = async ({ request, headers }: { request: Request
     request,
     db,
     session,
-    responseHeaders: headers,
+    responseHeaders: resHeaders,
   };
 };
-
-
 
 export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,

@@ -1,20 +1,20 @@
 "use client";
 
-import { Bot, SquareTerminal } from "lucide-react";
+import { Bot, BotMessageSquare, SquareTerminal } from "lucide-react";
 import * as React from "react";
 
 import { NavMain } from "@/components/nav-main";
 import { NavProjects } from "@/components/nav-projects";
 import { NavUser } from "@/components/nav-user";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
+	Sidebar,
+	SidebarContent,
+	SidebarFooter,
+	SidebarHeader,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	SidebarRail,
 } from "@/components/ui/sidebar";
 import { Link } from "@tanstack/react-router";
 
@@ -31,6 +31,11 @@ const data = {
       url: "/",
       icon: SquareTerminal,
       isActive: true,
+    },
+    {
+      title: "Agents",
+      url: "/agents",
+      icon: BotMessageSquare,
     },
     {
       title: "Users",

@@ -9,7 +9,7 @@ declare namespace Cloudflare {
 		D1_DATABASE_ID: string;
 		R2: R2Bucket;
 		DB: D1Database;
-		VECTORIZE: VectorizeIndex;
+		VECTORIZE: Vectorize;
 		AI: Ai;
 	}
 }

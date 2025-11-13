@@ -15,8 +15,12 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
+import { Route as ApiUploadKnowledgeSplatRouteImport } from './routes/api/upload-knowledge.$'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc.$'
+import { Route as ApiChatSplatRouteImport } from './routes/api/chat.$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -47,15 +51,35 @@ const AppUsersRoute = AppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => AppRoute,
+} as any)
+const ApiUploadKnowledgeSplatRoute = ApiUploadKnowledgeSplatRouteImport.update({
+  id: '/api/upload-knowledge/$',
+  path: '/api/upload-knowledge/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatSplatRoute = ApiChatSplatRouteImport.update({
+  id: '/api/chat/$',
+  path: '/api/chat/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppAgentsAgentIdRoute = AppAgentsAgentIdRouteImport.update({
+  id: '/agents/$agentId',
+  path: '/agents/$agentId',
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -64,8 +88,12 @@ export interface FileRoutesByFullPath {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/': typeof AppIndexRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$': typeof ApiChatSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
+  '/agents': typeof AppAgentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRouteWithChildren
@@ -73,8 +101,12 @@ export interface FileRoutesByTo {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/': typeof AppIndexRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$': typeof ApiChatSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
+  '/agents': typeof AppAgentsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -84,8 +116,12 @@ export interface FileRoutesById {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chat/$': typeof ApiChatSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
+  '/_app/agents/': typeof AppAgentsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -95,8 +131,12 @@ export interface FileRouteTypes {
     | '/auth/sign-in'
     | '/auth/sign-up'
     | '/'
+    | '/agents/$agentId'
     | '/api/auth/$'
+    | '/api/chat/$'
     | '/api/trpc/$'
+    | '/api/upload-knowledge/$'
+    | '/agents'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
@@ -104,8 +144,12 @@ export interface FileRouteTypes {
     | '/auth/sign-in'
     | '/auth/sign-up'
     | '/'
+    | '/agents/$agentId'
     | '/api/auth/$'
+    | '/api/chat/$'
     | '/api/trpc/$'
+    | '/api/upload-knowledge/$'
+    | '/agents'
   id:
     | '__root__'
     | '/_app'
@@ -114,15 +158,21 @@ export interface FileRouteTypes {
     | '/auth/sign-in'
     | '/auth/sign-up'
     | '/_app/'
+    | '/_app/agents/$agentId'
     | '/api/auth/$'
+    | '/api/chat/$'
     | '/api/trpc/$'
+    | '/api/upload-knowledge/$'
+    | '/_app/agents/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiChatSplatRoute: typeof ApiChatSplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
+  ApiUploadKnowledgeSplatRoute: typeof ApiUploadKnowledgeSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -169,11 +219,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/agents/': {
+      id: '/_app/agents/'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AppAgentsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/api/upload-knowledge/$': {
+      id: '/api/upload-knowledge/$'
+      path: '/api/upload-knowledge/$'
+      fullPath: '/api/upload-knowledge/$'
+      preLoaderRoute: typeof ApiUploadKnowledgeSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/trpc/$': {
       id: '/api/trpc/$'
       path: '/api/trpc/$'
       fullPath: '/api/trpc/$'
       preLoaderRoute: typeof ApiTrpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chat/$': {
+      id: '/api/chat/$'
+      path: '/api/chat/$'
+      fullPath: '/api/chat/$'
+      preLoaderRoute: typeof ApiChatSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -183,17 +254,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/agents/$agentId': {
+      id: '/_app/agents/$agentId'
+      path: '/agents/$agentId'
+      fullPath: '/agents/$agentId'
+      preLoaderRoute: typeof AppAgentsAgentIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
+  AppAgentsIndexRoute: typeof AppAgentsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
+  AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
+  AppAgentsIndexRoute: AppAgentsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -214,7 +296,9 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiChatSplatRoute: ApiChatSplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
+  ApiUploadKnowledgeSplatRoute: ApiUploadKnowledgeSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
