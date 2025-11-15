@@ -1,4 +1,5 @@
 import { openai } from "@ai-sdk/openai";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { embed, embedMany } from "ai";
 
 /**
@@ -20,96 +21,39 @@ const embeddingModel = openai.embedding("text-embedding-3-small");
 const VECTORIZE_METADATA_LIMIT = 2800; // 3KB limit with buffer
 
 /**
- * Chunking strategy with overlap for better context preservation
- * Based on RAG best practices:
- * - Configurable chunk size optimized for metadata limits (800-1000 chars)
- * - 20% overlap between chunks to preserve context
- * - Respects document structure (headers, paragraphs)
+ * Chunking strategy using LangChain's RecursiveCharacterTextSplitter
+ * Based on contextual RAG best practices:
+ * - Intelligently splits on content boundaries (paragraphs, sentences)
+ * - Configurable chunk size (1024 chars) with overlap (200 chars)
+ * - Respects document structure and maintains context
  * - Filters out very small chunks
  * - Respects Vectorize 3KB metadata limit
  */
-export function generateChunks(
+export async function generateChunks(
 	input: string,
 	options?: {
 		chunkSize?: number;
-		overlapPercentage?: number;
+		chunkOverlap?: number;
 		minChunkSize?: number;
 		maxChunkSize?: number; // Hard limit for metadata
 	}
-): string[] {
+): Promise<string[]> {
 	const {
-		chunkSize = 800, // Reduced to stay within metadata limits
-		overlapPercentage = 0.2,
+		chunkSize = 1024, // Optimized for semantic coherence
+		chunkOverlap = 200, // Helps maintain context across chunks
 		minChunkSize = 100,
 		maxChunkSize = 2000, // Hard cap for Vectorize metadata
 	} = options || {};
 
-	const overlapSize = Math.floor(chunkSize * overlapPercentage);
+	// Use LangChain's RecursiveCharacterTextSplitter for intelligent splitting
+	const splitter = new RecursiveCharacterTextSplitter({
+		chunkSize,
+		chunkOverlap,
+	});
 
-	// Split by markdown headers (##, ###, etc) to respect document structure
-	const headerSections = input.split(/(?=^#{1,6}\s)/m);
+	const chunks = await splitter.splitText(input);
 
-	const chunks: string[] = [];
-	let previousOverlap = "";
-
-	for (const section of headerSections) {
-		if (!section.trim()) continue;
-
-		// Extract header if present
-		const headerMatch = section.match(/^(#{1,6}\s.+?)\n/);
-		const header = headerMatch ? headerMatch[1] : "";
-		const content = header ? section.slice(header.length + 1) : section;
-
-		// If section is small enough, keep it as-is with overlap
-		if (section.length <= chunkSize) {
-			const chunkWithOverlap = previousOverlap
-				? previousOverlap + "\n\n" + section.trim()
-				: section.trim();
-			chunks.push(chunkWithOverlap);
-			
-			// Update overlap for next chunk
-			const sectionText = section.trim();
-			if (sectionText.length > overlapSize) {
-				previousOverlap = sectionText.slice(-overlapSize);
-			}
-			continue;
-		}
-
-		// For larger sections, split by paragraphs with overlap
-		const paragraphs = content.split(/\n\n+/).filter((p) => p.trim() !== "");
-
-		let currentChunk = previousOverlap ? previousOverlap + "\n\n" : "";
-		if (header) {
-			currentChunk += header + "\n\n";
-		}
-
-		for (let i = 0; i < paragraphs.length; i++) {
-			const paragraph = paragraphs[i];
-			const combined = currentChunk + paragraph;
-
-			// If combined chunk exceeds size, save current and start new with overlap
-			if (combined.length > chunkSize && currentChunk.length > minChunkSize) {
-				chunks.push(currentChunk.trim());
-				
-				// Create overlap from end of current chunk
-				const overlapText = currentChunk.slice(-overlapSize);
-				currentChunk = header ? header + "\n\n" + overlapText + "\n\n" + paragraph : overlapText + "\n\n" + paragraph;
-			} else {
-				currentChunk = i === 0 ? currentChunk + paragraph : currentChunk + "\n\n" + paragraph;
-			}
-		}
-
-		// Push remaining chunk
-		if (currentChunk.trim().length >= minChunkSize) {
-			chunks.push(currentChunk.trim());
-			// Update overlap for next section
-			if (currentChunk.trim().length > overlapSize) {
-				previousOverlap = currentChunk.trim().slice(-overlapSize);
-			}
-		}
-	}
-
-	// Filter and enforce max size for Vectorize metadata limits
+	// Filter and enforce size constraints for Vectorize metadata limits
 	const filteredChunks = chunks
 		.filter((chunk) => chunk.length >= minChunkSize)
 		.map((chunk) => {
@@ -121,8 +65,8 @@ export function generateChunks(
 		});
 	
 	console.log(`Generated ${filteredChunks.length} chunks from ${input.length} characters`);
-	console.log(`Chunk sizes: min=${Math.min(...filteredChunks.map(c => c.length))}, max=${Math.max(...filteredChunks.map(c => c.length))}, avg=${Math.floor(filteredChunks.reduce((sum, c) => sum + c.length, 0) / filteredChunks.length)}`);
 	if (filteredChunks.length > 0) {
+		console.log(`Chunk sizes: min=${Math.min(...filteredChunks.map(c => c.length))}, max=${Math.max(...filteredChunks.map(c => c.length))}, avg=${Math.floor(filteredChunks.reduce((sum, c) => sum + c.length, 0) / filteredChunks.length)}`);
 		console.log(`First chunk preview (${filteredChunks[0].length} chars): ${filteredChunks[0].substring(0, 100)}...`);
 	}
 	
@@ -142,7 +86,7 @@ export async function generateEmbeddings(
 		dimensions?: number;
 	},
 ): Promise<Array<{ embedding: number[]; content: string }>> {
-	const chunks = generateChunks(value);
+	const chunks = await generateChunks(value);
 	const model = options?.model
 		? openai.embedding(options.model)
 		: embeddingModel;
@@ -198,8 +142,9 @@ export async function generateEmbedding(
 }
 
 /**
- * Find relevant content using cosine similarity via Cloudflare Vectorize
- * Implements best practices for retrieval quality
+ * Find relevant content using hybrid search (vector + keyword)
+ * Combines semantic similarity (Vectorize) with keyword matching
+ * Implements contextual RAG best practices
  */
 export async function findRelevantContent(
 	userQuery: string,
@@ -208,9 +153,11 @@ export async function findRelevantContent(
 		topK?: number;
 		minSimilarity?: number;
 		indexVersion?: number;
+		keywords?: string[]; // Optional keywords for hybrid search
+		useHybridSearch?: boolean; // Enable query rewriting + hybrid search
 	},
 ) {
-	const { topK = 6, minSimilarity = 0.3, indexVersion } = options || {};
+	const { topK = 6, minSimilarity = 0.3, indexVersion, keywords = [], useHybridSearch = false } = options || {};
 
 	try {
 		// Preprocess query - remove noise and normalize
@@ -222,7 +169,7 @@ export async function findRelevantContent(
 		}
 		
 		console.log(`[RAG] Searching for: "${cleanedQuery.substring(0, 100)}..." in namespace: ${agentId}`);
-		console.log(`[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}`);
+		console.log(`[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}, hybridSearch=${useHybridSearch}`);
 		
 		// Generate embedding for the query with consistent dimensions
 		const queryEmbedding = await generateEmbedding(cleanedQuery, {

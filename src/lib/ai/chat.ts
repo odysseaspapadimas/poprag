@@ -16,7 +16,7 @@ import { findRelevantContent } from "@/lib/ai/embedding";
 import { createModel } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 import type { UIMessage } from "ai";
-import { convertToModelMessages, stepCountIs, streamText, tool } from "ai";
+import { convertToModelMessages, generateObject, stepCountIs, streamText, tool, type LanguageModel } from "ai";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import z from "zod";
@@ -40,6 +40,51 @@ export interface ChatOptions {
     OPENROUTER_API_KEY?: string;
     CLOUDFLARE_ACCOUNT_ID?: string;
   };
+}
+
+/**
+ * Query rewriting for improved RAG retrieval
+ * Expands user queries into multiple variations to improve search coverage
+ * Based on contextual RAG best practices
+ */
+export async function rewriteQuery(
+  model: LanguageModel,
+  query: string
+): Promise<{ queries: string[]; keywords: string[] }> {
+  const promptText = `Given the following user message, rewrite it into 3-5 distinct queries that could be used to search for relevant information, and provide additional keywords related to the query.
+
+Each query should focus on different aspects or potential interpretations of the original message.
+Each keyword should be derived from an interpretation of the provided user message.
+
+User message: ${query}`;
+
+  try {
+    const result = await generateObject({
+      model,
+      prompt: promptText,
+      schema: z.object({
+        queries: z.array(z.string()).describe(
+          "Similar queries to the user's query. Be concise but comprehensive."
+        ),
+        keywords: z.array(z.string()).describe(
+          "Keywords from the query to use for full-text search"
+        ),
+      }),
+    });
+
+    console.log(`[Query Rewriting] Original: "${query.substring(0, 50)}..."`);
+    console.log(`[Query Rewriting] Generated ${result.object.queries.length} query variations`);
+    console.log(`[Query Rewriting] Extracted ${result.object.keywords.length} keywords`);
+
+    return result.object;
+  } catch (error) {
+    console.warn("[Query Rewriting] Failed, using original query:", error);
+    // Fallback to original query
+    return {
+      queries: [query],
+      keywords: [],
+    };
+  }
 }
 
 /**
@@ -116,8 +161,11 @@ export async function handleChatRequest(
       mergedVariables
     );
 
-    // 5. RAG retrieval - proactive context loading
+    // 5. RAG retrieval - proactive context loading with query rewriting
     let ragContext;
+    let rewrittenQueries: string[] = [];
+    let extractedKeywords: string[] = [];
+    
     const ragEnabled = Boolean(
       request.rag || 
       (Array.isArray(policy.enabledTools) && policy.enabledTools.includes("retrieval"))
@@ -151,17 +199,53 @@ export async function handleChatRequest(
         if (query && query.trim().length > 0) {
           console.log(`[Chat] Performing initial RAG retrieval for: "${query.substring(0, 100)}..."`);
           
-          const results = await findRelevantContent(query, agentData.id, {
-            topK: request.rag?.topK || 6,
-            indexVersion: indexPin.indexVersion,
-            minSimilarity: 0.3, // Lower threshold for initial context
-          });
+          // Optional: Use query rewriting for improved retrieval
+          // Create a temporary model for query rewriting (lightweight model)
+          const tempModelConfig = {
+            alias: "gpt-4o-mini",
+            provider: "openai" as const,
+            modelId: "gpt-4o-mini",
+          };
+          const tempModel = createModel(tempModelConfig, options?.env);
+          
+          // Rewrite query into multiple variations
+          const { queries, keywords } = await rewriteQuery(tempModel, query);
+          rewrittenQueries = queries;
+          extractedKeywords = keywords;
+          
+          // Perform retrieval for ALL query variations and merge results
+          const retrievalPromises = queries.map(q => 
+            findRelevantContent(q, agentData.id, {
+              topK: Math.ceil((request.rag?.topK || 6) / queries.length), // Distribute topK across queries
+              indexVersion: indexPin.indexVersion,
+              minSimilarity: 0.3, // Lower threshold for initial context
+              keywords: extractedKeywords,
+              useHybridSearch: true,
+            })
+          );
+          
+          const retrievalResults = await Promise.all(retrievalPromises);
+          
+          // Merge and deduplicate results from all queries
+          const allMatches = retrievalResults.flatMap(r => r.matches);
+          
+          // Use reciprocal rank fusion to merge results
+          const { reciprocalRankFusion } = await import("@/lib/utils");
+          const fusedResults = reciprocalRankFusion(
+            retrievalResults.map(r => r.matches),
+            60 // k constant
+          );
+          
+          // Take top K after fusion
+          const topMatches = fusedResults.slice(0, request.rag?.topK || 6);
 
-          if (results.matches.length > 0) {
-            console.log(`[Chat] Initial RAG retrieved ${results.matches.length} chunks (avg score: ${(results.matches.reduce((sum, m) => sum + m.score, 0) / results.matches.length).toFixed(3)})`);
+          if (topMatches.length > 0) {
+            console.log(`[Chat] Initial RAG retrieved ${topMatches.length} chunks after query rewriting and fusion`);
+            console.log(`[Chat] Query variations used: ${rewrittenQueries.length}, Keywords: ${extractedKeywords.join(", ")}`);
+            console.log(`[Chat] Score range: ${topMatches[0].score.toFixed(3)} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`);
             
             ragContext = {
-              chunks: results.matches.map((match) => ({
+              chunks: topMatches.map((match) => ({
                 content: String(match.content), // Ensure content is string
                 sourceId: (match.metadata?.sourceId as string) || match.id,
                 score: match.score,
@@ -188,7 +272,7 @@ export async function handleChatRequest(
     systemPrompt += `
 
 ## Available Tools
-You have access to a "getInformation" tool that searches your knowledge base. 
+You have access to a "getInformation" tool that searches your knowledge base using advanced semantic search.
 
 **CRITICAL INSTRUCTION**: For ANY question about:
 - Implementation plans, timelines, or project details
@@ -199,21 +283,35 @@ You have access to a "getInformation" tool that searches your knowledge base.
 You MUST use the "getInformation" tool FIRST before responding. Do not rely solely on the context provided below or your training data. Always verify with the knowledge base.
 
 ## How to Use the Tool
-1. Extract the user's main question or query
+1. Extract the user's main question or query (be specific)
 2. Call getInformation with that question
-3. Use the retrieved context to formulate your answer
-4. Cite sources when relevant`;
+3. The tool will automatically:
+   - Rewrite your query into multiple variations
+   - Search using both semantic similarity and keyword matching
+   - Rank and merge results from different search methods
+4. Use the retrieved context to formulate your answer
+5. Cite sources when relevant
 
-    // Add initial RAG context if available (this is from initial retrieval)
+## Initial Context
+The following context was retrieved based on the user's query${rewrittenQueries.length > 1 ? ` (using ${rewrittenQueries.length} query variations)` : ''}:`;
+
+    // Add initial RAG context if available (this is from initial retrieval with query rewriting)
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
+      systemPrompt += `
+
+**Note**: This initial context is based on query expansion and hybrid search. If you need more specific information, use the getInformation tool with a focused query.`;
+    } else {
+      systemPrompt += `
+
+No initial context was found. Use the getInformation tool to search the knowledge base.`;
     }
 
     // 7. Create model instance
     const modelConfig = {
       alias: request.modelAlias || policy.modelAlias,
       provider: "openai" as const, // Would be loaded from modelAlias table
-      modelId: "gpt-4o-mini", // Would be loaded from modelAlias table
+      modelId: "gpt-5-mini", // Would be loaded from modelAlias table
     };
 
     const model = createModel(modelConfig, options?.env);
@@ -228,29 +326,55 @@ You MUST use the "getInformation" tool FIRST before responding. Do not rely sole
       topP: policy.topP || 1,
       tools: {
         getInformation: tool({
-          description: `Search your knowledge base for relevant information. This tool retrieves the most relevant content from your indexed documents based on semantic similarity. Use this EVERY TIME before answering questions about project-specific information, implementation details, or documentation.`,
+          description: `Search your knowledge base using advanced contextual RAG. This tool:
+1. Rewrites your query into multiple variations for better coverage
+2. Performs hybrid search (semantic + keyword matching)
+3. Merges and ranks results using reciprocal rank fusion
+Use this EVERY TIME before answering questions about project-specific information.`,
           inputSchema: z.object({
             question: z.string().describe("The user's question or the specific information you need to retrieve from the knowledge base"),
           }),
           execute: async ({ question }) => {
             console.log(`[RAG Tool] Searching knowledge base for: "${question}"`);
             
-            const results = await findRelevantContent(question, agentData.id, {
-              topK: 6,
-            });
+            // Rewrite query for better retrieval
+            const { queries, keywords } = await rewriteQuery(model, question);
+            console.log(`[RAG Tool] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`);
             
-            console.log(`[RAG Tool] Found ${results.matches.length} results`);
+            // Perform retrieval for all query variations
+            const retrievalPromises = queries.map(q => 
+              findRelevantContent(q, agentData.id, {
+                topK: Math.ceil(6 / queries.length), // Distribute topK
+                keywords: keywords,
+                useHybridSearch: true,
+              })
+            );
             
-            if (results.matches.length === 0) {
+            const retrievalResults = await Promise.all(retrievalPromises);
+            
+            // Merge results using reciprocal rank fusion
+            const { reciprocalRankFusion } = await import("@/lib/utils");
+            const fusedResults = reciprocalRankFusion(
+              retrievalResults.map(r => r.matches),
+              60
+            );
+            
+            const topMatches = fusedResults.slice(0, 6);
+            
+            console.log(`[RAG Tool] Found ${topMatches.length} results after fusion`);
+            
+            if (topMatches.length === 0) {
               return {
                 status: "no_results",
                 message: "No relevant information found in the knowledge base for this query. The knowledge base may need to be updated with relevant content.",
                 query: question,
+                queryVariations: queries,
+                keywords: keywords,
               };
             }
             
             // Format with clear structure for LLM consumption
-            const formattedResults = results.matches.map((match, idx) => ({
+            const formattedResults = topMatches.map((match, idx) => ({
               rank: idx + 1,
               relevanceScore: match.score.toFixed(3),
               content: match.content,
@@ -268,7 +392,9 @@ You MUST use the "getInformation" tool FIRST before responding. Do not rely sole
             return {
               status: "success",
               query: question,
-              resultsFound: results.matches.length,
+              queryVariations: queries,
+              keywords: keywords,
+              resultsFound: topMatches.length,
               context: contextText,
               sources: formattedResults.map(r => ({
                 source: r.source,
