@@ -182,7 +182,7 @@ export const agentRouter = createTRPCRouter({
         createdAt: new Date(),
       });
 
-      // Create model policy
+      // Create model policy with RAG enabled by default
       await db.insert(agentModelPolicy).values({
         id: policyId,
         agentId: agentId,
@@ -190,7 +190,7 @@ export const agentRouter = createTRPCRouter({
         temperature: 0.7,
         topP: 1,
         maxTokens: 2048,
-        enabledTools: [],
+        enabledTools: ["retrieval"], // Enable RAG by default
         effectiveFrom: new Date(),
       });
 
@@ -410,5 +410,106 @@ export const agentRouter = createTRPCRouter({
         )
         .orderBy(desc(auditLog.createdAt))
         .limit(input.limit);
+    }),
+
+  /**
+   * Update agent model policy
+   */
+  updateModelPolicy: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+        enabledTools: z.array(z.string()).optional(),
+        temperature: z.number().min(0).max(2).optional(),
+        topP: z.number().min(0).max(1).optional(),
+        maxTokens: z.number().min(1).max(32000).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Verify agent exists and user has access
+      const [agentData] = await db
+        .select()
+        .from(agent)
+        .where(eq(agent.id, input.agentId))
+        .limit(1);
+
+      if (!agentData) {
+        throw new Error("Agent not found");
+      }
+
+      if (!ctx.session.user.isAdmin && agentData.createdBy !== ctx.session.user.id) {
+        throw new Error("Access denied");
+      }
+
+      // Get current policy
+      const [currentPolicy] = await db
+        .select()
+        .from(agentModelPolicy)
+        .where(eq(agentModelPolicy.agentId, input.agentId))
+        .orderBy(desc(agentModelPolicy.effectiveFrom))
+        .limit(1);
+
+      if (!currentPolicy) {
+        throw new Error("Model policy not found");
+      }
+
+      // Update policy
+      const updates: any = {};
+      if (input.enabledTools !== undefined) updates.enabledTools = input.enabledTools;
+      if (input.temperature !== undefined) updates.temperature = input.temperature;
+      if (input.topP !== undefined) updates.topP = input.topP;
+      if (input.maxTokens !== undefined) updates.maxTokens = input.maxTokens;
+
+      await db
+        .update(agentModelPolicy)
+        .set(updates)
+        .where(eq(agentModelPolicy.id, currentPolicy.id));
+
+      // Audit log
+      await db.insert(auditLog).values({
+        id: nanoid(),
+        actorId: ctx.session.user.id,
+        eventType: "agent.policy_updated",
+        targetType: "agent",
+        targetId: input.agentId,
+        diff: updates,
+        createdAt: new Date(),
+      });
+
+      return { success: true };
+    }),
+
+  /**
+   * Run Vectorize diagnostics for an agent
+   * Helps debug incomplete RAG results
+   */
+  runVectorizeDiagnostics: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { runVectorizeDiagnostics } = await import("@/lib/ai/vectorize-diagnostics");
+      
+      // Check agent ownership
+      const [agentData] = await db
+        .select()
+        .from(agent)
+        .where(eq(agent.id, input.agentId))
+        .limit(1);
+
+      if (!agentData) {
+        throw new Error("Agent not found");
+      }
+
+      // Only owner or admin can run diagnostics
+      if (agentData.createdBy !== ctx.session.user.id && !ctx.session.user.isAdmin) {
+        throw new Error("Not authorized");
+      }
+
+      const diagnostics = await runVectorizeDiagnostics(input.agentId);
+      
+      return diagnostics;
     }),
 });

@@ -143,11 +143,13 @@ export async function processKnowledgeSource(
 		// Parse document
 		const parsed = await parseDocument(content, source.mime || "text/plain");
 
-		// Generate embeddings
+		// Generate embeddings with consistent dimensions (MUST match query dimensions)
 		const embeddings = await generateEmbeddings(parsed.content, {
 			model: options?.embeddingModel,
-			dimensions: options?.embeddingDimensions,
+			dimensions: options?.embeddingDimensions || 1536, // Default to match EMBEDDING_DIMENSIONS
 		});
+		
+		console.log(`Generated ${embeddings.length} embeddings for source ${sourceId}`);
 
 		// Create vector IDs for Vectorize (no chunk records needed)
 		const vectorizeIds: string[] = embeddings.map(() => nanoid());
@@ -156,21 +158,31 @@ export async function processKnowledgeSource(
 
 		// Insert vectors into Vectorize with agent-based namespace (store full text in metadata)
 		const { env } = await import("cloudflare:workers");
-		const vectors = embeddings.map((emb, idx) => ({
-			id: vectorizeIds[idx],
-			values: emb.embedding,
-			namespace: source.agentId, // Agent-based isolation
-			metadata: {
-				sourceId: source.id,
-				agentId: source.agentId,
-				fileName: source.fileName || "unknown",
-				chunkIndex: idx,
-				textLength: emb.content.length,
-				text: emb.content, // Store FULL text in Vectorize metadata
-			},
-		}));
+		const vectors = embeddings.map((emb, idx) => {
+			// Ensure text doesn't exceed Vectorize metadata limits (3KB)
+			const textContent = emb.content;
+			const MAX_TEXT_SIZE = 2800; // Leave buffer for JSON overhead
+			
+			if (textContent.length > MAX_TEXT_SIZE) {
+				console.warn(`Chunk ${idx} text too large (${textContent.length} bytes), truncating to ${MAX_TEXT_SIZE}`);
+			}
+			
+			return {
+				id: vectorizeIds[idx],
+				values: emb.embedding,
+				namespace: source.agentId, // Agent-based isolation
+				metadata: {
+					sourceId: source.id,
+					agentId: source.agentId,
+					fileName: source.fileName || "unknown",
+					chunkIndex: idx,
+					textLength: textContent.length,
+					text: textContent.substring(0, MAX_TEXT_SIZE), // Store text, respecting metadata limits
+				},
+			};
+		});
 
-		const vectorizeResult = await env.VECTORIZE.insert(vectors);
+		const vectorizeResult = await env.VECTORIZE.upsert(vectors);
 		console.log(`Inserted ${vectors.length} vectors into Vectorize namespace: ${source.agentId}, mutationId: ${vectorizeResult.mutationId}`);
 
 		// Store vectorize IDs in knowledge source record for deletion tracking

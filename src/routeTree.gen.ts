@@ -18,9 +18,11 @@ import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as ApiUploadKnowledgeSplatRouteImport } from './routes/api/upload-knowledge.$'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc.$'
-import { Route as ApiChatSplatRouteImport } from './routes/api/chat.$'
+import { Route as ApiChatAgentSlugRouteImport } from './routes/api/chat.$agentSlug'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
-import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
+import { Route as AppAgentsAgentIdRouteRouteImport } from './routes/_app/agents/$agentId/route'
+import { Route as AppAgentsAgentIdIndexRouteImport } from './routes/_app/agents/$agentId/index'
+import { Route as AppAgentsAgentIdChatRouteImport } from './routes/_app/agents/$agentId/chat'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -66,9 +68,9 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   path: '/api/trpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiChatSplatRoute = ApiChatSplatRouteImport.update({
-  id: '/api/chat/$',
-  path: '/api/chat/$',
+const ApiChatAgentSlugRoute = ApiChatAgentSlugRouteImport.update({
+  id: '/api/chat/$agentSlug',
+  path: '/api/chat/$agentSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -76,10 +78,20 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppAgentsAgentIdRoute = AppAgentsAgentIdRouteImport.update({
+const AppAgentsAgentIdRouteRoute = AppAgentsAgentIdRouteRouteImport.update({
   id: '/agents/$agentId',
   path: '/agents/$agentId',
   getParentRoute: () => AppRoute,
+} as any)
+const AppAgentsAgentIdIndexRoute = AppAgentsAgentIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAgentsAgentIdRouteRoute,
+} as any)
+const AppAgentsAgentIdChatRoute = AppAgentsAgentIdChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => AppAgentsAgentIdRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -88,12 +100,14 @@ export interface FileRoutesByFullPath {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/': typeof AppIndexRoute
-  '/agents/$agentId': typeof AppAgentsAgentIdRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chat/$': typeof ApiChatSplatRoute
+  '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
+  '/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRouteWithChildren
@@ -101,12 +115,13 @@ export interface FileRoutesByTo {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/': typeof AppIndexRoute
-  '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chat/$': typeof ApiChatSplatRoute
+  '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
+  '/agents/$agentId': typeof AppAgentsAgentIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,12 +131,14 @@ export interface FileRoutesById {
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
   '/_app/': typeof AppIndexRoute
-  '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
+  '/_app/agents/$agentId': typeof AppAgentsAgentIdRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chat/$': typeof ApiChatSplatRoute
+  '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
+  '/_app/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -133,10 +150,12 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/api/auth/$'
-    | '/api/chat/$'
+    | '/api/chat/$agentSlug'
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/agents'
+    | '/agents/$agentId/chat'
+    | '/agents/$agentId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
@@ -144,12 +163,13 @@ export interface FileRouteTypes {
     | '/auth/sign-in'
     | '/auth/sign-up'
     | '/'
-    | '/agents/$agentId'
     | '/api/auth/$'
-    | '/api/chat/$'
+    | '/api/chat/$agentSlug'
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/agents'
+    | '/agents/$agentId/chat'
+    | '/agents/$agentId'
   id:
     | '__root__'
     | '/_app'
@@ -160,17 +180,19 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/agents/$agentId'
     | '/api/auth/$'
-    | '/api/chat/$'
+    | '/api/chat/$agentSlug'
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/_app/agents/'
+    | '/_app/agents/$agentId/chat'
+    | '/_app/agents/$agentId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   AuthRoute: typeof AuthRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiChatSplatRoute: typeof ApiChatSplatRoute
+  ApiChatAgentSlugRoute: typeof ApiChatAgentSlugRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
   ApiUploadKnowledgeSplatRoute: typeof ApiUploadKnowledgeSplatRoute
 }
@@ -240,11 +262,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTrpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/chat/$': {
-      id: '/api/chat/$'
-      path: '/api/chat/$'
-      fullPath: '/api/chat/$'
-      preLoaderRoute: typeof ApiChatSplatRouteImport
+    '/api/chat/$agentSlug': {
+      id: '/api/chat/$agentSlug'
+      path: '/api/chat/$agentSlug'
+      fullPath: '/api/chat/$agentSlug'
+      preLoaderRoute: typeof ApiChatAgentSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -258,23 +280,52 @@ declare module '@tanstack/react-router' {
       id: '/_app/agents/$agentId'
       path: '/agents/$agentId'
       fullPath: '/agents/$agentId'
-      preLoaderRoute: typeof AppAgentsAgentIdRouteImport
+      preLoaderRoute: typeof AppAgentsAgentIdRouteRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_app/agents/$agentId/': {
+      id: '/_app/agents/$agentId/'
+      path: '/'
+      fullPath: '/agents/$agentId/'
+      preLoaderRoute: typeof AppAgentsAgentIdIndexRouteImport
+      parentRoute: typeof AppAgentsAgentIdRouteRoute
+    }
+    '/_app/agents/$agentId/chat': {
+      id: '/_app/agents/$agentId/chat'
+      path: '/chat'
+      fullPath: '/agents/$agentId/chat'
+      preLoaderRoute: typeof AppAgentsAgentIdChatRouteImport
+      parentRoute: typeof AppAgentsAgentIdRouteRoute
     }
   }
 }
 
+interface AppAgentsAgentIdRouteRouteChildren {
+  AppAgentsAgentIdChatRoute: typeof AppAgentsAgentIdChatRoute
+  AppAgentsAgentIdIndexRoute: typeof AppAgentsAgentIdIndexRoute
+}
+
+const AppAgentsAgentIdRouteRouteChildren: AppAgentsAgentIdRouteRouteChildren = {
+  AppAgentsAgentIdChatRoute: AppAgentsAgentIdChatRoute,
+  AppAgentsAgentIdIndexRoute: AppAgentsAgentIdIndexRoute,
+}
+
+const AppAgentsAgentIdRouteRouteWithChildren =
+  AppAgentsAgentIdRouteRoute._addFileChildren(
+    AppAgentsAgentIdRouteRouteChildren,
+  )
+
 interface AppRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
-  AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
+  AppAgentsAgentIdRouteRoute: typeof AppAgentsAgentIdRouteRouteWithChildren
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
-  AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
+  AppAgentsAgentIdRouteRoute: AppAgentsAgentIdRouteRouteWithChildren,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
 }
 
@@ -296,7 +347,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   AuthRoute: AuthRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiChatSplatRoute: ApiChatSplatRoute,
+  ApiChatAgentSlugRoute: ApiChatAgentSlugRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
   ApiUploadKnowledgeSplatRoute: ApiUploadKnowledgeSplatRoute,
 }

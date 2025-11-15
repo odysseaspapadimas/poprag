@@ -25,7 +25,7 @@ function AgentsPage() {
   const { data: agents } = useSuspenseQuery(trpc.agent.list.queryOptions());
 
   return (
-    <div className="container mx-auto py-8 max-w-6xl">
+    <div>
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold">Agents</h1>

@@ -45,53 +45,56 @@ export function validateVariables(
 }
 
 /**
- * Build system prompt with context injection for RAG
+ * Build complete system prompt with RAG context
+ * Following best practices for RAG prompt engineering
  */
 export function buildSystemPrompt(
 	basePrompt: string,
-	context?: {
-		chunks?: Array<{
+	ragContext: {
+		chunks: Array<{
 			content: string;
 			sourceId: string;
 			score: number;
 			metadata?: Record<string, unknown>;
 		}>;
-		guardrails?: {
-			moderation?: boolean;
-			denylist?: string[];
-		};
 	},
 ): string {
-	let prompt = basePrompt;
+	if (!ragContext.chunks.length) return basePrompt;
 
-	// Inject RAG context if available
-	if (context?.chunks && context.chunks.length > 0) {
-		const contextBlock = `
+	// Sort by relevance score (highest first)
+	const sortedChunks = [...ragContext.chunks].sort((a, b) => b.score - a.score);
 
-## Knowledge Base Context
-The following information is from your knowledge base. Use it to answer questions accurately:
-
-${context.chunks
-	.map(
-		(chunk, idx) =>
-			`[${idx + 1}] (source: ${chunk.sourceId}, relevance: ${(chunk.score * 100).toFixed(1)}%)
+	const contextSection = sortedChunks
+		.map(
+			(chunk, idx) =>
+				`[Context ${idx + 1}] Relevance: ${chunk.score.toFixed(3)} | Source: ${chunk.metadata?.fileName || chunk.sourceId}
 ${chunk.content}`,
-	)
-	.join("\n\n")}
+		)
+		.join("\n\n" + "═".repeat(80) + "\n\n");
 
-Remember to cite sources using [source: <sourceId>] format when referencing this information.
-`;
-		prompt += contextBlock;
-	}
+	return `${basePrompt}
 
-	// Add guardrail instructions
-	if (context?.guardrails?.moderation) {
-		prompt += "\n\nIMPORTANT: Do not generate harmful, inappropriate, or offensive content.";
-	}
+${'═'.repeat(80)}
+## 📚 Retrieved Knowledge Base Context
+${'═'.repeat(80)}
 
-	if (context?.guardrails?.denylist && context.guardrails.denylist.length > 0) {
-		prompt += `\n\nDo not respond to queries about: ${context.guardrails.denylist.join(", ")}.`;
-	}
+The following information has been retrieved from your knowledge base based on semantic similarity to the current conversation. This context is specifically relevant to answering the user's questions.
 
-	return prompt;
+**Instructions for using this context:**
+1. Prioritize information with higher relevance scores (closer to 1.0)
+2. Always cite the source when referencing specific information (e.g., "According to [Source Name]...")
+3. If the context doesn't fully answer the question, acknowledge this and use the getInformation tool to search for more specific information
+4. Cross-reference multiple context chunks when they provide complementary information
+5. If context contradicts your training data, prioritize the retrieved context as it represents current project-specific information
+
+${'═'.repeat(80)}
+${contextSection}
+${'═'.repeat(80)}
+
+**Context Usage Guidelines:**
+- High relevance (0.8-1.0): Very likely to be accurate and directly relevant
+- Medium relevance (0.6-0.8): Likely relevant but verify before using
+- Lower relevance (0.5-0.6): May contain useful information but use with caution
+
+If you need more specific information, use the getInformation tool with a focused query.`;
 }

@@ -269,4 +269,153 @@ export const promptRouter = createTRPCRouter({
 
 			return { success: true };
 		}),
+
+	/**
+	 * Update a prompt version
+	 */
+	updateVersion: protectedProcedure
+		.input(
+			z.object({
+				promptId: z.string(),
+				version: z.number(),
+				content: z.string().optional(),
+				variables: z.record(z.string(), z.unknown()).optional(),
+				changelog: z.string().optional(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Verify version exists
+			const [existingVersion] = await db
+				.select()
+				.from(promptVersion)
+				.where(
+					and(
+						eq(promptVersion.promptId, input.promptId),
+						eq(promptVersion.version, input.version),
+					),
+				)
+				.limit(1);
+
+			if (!existingVersion) {
+				throw new Error("Version not found");
+			}
+
+			// Allow editing labeled versions, but log the change carefully
+			// Note: This allows editing versions that are currently deployed to environments
+
+			// Update the version
+			const updates: Partial<typeof promptVersion.$inferInsert> = {};
+			if (input.content !== undefined) updates.content = input.content;
+			if (input.variables !== undefined) updates.variables = input.variables;
+			if (input.changelog !== undefined) updates.changelog = input.changelog;
+
+			await db
+				.update(promptVersion)
+				.set(updates)
+				.where(
+					and(
+						eq(promptVersion.promptId, input.promptId),
+						eq(promptVersion.version, input.version),
+					),
+				);
+
+			// Get prompt to get agentId for audit log
+			const [promptData] = await db
+				.select()
+				.from(prompt)
+				.where(eq(prompt.id, input.promptId))
+				.limit(1);
+
+			// Audit log
+			await db.insert(auditLog).values({
+				id: nanoid(),
+				actorId: ctx.session.user.id,
+				eventType: "prompt.version_updated",
+				targetType: "prompt",
+				targetId: input.promptId,
+				diff: {
+					version: input.version,
+					updates,
+					agentId: promptData?.agentId,
+				},
+				createdAt: new Date(),
+			});
+
+			return { success: true };
+		}),
+
+	/**
+	 * Delete a prompt version
+	 */
+	deleteVersion: protectedProcedure
+		.input(
+			z.object({
+				promptId: z.string(),
+				version: z.number(),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Verify version exists and is not labeled
+			const [existingVersion] = await db
+				.select()
+				.from(promptVersion)
+				.where(
+					and(
+						eq(promptVersion.promptId, input.promptId),
+						eq(promptVersion.version, input.version),
+					),
+				)
+				.limit(1);
+
+			if (!existingVersion) {
+				throw new Error("Version not found");
+			}
+
+			if (existingVersion.label !== "none") {
+				throw new Error("Cannot delete a version that has a label assigned");
+			}
+
+			// Check if this is the only version
+			const versions = await db
+				.select()
+				.from(promptVersion)
+				.where(eq(promptVersion.promptId, input.promptId));
+
+			if (versions.length === 1) {
+				throw new Error("Cannot delete the only version of a prompt");
+			}
+
+			// Delete the version
+			await db
+				.delete(promptVersion)
+				.where(
+					and(
+						eq(promptVersion.promptId, input.promptId),
+						eq(promptVersion.version, input.version),
+					),
+				);
+
+			// Get prompt to get agentId for audit log
+			const [promptData] = await db
+				.select()
+				.from(prompt)
+				.where(eq(prompt.id, input.promptId))
+				.limit(1);
+
+			// Audit log
+			await db.insert(auditLog).values({
+				id: nanoid(),
+				actorId: ctx.session.user.id,
+				eventType: "prompt.version_deleted",
+				targetType: "prompt",
+				targetId: input.promptId,
+				diff: {
+					version: input.version,
+					agentId: promptData?.agentId,
+				},
+				createdAt: new Date(),
+			});
+
+			return { success: true };
+		}),
 });

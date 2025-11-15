@@ -1,6 +1,6 @@
 /**
  * Chat API endpoint
- * POST /api/chat
+ * POST /api/chat/$agentSlug
  */
 
 import { handleChatRequest } from "@/lib/ai/chat";
@@ -8,8 +8,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 const chatRequestSchema = z.object({
-  agentSlug: z.string(),
-  messages: z.array(z.any()), // Simplified - will be validated by AI SDK
+  messages: z.array(z.any()), // UIMessage[]
   modelAlias: z.string().optional(),
   variables: z.record(z.string(), z.unknown()).optional(),
   rag: z
@@ -22,7 +21,7 @@ const chatRequestSchema = z.object({
   requestTags: z.array(z.string()).optional(),
 });
 
-export const Route = createFileRoute("/api/chat/$")({
+export const Route = createFileRoute("/api/chat/$agentSlug")({
   server: {
     handlers: {
       OPTIONS: () => {
@@ -36,7 +35,7 @@ export const Route = createFileRoute("/api/chat/$")({
         });
       },
 
-      POST: async ({ request }) => {
+      POST: async ({ request, params }) => {
         try {
           const body = await request.json();
           const validated = chatRequestSchema.parse(body);
@@ -49,10 +48,10 @@ export const Route = createFileRoute("/api/chat/$")({
           };
 
           // Handle chat request
-          const result = await handleChatRequest(validated as any, { env });
+          const result = await handleChatRequest({ agentSlug: params.agentSlug, ...validated }, { env });
 
           // Return streaming response
-          return result.toTextStreamResponse();
+          return result.toUIMessageStreamResponse();
         } catch (error) {
           console.error("Chat API error:", error);
 

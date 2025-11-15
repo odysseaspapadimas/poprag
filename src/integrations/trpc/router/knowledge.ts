@@ -330,6 +330,95 @@ export const knowledgeRouter = createTRPCRouter({
 		}),
 
 	/**
+	 * Reindex knowledge source with updated chunking strategy
+	 */
+	reindex: protectedProcedure
+		.input(z.object({ sourceId: z.string() }))
+		.mutation(async ({ input, ctx }) => {
+			const [source] = await db
+				.select()
+				.from(knowledgeSource)
+				.where(eq(knowledgeSource.id, input.sourceId))
+				.limit(1);
+
+			if (!source) {
+				throw new Error("Source not found");
+			}
+
+			// Verify user has access to the agent
+			const [agentData] = await db
+				.select()
+				.from(agent)
+				.where(eq(agent.id, source.agentId))
+				.limit(1);
+
+			if (!agentData) {
+				throw new Error("Agent not found");
+			}
+
+			if (!ctx.session.user.isAdmin && agentData.createdBy !== ctx.session.user.id) {
+				throw new Error("Access denied");
+			}
+
+			// Check if source has R2 file
+			if (!source.r2Key) {
+				throw new Error("No R2 file found for this source");
+			}
+
+			try {
+				// Download the file from R2
+				const { env } = await import("cloudflare:workers");
+				const r2Object = await env.R2.get(source.r2Key);
+
+				if (!r2Object) {
+					throw new Error("File not found in R2");
+				}
+
+				const content = await r2Object.text();
+
+				// Delete old vectors from Vectorize if they exist
+				if (source.vectorizeIds && source.vectorizeIds.length > 0) {
+					try {
+						await env.VECTORIZE.deleteByIds(source.vectorizeIds);
+						console.log(`Deleted ${source.vectorizeIds.length} old vectors for source ${input.sourceId}`);
+					} catch (error) {
+						console.error("Failed to delete old vectors:", error);
+						// Continue anyway - will create duplicates but at least new chunks will be there
+					}
+				}
+
+				// Reset status and clear old vectorize IDs before reprocessing
+				await db
+					.update(knowledgeSource)
+					.set({ 
+						status: "uploaded",
+						vectorizeIds: [],
+						updatedAt: new Date(),
+					})
+					.where(eq(knowledgeSource.id, input.sourceId));
+
+				// Reprocess with new chunking strategy
+				await processKnowledgeSource(input.sourceId, content);
+
+				// Audit log
+				await db.insert(auditLog).values({
+					id: nanoid(),
+					actorId: ctx.session.user.id,
+					eventType: "knowledge.reindexed",
+					targetType: "knowledge_source",
+					targetId: input.sourceId,
+					diff: { fileName: source.fileName },
+					createdAt: new Date(),
+				});
+
+				return { success: true };
+			} catch (error) {
+				console.error("Reindex failed:", error);
+				throw new Error(`Reindex failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+			}
+		}),
+
+	/**
 	 * Delete knowledge source
 	 */
 	delete: protectedProcedure

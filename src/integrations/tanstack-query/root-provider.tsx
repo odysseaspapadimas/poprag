@@ -1,5 +1,5 @@
 import { QueryCache, QueryClient } from '@tanstack/react-query'
-import { createTRPCClient, httpBatchLink, httpBatchStreamLink, loggerLink, splitLink, TRPCClientErrorLike } from '@trpc/client'
+import { createTRPCClient, httpBatchLink, httpBatchStreamLink, loggerLink, splitLink, type TRPCClientErrorLike } from '@trpc/client'
 import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import superjson from 'superjson'
 

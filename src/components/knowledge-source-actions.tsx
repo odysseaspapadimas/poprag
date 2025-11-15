@@ -1,21 +1,21 @@
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { KnowledgeSource } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
@@ -40,7 +40,7 @@ export function KnowledgeSourceActions({
 
   // Mutations
   const reindexMutation = useMutation(
-    trpc.knowledge.index.mutationOptions({
+    trpc.knowledge.reindex.mutationOptions({
       onSuccess: () => {
         toast.success("Knowledge source re-indexed successfully");
         queryClient.invalidateQueries({
@@ -71,7 +71,6 @@ export function KnowledgeSourceActions({
   const handleReindex = () => {
     reindexMutation.mutate({
       sourceId: source.id,
-      reindex: true,
     });
   };
 
