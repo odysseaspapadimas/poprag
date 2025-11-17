@@ -15,6 +15,20 @@ function ChatPage() {
   const { data: agent } = useSuspenseQuery(
     trpc.agent.get.queryOptions({ id: agentId })
   )
+  
+  if (!agent) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold">Agent not found</h1>
+        <p className="text-muted-foreground mt-2">The agent you attempted to chat with does not exist or you do not have access.</p>
+        <div className="mt-4">
+          <Link to="/agents">
+            <Button variant="outline">Back to Agents</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className=" h-full flex flex-col">

@@ -154,6 +154,15 @@ export function Chat({ agentId }: ChatProps) {
     trpc.agent.get.queryOptions({ id: agentId })
   );
 
+  if (!agent) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold">Agent not found</h1>
+        <p className="text-muted-foreground mt-2">The agent could not be found. Please check the agent id or contact your workspace admin.</p>
+      </div>
+    );
+  }
+
   const { messages, sendMessage } = useChat({
     transport: new DefaultChatTransport({
       api: `/api/chat/${agent.slug}`,

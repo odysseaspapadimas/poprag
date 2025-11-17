@@ -8,8 +8,10 @@ import {
   agent,
   agentIndexPin,
   agentModelPolicy,
+  modelAlias,
   prompt,
   promptVersion,
+  runMetric,
   transcript,
 } from "@/db/schema";
 import { findRelevantContent } from "@/lib/ai/embedding";
@@ -96,6 +98,10 @@ export async function handleChatRequest(
 ) {
   const runId = nanoid();
   const startTime = Date.now();
+
+  // Keep these in outer scope so we can record error metrics even when an
+  // exception happens during agent/model resolution.
+  let agentData: any | undefined;
 
   try {
     // 1. Resolve agent
@@ -308,11 +314,34 @@ No initial context was found. Use the getInformation tool to search the knowledg
     }
 
     // 7. Create model instance
-    const modelConfig = {
-      alias: request.modelAlias || policy.modelAlias,
-      provider: "openai" as const, // Would be loaded from modelAlias table
-      modelId: "gpt-5-mini", // Would be loaded from modelAlias table
-    };
+    // Resolve model alias into provider/modelId/gatewayRoute from the model_alias table
+    const selectedAlias = request.modelAlias || policy.modelAlias;
+    let modelConfig;
+    if (selectedAlias) {
+      const [aliasRecord] = await db
+        .select()
+        .from(modelAlias)
+        .where(eq(modelAlias.alias, selectedAlias))
+        .limit(1);
+
+      if (!aliasRecord) {
+        throw new Error(`Model alias '${selectedAlias}' not found`);
+      }
+
+      modelConfig = {
+        alias: aliasRecord.alias,
+        provider: aliasRecord.provider as any,
+        modelId: aliasRecord.modelId,
+        gatewayRoute: aliasRecord.gatewayRoute || undefined,
+      };
+    } else {
+      // Fallback - use policy.modelAlias if present
+      modelConfig = {
+        alias: policy.modelAlias,
+        provider: "openai" as const,
+        modelId: "gpt-5-mini",
+      };
+    }
 
     const model = createModel(modelConfig, options?.env);
 
@@ -433,15 +462,44 @@ Use this EVERY TIME before answering questions about project-specific informatio
           createdAt: new Date(),
         });
 
-        // // Save metrics
-        // await db.insert(runMetric).values({
-        // 	id: nanoid(),
-        // 	agentId: agentData.id,
-        // 	runId,
-        // 	tokens: event.usage.totalTokens,
-        // 	latencyMs: latency,
-        // 	createdAt: new Date(),
-        // });
+        // Save metrics (tokens, latency and optional cost estimate)
+        try {
+          // Estimate cost if model alias caps available
+          let costMicrocents: number | null = null;
+          try {
+            const aliasRecord = await db
+              .select()
+              .from(modelAlias)
+              .where(eq(modelAlias.alias, modelConfig.alias))
+              .limit(1)
+              .then((rows) => rows[0]);
+
+            const tokens = event.usage?.totalTokens ?? undefined;
+            const maxPricePer1k = aliasRecord?.caps?.maxPricePer1k;
+            if (typeof tokens === "number" && typeof maxPricePer1k === "number") {
+              const costDollars = (tokens / 1000) * maxPricePer1k;
+              // Store microcents (1 dollar == 1_000_000 microcents)
+              costMicrocents = Math.round(costDollars * 1_000_000);
+            }
+          } catch (err) {
+            // If computation fails, leave costMicrocents null
+            costMicrocents = null;
+          }
+
+          const metricId = nanoid();
+          await db.insert(runMetric).values({
+            id: metricId,
+            agentId: agentData.id,
+            runId,
+            tokens: event.usage?.totalTokens,
+            costMicrocents: costMicrocents ?? undefined,
+            latencyMs: latency,
+            createdAt: new Date(),
+          });
+          console.debug(`[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`);
+        } catch (err) {
+          console.warn("[Chat] Failed to insert run metric:", err);
+        }
       },
     });
 
@@ -449,15 +507,23 @@ Use this EVERY TIME before answering questions about project-specific informatio
   } catch (error) {
     const latency = Date.now() - startTime;
 
-    // Log error metric
-    // await db.insert(runMetric).values({
-    // 	id: nanoid(),
-    // 	agentId: request.agentSlug,
-    // 	runId,
-    // 	latencyMs: latency,
-    // 	errorType: error instanceof Error ? error.name : "UnknownError",
-    // 	createdAt: new Date(),
-    // });
+    // Log error metric if we have an agent id
+    try {
+      if (typeof agentData !== "undefined" && agentData?.id) {
+        const metricId = nanoid();
+        await db.insert(runMetric).values({
+          id: metricId,
+          agentId: agentData.id,
+          runId,
+          latencyMs: latency,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          createdAt: new Date(),
+        });
+        console.debug(`[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`);
+      }
+    } catch (err) {
+      console.warn("[Chat] Failed to insert error run metric:", err);
+    }
 
     throw error;
   }

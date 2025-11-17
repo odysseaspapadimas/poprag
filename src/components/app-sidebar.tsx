@@ -7,14 +7,14 @@ import { NavMain } from "@/components/nav-main";
 import { NavProjects } from "@/components/nav-projects";
 import { NavUser } from "@/components/nav-user";
 import {
-	Sidebar,
-	SidebarContent,
-	SidebarFooter,
-	SidebarHeader,
-	SidebarMenu,
-	SidebarMenuButton,
-	SidebarMenuItem,
-	SidebarRail,
+    Sidebar,
+    SidebarContent,
+    SidebarFooter,
+    SidebarHeader,
+    SidebarMenu,
+    SidebarMenuButton,
+    SidebarMenuItem,
+    SidebarRail,
 } from "@/components/ui/sidebar";
 import { Link } from "@tanstack/react-router";
 
@@ -36,6 +36,11 @@ const data = {
       title: "Agents",
       url: "/agents",
       icon: BotMessageSquare,
+    },
+    {
+      title: "Models",
+      url: "/models",
+      icon: SquareTerminal,
     },
     {
       title: "Users",

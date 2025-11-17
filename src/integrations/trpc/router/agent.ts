@@ -8,10 +8,11 @@ import {
     modelAlias,
     prompt,
     promptVersion,
+    runMetric,
     type InsertAgent,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -83,7 +84,8 @@ export const agentRouter = createTRPCRouter({
         .limit(1);
 
       if (!result) {
-        throw new Error("Agent not found");
+        // Return null so the UI can show a friendly 'not found' message instead of throwing an error
+        return null;
       }
 
       // Check permissions
@@ -413,12 +415,38 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /**
+   * Get run metrics for an agent
+   */
+  getRunMetrics: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+        limit: z.number().min(1).max(100).default(50),
+        sinceMs: z.number().optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const conditions: any[] = [eq(runMetric.agentId, input.agentId)];
+      if (input.sinceMs) {
+        conditions.push(sql`${runMetric.createdAt} >= ${input.sinceMs}`);
+      }
+
+      return await db
+        .select()
+        .from(runMetric)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(runMetric.createdAt))
+        .limit(input.limit);
+    }),
+
+  /**
    * Update agent model policy
    */
   updateModelPolicy: protectedProcedure
     .input(
       z.object({
         agentId: z.string(),
+        modelAlias: z.string().optional(),
         enabledTools: z.array(z.string()).optional(),
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),
@@ -455,6 +483,18 @@ export const agentRouter = createTRPCRouter({
 
       // Update policy
       const updates: any = {};
+      // Validate modelAlias existence if provided
+      if (input.modelAlias !== undefined) {
+        const [alias] = await db
+          .select()
+          .from(modelAlias)
+          .where(eq(modelAlias.alias, input.modelAlias))
+          .limit(1);
+        if (!alias) {
+          throw new Error("Model alias not found");
+        }
+        updates.modelAlias = input.modelAlias;
+      }
       if (input.enabledTools !== undefined) updates.enabledTools = input.enabledTools;
       if (input.temperature !== undefined) updates.temperature = input.temperature;
       if (input.topP !== undefined) updates.topP = input.topP;
@@ -477,6 +517,26 @@ export const agentRouter = createTRPCRouter({
       });
 
       return { success: true };
+    }),
+
+  /**
+   * Get current model policy for an agent (latest effectiveFrom)
+   */
+  getModelPolicy: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      const [policy] = await db
+        .select()
+        .from(agentModelPolicy)
+        .where(eq(agentModelPolicy.agentId, input.agentId))
+        .orderBy(desc(agentModelPolicy.effectiveFrom))
+        .limit(1);
+
+      return policy || null;
     }),
 
   /**

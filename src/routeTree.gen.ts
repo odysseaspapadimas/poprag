@@ -15,6 +15,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppModelsIndexRouteImport } from './routes/_app/models/index'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as ApiUploadKnowledgeSplatRouteImport } from './routes/api/upload-knowledge.$'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc.$'
@@ -51,6 +52,11 @@ const AuthSignInRoute = AuthSignInRouteImport.update({
 const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppModelsIndexRoute = AppModelsIndexRouteImport.update({
+  id: '/models/',
+  path: '/models/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/models': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
   '/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/models': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
   '/agents/$agentId': typeof AppAgentsAgentIdIndexRoute
 }
@@ -137,6 +145,7 @@ export interface FileRoutesById {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/models/': typeof AppModelsIndexRoute
   '/_app/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
   '/_app/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/agents'
+    | '/models'
     | '/agents/$agentId/chat'
     | '/agents/$agentId/'
   fileRoutesByTo: FileRoutesByTo
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/agents'
+    | '/models'
     | '/agents/$agentId/chat'
     | '/agents/$agentId'
   id:
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload-knowledge/$'
     | '/_app/agents/'
+    | '/_app/models/'
     | '/_app/agents/$agentId/chat'
     | '/_app/agents/$agentId/'
   fileRoutesById: FileRoutesById
@@ -239,6 +251,13 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/users'
       preLoaderRoute: typeof AppUsersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/models/': {
+      id: '/_app/models/'
+      path: '/models'
+      fullPath: '/models'
+      preLoaderRoute: typeof AppModelsIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/agents/': {
@@ -320,6 +339,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppAgentsAgentIdRouteRoute: typeof AppAgentsAgentIdRouteRouteWithChildren
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppModelsIndexRoute: typeof AppModelsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -327,6 +347,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppAgentsAgentIdRouteRoute: AppAgentsAgentIdRouteRouteWithChildren,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppModelsIndexRoute: AppModelsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

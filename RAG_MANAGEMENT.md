@@ -158,6 +158,9 @@ const { data: policy } = useQuery({
   queryKey: ['modelPolicy', agentId],
   queryFn: async () => {
     // Implement getModelPolicy query
+    // Example:
+    // const policy = await trpc.agent.getModelPolicy.query({ agentId });
+    // Policy includes modelAlias, temperature, topP, maxTokens, enabledTools
   }
 });
 

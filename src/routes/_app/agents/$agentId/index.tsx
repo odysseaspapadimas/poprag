@@ -1,6 +1,8 @@
+import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
+import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
 import { Button } from "@/components/ui/button";
 import { VectorizeDiagnostics } from "@/components/vectorize-diagnostics";
@@ -30,7 +32,17 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
         context.trpc.agent.getIndexPin.queryOptions({ agentId })
       ),
       context.queryClient.prefetchQuery(
+        context.trpc.agent.getModelPolicy.queryOptions({ agentId })
+      ),
+      context.queryClient.prefetchQuery(
+        context.trpc.model.list.queryOptions()
+      ),
+      context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
+      context.queryClient.prefetchQuery(
         context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 })
+      ),
+      context.queryClient.prefetchQuery(
+        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 })
       ),
     ]);
   },
@@ -58,12 +70,33 @@ function AgentDetailPage() {
     trpc.agent.get.queryOptions({ id: agentId })
   );
 
+  if (!agent) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold">Agent not found</h1>
+        <p className="text-muted-foreground mt-2">
+          The agent you are looking for does not exist or you do not have
+          access.
+        </p>
+        <div className="mt-4">
+          <Link to="/agents">
+            <Button variant="outline">Back to Agents</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const { data: knowledgeSources } = useSuspenseQuery(
     trpc.agent.getKnowledgeSources.queryOptions({ agentId })
   );
 
   const { data: indexPin } = useSuspenseQuery(
     trpc.agent.getIndexPin.queryOptions({ agentId })
+  );
+
+  const { data: modelPolicy } = useSuspenseQuery(
+    trpc.agent.getModelPolicy.queryOptions({ agentId })
   );
 
   const { data: auditLog } = useSuspenseQuery(
@@ -163,6 +196,14 @@ function AgentDetailPage() {
                       Visibility
                     </dt>
                     <dd className="text-sm">{agent.visibility}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-sm font-medium text-muted-foreground">
+                      Model Alias
+                    </dt>
+                    <dd className="text-sm">
+                      {modelPolicy?.modelAlias ?? "-"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-muted-foreground">
@@ -271,8 +312,8 @@ function AgentDetailPage() {
                 )}
               </div>
               <section>
-                 <h2>RAG Diagnostics</h2>
-                 <VectorizeDiagnostics agentId={agentId} />
+                <h2>RAG Diagnostics</h2>
+                <VectorizeDiagnostics agentId={agentId} />
               </section>
             </div>
           )}
@@ -282,9 +323,8 @@ function AgentDetailPage() {
           {activeTab === "models" && (
             <div className="bg-card border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Models & Knobs</h2>
-              <p className="text-muted-foreground">
-                Model configuration coming soon...
-              </p>
+              <ModelPolicyEditor agentId={agentId} />
+              {/* Model alias management has moved to the dedicated Models page */}
             </div>
           )}
 
@@ -362,9 +402,7 @@ function AgentDetailPage() {
           {activeTab === "analytics" && (
             <div className="bg-card border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Analytics</h2>
-              <p className="text-muted-foreground">
-                Usage analytics and metrics coming soon...
-              </p>
+              <AgentMetrics agentId={agentId} />
             </div>
           )}
 
