@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface VectorizeDiagnosticsProps {
 	agentId: string;
@@ -20,7 +21,7 @@ export function VectorizeDiagnostics({ agentId }: VectorizeDiagnosticsProps) {
 	const runDiagnostics = useMutation(
 		trpc.agent.runVectorizeDiagnostics.mutationOptions({
 			onSuccess: (data: any) => {
-				console.log("Diagnostics completed:", data);
+				toast.success("Vectorize diagnostics completed");
 			},
 			onError: (error: any) => {
 				console.error("Diagnostics failed:", error);

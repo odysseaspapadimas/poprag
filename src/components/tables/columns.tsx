@@ -4,6 +4,7 @@ import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/db/schema";
+import { Link } from "@tanstack/react-router";
 import AgentActions from "../agent-actions";
 
 export const columns: ColumnDef<Agent>[] = [
@@ -22,7 +23,17 @@ export const columns: ColumnDef<Agent>[] = [
     },
     cell: ({ row }) => {
       const name = row.getValue("name") as string;
-      return <div className="font-medium">{name}</div>;
+      return (
+        <div className="font-medium underline-offset-4 hover:underline">
+          <Link
+            to="/agents/$agentId"
+            params={{ agentId: row.original.id }}
+            search={{ tab: "overview" }}
+          >
+            {name}
+          </Link>
+        </div>
+      );
     },
   },
   {
@@ -70,11 +81,7 @@ export const columns: ColumnDef<Agent>[] = [
     header: "Visibility",
     cell: ({ row }) => {
       const visibility = row.getValue("visibility") as string;
-      return (
-        <Badge variant="outline">
-          {visibility}
-        </Badge>
-      );
+      return <Badge variant="outline">{visibility}</Badge>;
     },
   },
   {
@@ -105,9 +112,7 @@ export const columns: ColumnDef<Agent>[] = [
     cell: ({ row }) => {
       const agent = row.original;
 
-      return (
-        <AgentActions agent={agent} />
-      );
+      return <AgentActions agent={agent} />;
     },
   },
 ];

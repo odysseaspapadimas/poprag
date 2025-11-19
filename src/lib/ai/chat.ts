@@ -372,38 +372,12 @@ export async function handleChatRequest(
 
         // Save metrics (tokens, latency and optional cost estimate)
         try {
-          // Estimate cost if model alias caps available
-          let costMicrocents: number | null = null;
-          try {
-            const aliasRecord = await db
-              .select()
-              .from(modelAlias)
-              .where(eq(modelAlias.alias, modelConfig.alias))
-              .limit(1)
-              .then((rows) => rows[0]);
-
-            const tokens = event.usage?.totalTokens ?? undefined;
-            const maxPricePer1k = aliasRecord?.caps?.maxPricePer1k;
-            if (
-              typeof tokens === "number" &&
-              typeof maxPricePer1k === "number"
-            ) {
-              const costDollars = (tokens / 1000) * maxPricePer1k;
-              // Store microcents (1 dollar == 1_000_000 microcents)
-              costMicrocents = Math.round(costDollars * 1_000_000);
-            }
-          } catch (err) {
-            // If computation fails, leave costMicrocents null
-            costMicrocents = null;
-          }
-
           const metricId = nanoid();
           await db.insert(runMetric).values({
             id: metricId,
             agentId: agentData.id,
             runId,
             tokens: event.usage?.totalTokens,
-            costMicrocents: costMicrocents ?? undefined,
             latencyMs: latency,
             createdAt: new Date(),
           });

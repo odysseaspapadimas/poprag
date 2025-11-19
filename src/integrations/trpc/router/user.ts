@@ -1,9 +1,9 @@
 import type { TRPCRouterRecord } from "@trpc/server";
 
-import { protectedProcedure } from "@/integrations/trpc/init";
+import { adminProcedure } from "@/integrations/trpc/init";
 
 export const userRouter = {
-  getAll: protectedProcedure.query(
+  getAll: adminProcedure.query(
     async ({ ctx }) => await ctx.db.query.user.findMany(),
   ),
 } satisfies TRPCRouterRecord;

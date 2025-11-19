@@ -1,6 +1,10 @@
 import { db } from "@/db";
 import { modelAlias } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure, publicProcedure } from "@/integrations/trpc/init";
+import {
+  adminProcedure,
+  createTRPCRouter,
+  publicProcedure,
+} from "@/integrations/trpc/init";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -29,7 +33,7 @@ export const modelRouter = createTRPCRouter({
   list: publicProcedure.query(async () => {
     return await db.select().from(modelAlias);
   }),
-  
+
   /**
    * List available models from Cloudflare Workers AI
    * Uses /accounts/{account_id}/ai/models/search endpoint
@@ -43,7 +47,7 @@ export const modelRouter = createTRPCRouter({
         perPage: z.number().optional(),
       })
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
       const { CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_WORKERS_API_TOKEN } = env;
 
       if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_WORKERS_API_TOKEN) {
@@ -66,10 +70,12 @@ export const modelRouter = createTRPCRouter({
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch Cloudflare models: ${response.statusText}`);
+        throw new Error(
+          `Failed to fetch Cloudflare models: ${response.statusText}`
+        );
       }
 
-      const data = await response.json() as {
+      const data = (await response.json()) as {
         success: boolean;
         result: CloudflareModel[];
         errors?: unknown[];
@@ -110,16 +116,17 @@ export const modelRouter = createTRPCRouter({
       throw new Error(`Failed to fetch OpenAI models: ${response.statusText}`);
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       data: OpenAIModel[];
       object: string;
     };
 
     return data.data
-      .filter((model) => 
-        model.id.includes("gpt") || 
-        model.id.includes("text-embedding") ||
-        model.id.includes("whisper")
+      .filter(
+        (model) =>
+          model.id.includes("gpt") ||
+          model.id.includes("text-embedding") ||
+          model.id.includes("whisper")
       )
       .map((model) => ({
         id: model.id,
@@ -128,25 +135,31 @@ export const modelRouter = createTRPCRouter({
       }));
   }),
 
-  create: protectedProcedure
+  create: adminProcedure
     .input(
       z.object({
         alias: z.string().min(1).max(100),
         provider: z.enum(["openai", "openrouter", "huggingface", "workers-ai"]),
         modelId: z.string(),
-        caps: z.object({
-          maxTokens: z.number().optional(),
-          maxPricePer1k: z.number().optional(),
-          streaming: z.boolean().optional(),
-          contextLength: z.number().optional(),
-        }).optional(),
+        caps: z
+          .object({
+            maxTokens: z.number().optional(),
+            maxPricePer1k: z.number().optional(),
+            streaming: z.boolean().optional(),
+            contextLength: z.number().optional(),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       // Ensure alias doesn't already exist
-      const [existing] = await db.select().from(modelAlias).where(eq(modelAlias.alias, input.alias)).limit(1);
+      const [existing] = await db
+        .select()
+        .from(modelAlias)
+        .where(eq(modelAlias.alias, input.alias))
+        .limit(1);
       if (existing) {
-        throw new Error('Model alias already exists');
+        throw new Error("Model alias already exists");
       }
 
       // Insert
@@ -154,14 +167,13 @@ export const modelRouter = createTRPCRouter({
         alias: input.alias,
         provider: input.provider,
         modelId: input.modelId,
-        caps: input.caps || {},
         updatedAt: new Date(),
       });
 
       return { success: true };
     }),
 
-  delete: protectedProcedure
+  delete: adminProcedure
     .input(z.object({ alias: z.string() }))
     .mutation(async ({ input, ctx }) => {
       await db.delete(modelAlias).where(eq(modelAlias.alias, input.alias));

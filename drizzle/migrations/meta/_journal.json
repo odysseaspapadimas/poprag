@@ -8,6 +8,13 @@
       "when": 1763492161695,
       "tag": "0000_watery_echo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1763569668081,
+      "tag": "0001_curious_shatterstar",
+      "breakpoints": true
     }
   ]
 }

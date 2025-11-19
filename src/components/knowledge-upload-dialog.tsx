@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { FileUpload } from "@/components/ui/file-upload";
 import { useTRPC } from "@/integrations/trpc/react";
@@ -42,8 +42,6 @@ export function KnowledgeUploadDialog({
           mime: file.type || "application/octet-stream",
           bytes: file.size,
         });
-
-        console.log("Upload start data:", uploadResult);
 
         if (!uploadResult) {
           console.error("Upload start data is missing");

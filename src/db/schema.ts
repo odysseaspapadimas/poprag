@@ -156,12 +156,6 @@ export const modelAlias = sqliteTable(
       enum: ["openai", "openrouter", "huggingface", "workers-ai"],
     }).notNull(),
     modelId: text("model_id").notNull(),
-    caps: text("caps", { mode: "json" }).$type<{
-      maxTokens?: number;
-      maxPricePer1k?: number;
-      streaming?: boolean;
-      contextLength?: number;
-    }>(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .$onUpdate(() => new Date())

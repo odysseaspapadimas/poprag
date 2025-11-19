@@ -9,8 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as AuthRouteRouteImport } from './routes/auth/route'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
@@ -25,13 +25,13 @@ import { Route as AppAgentsAgentIdRouteRouteImport } from './routes/_app/agents/
 import { Route as AppAgentsAgentIdIndexRouteImport } from './routes/_app/agents/$agentId/index'
 import { Route as AppAgentsAgentIdChatRouteImport } from './routes/_app/agents/$agentId/chat'
 
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRouteRoute = AuthRouteRouteImport.update({
+  id: '/auth',
+  path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -42,12 +42,12 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AuthSignUpRoute = AuthSignUpRouteImport.update({
   id: '/sign-up',
   path: '/sign-up',
-  getParentRoute: () => AuthRoute,
+  getParentRoute: () => AuthRouteRoute,
 } as any)
 const AuthSignInRoute = AuthSignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
-  getParentRoute: () => AuthRoute,
+  getParentRoute: () => AuthRouteRoute,
 } as any)
 const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
@@ -101,7 +101,7 @@ const AppAgentsAgentIdChatRoute = AppAgentsAgentIdChatRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/auth': typeof AuthRouteWithChildren
+  '/auth': typeof AuthRouteRouteWithChildren
   '/users': typeof AppUsersRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
@@ -117,7 +117,7 @@ export interface FileRoutesByFullPath {
   '/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
 export interface FileRoutesByTo {
-  '/auth': typeof AuthRouteWithChildren
+  '/auth': typeof AuthRouteRouteWithChildren
   '/users': typeof AppUsersRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
@@ -133,8 +133,8 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/auth': typeof AuthRouteRouteWithChildren
   '/_app': typeof AppRouteWithChildren
-  '/auth': typeof AuthRouteWithChildren
   '/_app/users': typeof AppUsersRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
@@ -183,8 +183,8 @@ export interface FileRouteTypes {
     | '/agents/$agentId'
   id:
     | '__root__'
-    | '/_app'
     | '/auth'
+    | '/_app'
     | '/_app/users'
     | '/auth/sign-in'
     | '/auth/sign-up'
@@ -201,8 +201,8 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  AuthRouteRoute: typeof AuthRouteRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
-  AuthRoute: typeof AuthRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatAgentSlugRoute: typeof ApiChatAgentSlugRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -211,18 +211,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_app': {
       id: '/_app'
       path: ''
       fullPath: ''
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -237,14 +237,14 @@ declare module '@tanstack/react-router' {
       path: '/sign-up'
       fullPath: '/auth/sign-up'
       preLoaderRoute: typeof AuthSignUpRouteImport
-      parentRoute: typeof AuthRoute
+      parentRoute: typeof AuthRouteRoute
     }
     '/auth/sign-in': {
       id: '/auth/sign-in'
       path: '/sign-in'
       fullPath: '/auth/sign-in'
       preLoaderRoute: typeof AuthSignInRouteImport
-      parentRoute: typeof AuthRoute
+      parentRoute: typeof AuthRouteRoute
     }
     '/_app/users': {
       id: '/_app/users'
@@ -319,6 +319,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthRouteRouteChildren {
+  AuthSignInRoute: typeof AuthSignInRoute
+  AuthSignUpRoute: typeof AuthSignUpRoute
+}
+
+const AuthRouteRouteChildren: AuthRouteRouteChildren = {
+  AuthSignInRoute: AuthSignInRoute,
+  AuthSignUpRoute: AuthSignUpRoute,
+}
+
+const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
+  AuthRouteRouteChildren,
+)
+
 interface AppAgentsAgentIdRouteRouteChildren {
   AppAgentsAgentIdChatRoute: typeof AppAgentsAgentIdChatRoute
   AppAgentsAgentIdIndexRoute: typeof AppAgentsAgentIdIndexRoute
@@ -352,21 +366,9 @@ const AppRouteChildren: AppRouteChildren = {
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
-interface AuthRouteChildren {
-  AuthSignInRoute: typeof AuthSignInRoute
-  AuthSignUpRoute: typeof AuthSignUpRoute
-}
-
-const AuthRouteChildren: AuthRouteChildren = {
-  AuthSignInRoute: AuthSignInRoute,
-  AuthSignUpRoute: AuthSignUpRoute,
-}
-
-const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
+  AuthRouteRoute: AuthRouteRouteWithChildren,
   AppRoute: AppRouteWithChildren,
-  AuthRoute: AuthRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatAgentSlugRoute: ApiChatAgentSlugRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

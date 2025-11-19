@@ -310,6 +310,50 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /**
+   * Permanently delete agent
+   */
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const [existing] = await db
+        .select()
+        .from(agent)
+        .where(eq(agent.id, input.id))
+        .limit(1);
+
+      if (!existing) {
+        throw new Error("Agent not found");
+      }
+
+      if (
+        !ctx.session.user.isAdmin &&
+        existing.createdBy !== ctx.session.user.id
+      ) {
+        throw new Error("Access denied");
+      }
+
+      // Only allow deletion of archived agents
+      if (existing.status !== "archived") {
+        throw new Error("Only archived agents can be permanently deleted");
+      }
+
+      await db.delete(agent).where(eq(agent.id, input.id));
+
+      // Audit log
+      await db.insert(auditLog).values({
+        id: nanoid(),
+        actorId: ctx.session.user.id,
+        eventType: "agent.deleted",
+        targetType: "agent",
+        targetId: input.id,
+        diff: { deleted: true },
+        createdAt: new Date(),
+      });
+
+      return { success: true };
+    }),
+
+  /**
    * Get agent's knowledge sources
    */
   getKnowledgeSources: protectedProcedure

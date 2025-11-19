@@ -4,17 +4,16 @@ import { Bot, BotMessageSquare, SquareTerminal } from "lucide-react";
 import type * as React from "react";
 
 import { NavMain } from "@/components/nav-main";
-import { NavProjects } from "@/components/nav-projects";
 import { NavUser } from "@/components/nav-user";
 import {
-    Sidebar,
-    SidebarContent,
-    SidebarFooter,
-    SidebarHeader,
-    SidebarMenu,
-    SidebarMenuButton,
-    SidebarMenuItem,
-    SidebarRail,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar";
 import { Link } from "@tanstack/react-router";
 
@@ -26,12 +25,6 @@ const data = {
     avatar: "/avatars/user.jpg",
   },
   navMain: [
-    {
-      title: "Dashboard",
-      url: "/",
-      icon: SquareTerminal,
-      isActive: true,
-    },
     {
       title: "Agents",
       url: "/agents",
@@ -48,7 +41,6 @@ const data = {
       icon: Bot,
     },
   ],
-  projects: [],
 };
 
 export function AppSidebar({
@@ -82,7 +74,6 @@ export function AppSidebar({
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavProjects projects={data.projects} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={userData} />

@@ -1,13 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/")({
   component: RouteComponent,
+  beforeLoad: () => {
+    throw redirect({
+      to: "/agents",
+    });
+  },
 });
 
 function RouteComponent() {
-  return (
-    <center>
-      <h1 className="font-extrabold text-2xl">Welcome</h1>
-    </center>
-  );
+  return <Outlet />;
 }

@@ -1,5 +1,8 @@
 import { useForm } from "@tanstack/react-form";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  useNavigate
+} from "@tanstack/react-router";
 import { z } from "zod";
 
 import { Logo } from "@/components/logo";
@@ -27,17 +30,19 @@ export const Route = createFileRoute("/auth/sign-in")({
 });
 
 function RouteComponent() {
-  const router = useRouter();
   const trpc = useTRPC();
+  const navigate = useNavigate();
 
-  const loginMutation = useMutation(trpc.auth.login.mutationOptions({
-    onSuccess: () => {
-      router.invalidate();
-    },
-    onError: (error) => {
-      toast.error("Invalid email or password");
-    }
-  }));
+  const loginMutation = useMutation(
+    trpc.auth.login.mutationOptions({
+      onSuccess: () => {
+        navigate({ to: "/" });
+      },
+      onError: (error) => {
+        toast.error("Invalid email or password");
+      },
+    })
+  );
 
   const form = useForm({
     defaultValues: {
@@ -48,10 +53,10 @@ function RouteComponent() {
       onSubmit: signInSchema,
     },
     onSubmit: async ({ value }) => {
-        await loginMutation.mutateAsync({
-          email: value.email,
-          password: value.password,
-        });
+      await loginMutation.mutateAsync({
+        email: value.email,
+        password: value.password,
+      });
     },
   });
 
@@ -89,9 +94,7 @@ function RouteComponent() {
                     placeholder="your@email.com"
                     autoComplete="email"
                   />
-                  <FieldDescription>
-                    Enter your email address.
-                  </FieldDescription>
+                  <FieldDescription>Enter your email address.</FieldDescription>
                   {isInvalid && <FieldError errors={field.state.meta.errors} />}
                 </Field>
               );
@@ -117,9 +120,7 @@ function RouteComponent() {
                     placeholder="••••••••"
                     autoComplete="current-password"
                   />
-                  <FieldDescription>
-                    Enter your password.
-                  </FieldDescription>
+                  <FieldDescription>Enter your password.</FieldDescription>
                   {isInvalid && <FieldError errors={field.state.meta.errors} />}
                 </Field>
               );
@@ -127,7 +128,11 @@ function RouteComponent() {
           />
         </FieldGroup>
 
-        <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={loginMutation.isPending}
+        >
           Sign In
         </Button>
       </form>

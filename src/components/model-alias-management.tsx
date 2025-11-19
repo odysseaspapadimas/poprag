@@ -34,40 +34,37 @@ export function ModelAliasManagement() {
     },
   }));
 
-  const [form, setForm] = useState({ alias: "", provider: "openai", modelId: "", caps: '' });
-  const [showProviderModels, setShowProviderModels] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<"openai" | "cloudflare" | null>(null);
+  const [form, setForm] = useState({ 
+    alias: "", 
+    provider: "openai", 
+    modelId: ""
+  });
+  const [modelSearch, setModelSearch] = useState("");
+  const [showModelList, setShowModelList] = useState(false);
 
   // Query for provider models - using regular useQuery with enabled flag
   const { data: openaiModels } = useQuery({
     ...trpc.model.listOpenAIModels.queryOptions(),
-    enabled: selectedProvider === "openai",
+    enabled: form.provider === "openai" && showModelList,
   });
 
   const { data: cloudflareModels } = useQuery({
-    ...trpc.model.listCloudflareModels.queryOptions({search: form.modelId}),
-    enabled: selectedProvider === "cloudflare",
+    ...trpc.model.listCloudflareModels.queryOptions({search: modelSearch}),
+    enabled: form.provider === "workers-ai" && showModelList,
   });
 
   const handleCreate = async () => {
-    let capsObj = {};
-    if (form.caps) {
-      try {
-        capsObj = JSON.parse(form.caps);
-      } catch (e) {
-        toast.error("Invalid JSON in caps field");
-        return;
-      }
-    }
-
     await createMutation.mutateAsync({
       alias: form.alias,
       provider: form.provider as any,
       modelId: form.modelId,
-      caps: capsObj,
     });
 
-    setForm({ alias: "", provider: "openai", modelId: "", caps: '' });
+    setForm({ 
+      alias: "", 
+      provider: "openai", 
+      modelId: ""
+    });
   };
 
   const handleDelete = async (alias: string) => {
@@ -86,7 +83,11 @@ export function ModelAliasManagement() {
         </Field>
         <Field>
           <Label>Provider</Label>
-          <Select onValueChange={(v) => setForm(s => ({ ...s, provider: v }))} defaultValue={form.provider}>
+          <Select onValueChange={(v) => {
+            setForm(s => ({ ...s, provider: v }));
+            setModelSearch("");
+            setShowModelList(false);
+          }} defaultValue={form.provider}>
             <SelectTrigger className="w-56"><SelectValue placeholder="Provider" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="openai">openai</SelectItem>
@@ -105,50 +106,40 @@ export function ModelAliasManagement() {
             value={form.modelId} 
             onChange={(e) => setForm(s => ({ ...s, modelId: e.target.value }))} 
             placeholder="e.g., gpt-4o or @cf/meta/llama-3.3-70b-instruct-fp8-fast"
+            onFocus={() => {
+              if (form.provider === "openai" || form.provider === "workers-ai") {
+                setShowModelList(true);
+              }
+            }}
+            onBlur={() => setTimeout(() => setShowModelList(false), 200)}
           />
         </Field>
-        <Field>
-          <Label>Browse Models</Label>
-          <div className="flex gap-2">
-            <Button 
-              type="button"
-              variant="outline" 
-              size="sm"
-              onClick={() => {
-                setSelectedProvider(selectedProvider === "openai" ? null : "openai");
-                setShowProviderModels(!showProviderModels || selectedProvider !== "openai");
-              }}
-            >
-              {selectedProvider === "openai" ? "Hide" : "OpenAI Models"}
-            </Button>
-            <Button 
-              type="button"
-              variant="outline" 
-              size="sm"
-              onClick={() => {
-                setSelectedProvider(selectedProvider === "cloudflare" ? null : "cloudflare");
-                setShowProviderModels(!showProviderModels || selectedProvider !== "cloudflare");
-              }}
-            >
-              {selectedProvider === "cloudflare" ? "Hide" : "Cloudflare Models"}
-            </Button>
-          </div>
-        </Field>
+        {(form.provider === "openai" || form.provider === "workers-ai") && (
+          <Field>
+            <Label>Search Models</Label>
+            <Input 
+              value={modelSearch} 
+              onChange={(e) => setModelSearch(e.target.value)} 
+              placeholder="Search models..."
+              onFocus={() => setShowModelList(true)}
+              onBlur={() => setTimeout(() => setShowModelList(false), 200)}
+            />
+          </Field>
+        )}
       </div>
 
-      {showProviderModels && selectedProvider === "openai" && openaiModels && (
+      {showModelList && form.provider === "openai" && openaiModels && (
         <div className="p-3 border rounded max-h-48 overflow-y-auto">
           <div className="text-sm font-medium mb-2">OpenAI Models</div>
           <div className="space-y-1">
-            {openaiModels.map((model: any) => (
+            {openaiModels.filter(model => model.name.toLowerCase().includes(modelSearch.toLowerCase())).map((model: any) => (
               <button
                 key={model.id}
                 type="button"
                 className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
                 onClick={() => {
-                  setForm(s => ({ ...s, modelId: model.id, provider: "openai" }));
-                  setShowProviderModels(false);
-                  setSelectedProvider(null);
+                  setForm(s => ({ ...s, modelId: model.id }));
+                  setShowModelList(false);
                 }}
               >
                 {model.name} <span className="text-muted-foreground">({model.ownedBy})</span>
@@ -158,7 +149,7 @@ export function ModelAliasManagement() {
         </div>
       )}
 
-      {showProviderModels && selectedProvider === "cloudflare" && cloudflareModels && (
+      {showModelList && form.provider === "workers-ai" && cloudflareModels && (
         <div className="p-3 border rounded max-h-48 overflow-y-auto">
           <div className="text-sm font-medium mb-2">Cloudflare Workers AI Models</div>
           <div className="space-y-1">
@@ -168,9 +159,8 @@ export function ModelAliasManagement() {
                 type="button"
                 className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
                 onClick={() => {
-                  setForm(s => ({ ...s, modelId: model.id, provider: "workers-ai" }));
-                  setShowProviderModels(false);
-                  setSelectedProvider(null);
+                  setForm(s => ({ ...s, modelId: model.id }));
+                  setShowModelList(false);
                 }}
               >
                 {model.name} <span className="text-muted-foreground">({model.task})</span>
@@ -179,11 +169,6 @@ export function ModelAliasManagement() {
           </div>
         </div>
       )}
-
-      <Field>
-        <Label>Caps (JSON)</Label>
-        <textarea value={form.caps} onChange={(e) => setForm(s => ({ ...s, caps: e.target.value }))} className="w-full p-2 border rounded" rows={4} />
-      </Field>
 
       <div className="flex gap-2">
         <Button onClick={handleCreate} disabled={createMutation.isPending}>{createMutation.isPending ? 'Creating...' : 'Create Alias'}</Button>

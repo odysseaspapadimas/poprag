@@ -1,5 +1,5 @@
 import { useForm } from "@tanstack/react-form";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { Logo } from "@/components/logo";
@@ -28,13 +28,13 @@ export const Route = createFileRoute("/auth/sign-up")({
 });
 
 function RouteComponent() {
-  const router = useRouter();
   const trpc = useTRPC();
+  const navigate = useNavigate();
 
   const signUpMutation = useMutation(
     trpc.auth.signUp.mutationOptions({
       onSuccess: () => {
-        router.invalidate();
+        navigate({ to: "/" });
       },
       onError: (error) => {
         toast.error("Sign up failed: " + error.message);
@@ -157,7 +157,11 @@ function RouteComponent() {
           />
         </FieldGroup>
 
-        <Button type="submit" className="w-full" disabled={signUpMutation.isPending}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={signUpMutation.isPending}
+        >
           Sign Up
         </Button>
       </form>

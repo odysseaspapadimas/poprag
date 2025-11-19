@@ -1,5 +1,6 @@
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
+import { EditAgentDialog } from "@/components/edit-agent-dialog";
 import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
 import { ModelPolicyEditor } from "@/components/model-policy-editor";
@@ -8,7 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { VectorizeDiagnostics } from "@/components/vectorize-diagnostics";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
@@ -65,6 +66,14 @@ function AgentDetailPage() {
   const navigate = useNavigate({ from: Route.fullPath });
 
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  // Callback to invalidate analytics when a chat message is completed
+  const handleMessageComplete = () => {
+    queryClient.invalidateQueries({
+      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 50 })
+    });
+  };
 
   // Fetch agent data with suspense
   const { data: agent } = useSuspenseQuery(
@@ -150,6 +159,14 @@ function AgentDetailPage() {
             >
               {agent.status}
             </span>
+            <EditAgentDialog
+              agent={agent}
+              trigger={
+                <Button variant="outline" size="sm">
+                  Edit Settings
+                </Button>
+              }
+            />
           </div>
         </div>
         {(!setupStatus?.hasModelAlias || !setupStatus?.hasProdPrompt) && (
@@ -462,7 +479,7 @@ function AgentDetailPage() {
 
         {/* Chat */}
         <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex flex-col">
-          <Chat agentId={agentId} />
+          <Chat agentId={agentId} onMessageComplete={handleMessageComplete} />
         </div>
       </div>
     </div>
