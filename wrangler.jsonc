@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "ragbot",
+	"name": "poprag",
 	"compatibility_date": "2025-10-22",
 	"compatibility_flags": [
 		"nodejs_compat"
