@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -34,7 +34,20 @@ export function ModelAliasManagement() {
     },
   }));
 
-  const [form, setForm] = useState({ alias: "", provider: "openai", modelId: "", gatewayRoute: "", caps: '' });
+  const [form, setForm] = useState({ alias: "", provider: "openai", modelId: "", caps: '' });
+  const [showProviderModels, setShowProviderModels] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<"openai" | "cloudflare" | null>(null);
+
+  // Query for provider models - using regular useQuery with enabled flag
+  const { data: openaiModels } = useQuery({
+    ...trpc.model.listOpenAIModels.queryOptions(),
+    enabled: selectedProvider === "openai",
+  });
+
+  const { data: cloudflareModels } = useQuery({
+    ...trpc.model.listCloudflareModels.queryOptions({search: form.modelId}),
+    enabled: selectedProvider === "cloudflare",
+  });
 
   const handleCreate = async () => {
     let capsObj = {};
@@ -51,11 +64,10 @@ export function ModelAliasManagement() {
       alias: form.alias,
       provider: form.provider as any,
       modelId: form.modelId,
-      gatewayRoute: form.gatewayRoute || undefined,
       caps: capsObj,
     });
 
-    setForm({ alias: "", provider: "openai", modelId: "", gatewayRoute: "", caps: '' });
+    setForm({ alias: "", provider: "openai", modelId: "", caps: '' });
   };
 
   const handleDelete = async (alias: string) => {
@@ -89,13 +101,84 @@ export function ModelAliasManagement() {
       <div className="grid grid-cols-2 gap-4">
         <Field>
           <Label>Model ID</Label>
-          <Input value={form.modelId} onChange={(e) => setForm(s => ({ ...s, modelId: e.target.value }))} />
+          <Input 
+            value={form.modelId} 
+            onChange={(e) => setForm(s => ({ ...s, modelId: e.target.value }))} 
+            placeholder="e.g., gpt-4o or @cf/meta/llama-3.3-70b-instruct-fp8-fast"
+          />
         </Field>
         <Field>
-          <Label>Gateway Route (optional)</Label>
-          <Input value={form.gatewayRoute} onChange={(e) => setForm(s => ({ ...s, gatewayRoute: e.target.value }))} />
+          <Label>Browse Models</Label>
+          <div className="flex gap-2">
+            <Button 
+              type="button"
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setSelectedProvider(selectedProvider === "openai" ? null : "openai");
+                setShowProviderModels(!showProviderModels || selectedProvider !== "openai");
+              }}
+            >
+              {selectedProvider === "openai" ? "Hide" : "OpenAI Models"}
+            </Button>
+            <Button 
+              type="button"
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setSelectedProvider(selectedProvider === "cloudflare" ? null : "cloudflare");
+                setShowProviderModels(!showProviderModels || selectedProvider !== "cloudflare");
+              }}
+            >
+              {selectedProvider === "cloudflare" ? "Hide" : "Cloudflare Models"}
+            </Button>
+          </div>
         </Field>
       </div>
+
+      {showProviderModels && selectedProvider === "openai" && openaiModels && (
+        <div className="p-3 border rounded max-h-48 overflow-y-auto">
+          <div className="text-sm font-medium mb-2">OpenAI Models</div>
+          <div className="space-y-1">
+            {openaiModels.map((model: any) => (
+              <button
+                key={model.id}
+                type="button"
+                className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
+                onClick={() => {
+                  setForm(s => ({ ...s, modelId: model.id, provider: "openai" }));
+                  setShowProviderModels(false);
+                  setSelectedProvider(null);
+                }}
+              >
+                {model.name} <span className="text-muted-foreground">({model.ownedBy})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showProviderModels && selectedProvider === "cloudflare" && cloudflareModels && (
+        <div className="p-3 border rounded max-h-48 overflow-y-auto">
+          <div className="text-sm font-medium mb-2">Cloudflare Workers AI Models</div>
+          <div className="space-y-1">
+            {cloudflareModels.map((model: any) => (
+              <button
+                key={model.id}
+                type="button"
+                className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
+                onClick={() => {
+                  setForm(s => ({ ...s, modelId: model.id, provider: "workers-ai" }));
+                  setShowProviderModels(false);
+                  setSelectedProvider(null);
+                }}
+              >
+                {model.name} <span className="text-muted-foreground">({model.task})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Field>
         <Label>Caps (JSON)</Label>

@@ -1,15 +1,18 @@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 interface LabelManagementProps {
   promptId: string;
+  agentId?: string;
 }
 
-export function LabelManagement({ promptId }: LabelManagementProps) {
+export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
   const trpc = useTRPC();
+
+  const queryClient = useQueryClient();
 
   const { data: versions, refetch: refetchVersions } = useSuspenseQuery(
     trpc.prompt.getVersions.queryOptions({ promptId })
@@ -20,6 +23,11 @@ export function LabelManagement({ promptId }: LabelManagementProps) {
       onSuccess: () => {
         toast.success("Label assigned successfully");
         refetchVersions();
+        if (agentId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+        }
+        queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId }) });
       },
       onError: (error) => {
         toast.error(`Failed to assign label: ${error.message}`);
@@ -32,6 +40,11 @@ export function LabelManagement({ promptId }: LabelManagementProps) {
       onSuccess: () => {
         toast.success("Label rolled back successfully");
         refetchVersions();
+        if (agentId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+        }
+        queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId }) });
       },
       onError: (error) => {
         toast.error(`Failed to rollback label: ${error.message}`);

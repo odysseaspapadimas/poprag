@@ -156,11 +156,11 @@ export const modelAlias = sqliteTable(
       enum: ["openai", "openrouter", "huggingface", "workers-ai"],
     }).notNull(),
     modelId: text("model_id").notNull(),
-    gatewayRoute: text("gateway_route"),
     caps: text("caps", { mode: "json" }).$type<{
       maxTokens?: number;
       maxPricePer1k?: number;
       streaming?: boolean;
+      contextLength?: number;
     }>(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -284,6 +284,27 @@ export const knowledgeSource = sqliteTable(
   (table) => [
     index("knowledge_source_agent_idx").on(table.agentId),
     index("knowledge_source_status_idx").on(table.agentId, table.status),
+  ],
+);
+
+export const documentChunks = sqliteTable(
+  "document_chunks",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("source_id")  // Maps to source_id column in database
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    sessionId: text("agent_id").notNull(),  // Maps to agent_id column in database
+    chunkIndex: integer("chunk_index").notNull(),
+    vectorizeId: text("vectorize_id"), // Link to Vectorize vector
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("document_chunks_document_idx").on(table.documentId),
+    index("document_chunks_session_idx").on(table.sessionId),
   ],
 );
 
@@ -412,6 +433,9 @@ export type InsertPromptVersion = typeof promptVersion.$inferInsert;
 
 export type KnowledgeSource = typeof knowledgeSource.$inferSelect;
 export type InsertKnowledgeSource = typeof knowledgeSource.$inferInsert;
+
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type InsertDocumentChunk = typeof documentChunks.$inferInsert;
 
 export type AgentIndexPin = typeof agentIndexPin.$inferSelect;
 export type InsertAgentIndexPin = typeof agentIndexPin.$inferInsert;

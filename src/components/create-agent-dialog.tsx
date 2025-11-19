@@ -28,7 +28,9 @@ import {
 import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 
 const createAgentSchema = z.object({
@@ -55,6 +57,7 @@ interface CreateAgentDialogProps {
 export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
 
   // Fetch model aliases
   const { data: modelAliases } = useSuspenseQuery(trpc.model.list.queryOptions());
@@ -77,6 +80,12 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
       onSuccess: () => {
         form.reset();
         queryClient.invalidateQueries({ queryKey: trpc.agent.list.queryKey() });
+        // close modal and show toast
+        setOpen(false);
+        toast.success("Agent created");
+      },
+      onError: (err: any) => {
+        toast.error(`Failed to create agent: ${err?.message ?? err}`);
       },
     })
   );
@@ -103,9 +112,9 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
   };
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {trigger}
+        <div onClick={() => setOpen(true)}>{trigger}</div>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
         <DialogHeader>
@@ -203,6 +212,7 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
               <Button
                 type="button"
                 variant="outline"
+                onClick={() => setOpen(false)}
               >
                 Cancel
               </Button>

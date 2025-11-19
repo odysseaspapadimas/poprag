@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { CreatePromptVersionDialog } from "./create-prompt-version-dialog";
 import { LabelManagement } from "./label-management";
 import { PromptVersionsList } from "./prompt-versions-list";
@@ -25,6 +25,17 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
   );
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
+
+  // Auto-select a prompt if there's only one
+  useEffect(() => {
+    if (prompts.length === 1 && !selectedPromptId) {
+      setSelectedPromptId(prompts[0].id);
+    }
+    // If selected prompt no longer exists, clear selection
+    if (selectedPromptId && !prompts.some((p) => p.id === selectedPromptId)) {
+      setSelectedPromptId(null);
+    }
+  }, [prompts, selectedPromptId]);
 
   return (
     <div className="space-y-6">
@@ -105,13 +116,14 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
                 <Suspense fallback={<Skeleton className="h-96 w-full" />}>
                   <PromptVersionsList
                     promptId={selectedPrompt.id}
+                    agentId={agentId}
                     onCreateNew={() => setCreateDialogOpen(true)}
                   />
                 </Suspense>
               )}
 
               {viewMode === "labels" && (
-                <LabelManagement promptId={selectedPrompt.id} />
+                <LabelManagement promptId={selectedPrompt.id} agentId={agentId} />
               )}
             </div>
           ) : (

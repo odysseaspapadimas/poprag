@@ -4,6 +4,7 @@ import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
 import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { VectorizeDiagnostics } from "@/components/vectorize-diagnostics";
 import { useTRPC } from "@/integrations/trpc/react";
@@ -103,6 +104,10 @@ function AgentDetailPage() {
     trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 })
   );
 
+  const { data: setupStatus } = useSuspenseQuery(
+    trpc.agent.getSetupStatus.queryOptions({ agentId })
+  );
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "prompts", label: "Prompts" },
@@ -147,6 +152,20 @@ function AgentDetailPage() {
             </span>
           </div>
         </div>
+        {(!setupStatus?.hasModelAlias || !setupStatus?.hasProdPrompt) && (
+          <div className="mt-4">
+            <Alert variant="destructive">
+              <div className="flex-1">
+                <AlertTitle>Agent not fully configured</AlertTitle>
+                <AlertDescription>
+                  {(!setupStatus?.hasModelAlias && "No model selected.") || ""}
+                  {(!setupStatus?.hasModelAlias && !setupStatus?.hasProdPrompt) && " "}
+                  {(!setupStatus?.hasProdPrompt && "No production prompt found.") || ""}
+                </AlertDescription>
+              </div>
+            </Alert>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}

@@ -1,11 +1,14 @@
 import { db } from "@/db";
 import {
+	documentChunks,
 	knowledgeSource,
 	type InsertKnowledgeSource,
 } from "@/db/schema";
+import type { TextSplitter } from "@langchain/textsplitters";
+import { MarkdownTextSplitter, RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { generateEmbeddings } from "./embedding";
+import { ulid } from "ulidx";
+import { extractText, getDocumentProxy } from "unpdf";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -17,6 +20,16 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 	}
 	return out;
 }
+
+/**
+ * Stream response callback type for progress updates
+ */
+export type StreamResponseCallback = (message: {
+	message?: string;
+	progress?: number;
+	error?: string;
+	[key: string]: unknown;
+}) => Promise<void>;
 
 /**
  * Wait for a Vectorize mutation to be processed
@@ -66,19 +79,57 @@ export interface ParsedDocument {
 
 /**
  * Parse text content from uploaded file
- * In production, this would handle various file types (PDF, XLSX, DOCX)
- * For now, handles plain text
+ * Handles plain text, markdown, and PDF files
  */
 export async function parseDocument(
 	content: string | Buffer,
 	mimeType: string,
+	filename?: string,
 ): Promise<ParsedDocument> {
-	// Handle plain text
-	if (mimeType.startsWith("text/")) {
-		const text = typeof content === "string" ? content : content.toString("utf-8");
+	// Handle PDF files
+	if (mimeType === "application/pdf") {
+		if (typeof content === "string") {
+			throw new Error("PDF content must be a Buffer");
+		}
+		try {
+			const buffer = content as Buffer;
+			const pdf = await getDocumentProxy(new Uint8Array(buffer));
+			const result = await extractText(pdf, { mergePages: true });
+			const text = Array.isArray(result.text) ? result.text.join(" ") : result.text;
+			
+			return {
+				content: text,
+				metadata: {
+					mimeType,
+					type: "pdf",
+					originalLength: text.length,
+				},
+			};
+		} catch (error) {
+			throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	// Convert buffer to string for text-based formats
+	const text = typeof content === "string" ? content : content.toString("utf-8");
+
+	// Handle markdown files
+	if (
+		mimeType === "text/markdown" ||
+		filename?.endsWith(".md") ||
+		filename?.endsWith(".markdown")
+	) {
 		return {
 			content: text,
-			metadata: { mimeType, originalLength: text.length },
+			metadata: { mimeType, type: "markdown", originalLength: text.length },
+		};
+	}
+
+	// Handle plain text
+	if (mimeType.startsWith("text/")) {
+		return {
+			content: text,
+			metadata: { mimeType, type: "text", originalLength: text.length },
 		};
 	}
 
@@ -88,27 +139,20 @@ export async function parseDocument(
 		mimeType.includes("csv") ||
 		mimeType.includes("excel")
 	) {
-		// In production, use a library like xlsx or csv-parse
 		// For now, treat as text
-		const text = typeof content === "string" ? content : content.toString("utf-8");
+		// In production, use a library like xlsx or csv-parse for better parsing
 		return {
 			content: text,
-			metadata: { mimeType, type: "spreadsheet" },
+			metadata: { mimeType, type: "spreadsheet", originalLength: text.length },
 		};
-	}
-
-	// For PDF files
-	if (mimeType === "application/pdf") {
-		// In production, use pdf-parse or similar
-		throw new Error("PDF parsing not yet implemented - use WASM library");
 	}
 
 	throw new Error(`Unsupported file type: ${mimeType}`);
 }
 
 /**
- * Process and index a knowledge source
- * Full pipeline: parse → embed → store in Vectorize
+ * Process and index a knowledge source with streaming updates
+ * Full pipeline: parse → chunk → embed (batch) → store in Vectorize and D1
  */
 export async function processKnowledgeSource(
 	sourceId: string,
@@ -117,6 +161,7 @@ export async function processKnowledgeSource(
 		embeddingModel?: string;
 		embeddingDimensions?: number;
 		chunkSize?: number;
+		streamResponse?: StreamResponseCallback;
 	},
 ) {
 	// Get source from database
@@ -130,9 +175,8 @@ export async function processKnowledgeSource(
 		throw new Error(`Knowledge source ${sourceId} not found`);
 	}
 
-	// Validate that agent exists (foreign key constraint check)
-	console.log(`Processing knowledge source: sourceId=${sourceId}, agentId=${source.agentId}`);
-
+	const streamResponse = options?.streamResponse || (async () => {});
+	
 	try {
 		// Update status to parsing
 		await db
@@ -141,51 +185,95 @@ export async function processKnowledgeSource(
 			.where(eq(knowledgeSource.id, sourceId));
 
 		// Parse document
-		const parsed = await parseDocument(content, source.mime || "text/plain");
+		const parsed = await parseDocument(content, source.mime || "text/plain", source.fileName || undefined);
+		await streamResponse({ message: "Document parsed successfully", metadata: parsed.metadata });
 
-		// Generate embeddings with consistent dimensions (MUST match query dimensions)
-		const embeddings = await generateEmbeddings(parsed.content, {
-			model: options?.embeddingModel,
-			dimensions: options?.embeddingDimensions || 1536, // Default to match EMBEDDING_DIMENSIONS
-		});
-		
-		console.log(`Generated ${embeddings.length} embeddings for source ${sourceId}`);
+		// Choose appropriate text splitter based on file type
+		let splitter: TextSplitter;
+		if (parsed.metadata.type === "markdown") {
+			// Use MarkdownTextSplitter for markdown files to preserve structure
+			splitter = new MarkdownTextSplitter({
+				chunkSize: options?.chunkSize || 1024,
+				chunkOverlap: 200,
+			});
+			console.log(`Using MarkdownTextSplitter for ${source.fileName}`);
+		} else {
+			// Use RecursiveCharacterTextSplitter for all other file types
+			splitter = new RecursiveCharacterTextSplitter({
+				chunkSize: options?.chunkSize || 1024,
+				chunkOverlap: 200,
+			});
+			console.log(`Using RecursiveCharacterTextSplitter for ${source.fileName}`);
+		}
 
-		// Create vector IDs for Vectorize (no chunk records needed)
-		const vectorizeIds: string[] = embeddings.map(() => nanoid());
-		
-		console.log(`Processing ${embeddings.length} embeddings for source ${sourceId}, agent ${source.agentId}`);
+		const chunks = await splitter.splitText(parsed.content);
+		await streamResponse({ message: `Split into ${chunks.length} chunks` });
 
-		// Insert vectors into Vectorize with agent-based namespace (store full text in metadata)
+		console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
+
+		// Process chunks in batches for embedding
+		const BATCH_SIZE = 10;
+		const chunkBatches = chunkArray(chunks, BATCH_SIZE);
+		const vectorizeIds: string[] = [];
 		const { env } = await import("cloudflare:workers");
-		const vectors = embeddings.map((emb, idx) => {
-			// Ensure text doesn't exceed Vectorize metadata limits (3KB)
-			const textContent = emb.content;
-			const MAX_TEXT_SIZE = 2800; // Leave buffer for JSON overhead
-			
-			if (textContent.length > MAX_TEXT_SIZE) {
-				console.warn(`Chunk ${idx} text too large (${textContent.length} bytes), truncating to ${MAX_TEXT_SIZE}`);
-			}
-			
-			return {
-				id: vectorizeIds[idx],
-				values: emb.embedding,
-				namespace: source.agentId, // Agent-based isolation
-				metadata: {
-					sourceId: source.id,
-					agentId: source.agentId,
-					fileName: source.fileName || "unknown",
-					chunkIndex: idx,
-					textLength: textContent.length,
-					text: textContent.substring(0, MAX_TEXT_SIZE), // Store text, respecting metadata limits
-				},
-			};
-		});
+		let processedChunks = 0;
 
-		const vectorizeResult = await env.VECTORIZE.upsert(vectors);
-		console.log(`Inserted ${vectors.length} vectors into Vectorize namespace: ${source.agentId}, mutationId: ${vectorizeResult.mutationId}`);
+		// Process each batch
+		for (let batchIdx = 0; batchIdx < chunkBatches.length; batchIdx++) {
+			const batch = chunkBatches[batchIdx];
+			
+			// Generate embeddings for this batch using Workers AI BGE model
+			// Pass all texts in the batch at once for efficient processing
+			const embeddingResult: { data: number[][] } = await env.AI.run('@cf/baai/bge-large-en-v1.5', {
+				text: batch,
+			}) as { data: number[][] };
+			const embeddingBatch: number[][] = embeddingResult.data;
 
-		// Store vectorize IDs in knowledge source record for deletion tracking
+			// Insert chunks into database FIRST to get the IDs
+			const chunkInsertResults = await db
+				.insert(documentChunks)
+				.values(
+					batch.map((chunk, idx) => ({
+						id: ulid(),
+						text: chunk,
+						sessionId: source.agentId,
+						documentId: source.id,
+						chunkIndex: processedChunks + idx,
+						createdAt: new Date(),
+					}))
+				)
+				.returning({ insertedChunkId: documentChunks.id });
+
+			// Extract the inserted chunk IDs
+			const chunkIds = chunkInsertResults.map((result) => result.insertedChunkId);
+			vectorizeIds.push(...chunkIds);
+
+			// Insert vectors into VECTORIZE_INDEX with proper metadata
+			await env.VECTORIZE.insert(
+				embeddingBatch.map((embedding, index) => ({
+					id: chunkIds[index],
+					values: embedding,
+					namespace: source.agentId, // Use agentId for namespace isolation
+					metadata: {
+						sessionId: source.agentId,
+						documentId: source.id,
+						chunkId: chunkIds[index],
+						text: batch[index],
+					},
+				}))
+			);
+
+			processedChunks += batch.length;
+			const progressPercent = ((batchIdx + 1) / chunkBatches.length) * 100;
+			await streamResponse({
+				message: `Embedding... (${progressPercent.toFixed(2)}%)`,
+				progress: progressPercent,
+			});
+
+			console.log(`Processed batch ${batchIdx + 1}/${chunkBatches.length}, embedded ${processedChunks} chunks`);
+		}
+
+		// Store vectorize IDs for deletion tracking
 		await db
 			.update(knowledgeSource)
 			.set({
@@ -193,9 +281,6 @@ export async function processKnowledgeSource(
 				updatedAt: new Date(),
 			})
 			.where(eq(knowledgeSource.id, sourceId));
-
-		// Optional: Wait for mutation to be processed (uncomment if needed)
-		// await waitForMutation(env.VECTORIZE, vectorizeResult.mutationId);
 
 		// Update source status
 		await db
@@ -206,18 +291,23 @@ export async function processKnowledgeSource(
 			})
 			.where(eq(knowledgeSource.id, sourceId));
 
+		await streamResponse({
+			message: "Inserted vectors into database",
+			chunksProcessed: processedChunks,
+			vectorsInserted: vectorizeIds.length,
+		});
+
 		return {
 			success: true,
-			vectorsInserted: vectors.length,
-			mutationId: vectorizeResult.mutationId,
+			vectorsInserted: vectorizeIds.length,
+			chunksProcessed: processedChunks,
 		};
 	} catch (error) {
-		// Log detailed error for debugging - preserve original error
+		// Log detailed error for debugging
 		console.error("Indexing failed - detailed error:", {
-			error: error, // Log the full error object
+			error: error,
 			message: error instanceof Error ? error.message : String(error),
 			stack: error instanceof Error ? error.stack : undefined,
-			cause: error instanceof Error ? (error as any).cause : undefined,
 			sourceId,
 			agentId: source?.agentId,
 		});
@@ -232,6 +322,10 @@ export async function processKnowledgeSource(
 			})
 			.where(eq(knowledgeSource.id, sourceId));
 
+		await streamResponse({
+			error: error instanceof Error ? error.message : String(error),
+		});
+
 		throw error;
 	}
 }
@@ -242,7 +336,7 @@ export async function processKnowledgeSource(
 export async function createKnowledgeSource(
 	data: Omit<InsertKnowledgeSource, "createdAt" | "updatedAt">,
 ): Promise<string> {
-	const id = data.id || nanoid();
+	const id = data.id || ulid();
 	await db.insert(knowledgeSource).values({
 		...data,
 		id,

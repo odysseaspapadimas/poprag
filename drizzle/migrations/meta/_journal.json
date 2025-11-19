@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1762908015274,
-      "tag": "0000_reflective_yellowjacket",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1762980908492,
-      "tag": "0001_violet_miracleman",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1762986997140,
-      "tag": "0002_brave_gideon",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1763054358028,
-      "tag": "0003_third_vampiro",
+      "when": 1763492161695,
+      "tag": "0000_watery_echo",
       "breakpoints": true
     }
   ]

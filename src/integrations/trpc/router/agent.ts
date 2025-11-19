@@ -1,15 +1,15 @@
 import { db } from "@/db";
 import {
-    agent,
-    agentIndexPin,
-    agentModelPolicy,
-    auditLog,
-    knowledgeSource,
-    modelAlias,
-    prompt,
-    promptVersion,
-    runMetric,
-    type InsertAgent,
+  agent,
+  agentIndexPin,
+  agentModelPolicy,
+  auditLog,
+  knowledgeSource,
+  modelAlias,
+  prompt,
+  promptVersion,
+  runMetric,
+  type InsertAgent,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -154,7 +154,7 @@ export const agentRouter = createTRPCRouter({
         id: agentId,
         name: input.name,
         slug: input.slug,
-        description: input.description,
+        description: input.description || null,
         visibility: input.visibility,
         status: "draft",
         createdBy: ctx.session.user.id,
@@ -537,6 +537,41 @@ export const agentRouter = createTRPCRouter({
         .limit(1);
 
       return policy || null;
+    }),
+
+  /**
+   * Get a quick setup status for the UI. Returns booleans that indicate
+   * whether the agent has a production prompt and whether a model alias is set.
+   */
+  getSetupStatus: protectedProcedure
+    .input(z.object({ agentId: z.string() }))
+    .query(async ({ input }) => {
+      // Check for a model policy with a modelAlias
+      const [policy] = await db
+        .select()
+        .from(agentModelPolicy)
+        .where(eq(agentModelPolicy.agentId, input.agentId))
+        .orderBy(desc(agentModelPolicy.effectiveFrom))
+        .limit(1);
+
+      const hasModelAlias = !!(policy && policy.modelAlias);
+
+      // Check if any prompt has a 'prod' labeled version
+      const [prodPromptVersion] = await db
+        .select()
+        .from(promptVersion)
+        .innerJoin(prompt, eq(prompt.id, promptVersion.promptId))
+        .where(
+          and(
+            eq(promptVersion.label, "prod"),
+            eq(prompt.agentId, input.agentId)
+          )
+        )
+        .limit(1);
+
+      const hasProdPrompt = !!prodPromptVersion;
+
+      return { hasModelAlias, hasProdPrompt };
     }),
 
   /**

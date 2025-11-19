@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PromptVersion } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { Edit, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -22,10 +22,11 @@ import { EditPromptVersionDialog } from "./edit-prompt-version-dialog";
 
 interface PromptVersionsListProps {
   promptId: string;
+  agentId?: string;
   onCreateNew: () => void;
 }
 
-export function PromptVersionsList({ promptId, onCreateNew }: PromptVersionsListProps) {
+export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVersionsListProps) {
   const trpc = useTRPC();
   const [editingVersion, setEditingVersion] = useState<PromptVersion | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -34,11 +35,18 @@ export function PromptVersionsList({ promptId, onCreateNew }: PromptVersionsList
     trpc.prompt.getVersions.queryOptions({ promptId })
   );
 
+  const queryClient = useQueryClient();
+
   const deleteVersionMutation = useMutation(
     trpc.prompt.deleteVersion.mutationOptions({
       onSuccess: () => {
         toast.success("Prompt version deleted successfully");
         refetchVersions();
+        // Also invalidate prompt list for the agent to maintain consistent UI
+        if (agentId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+        }
       },
       onError: (error) => {
         toast.error(`Failed to delete version: ${error.message}`);
@@ -204,7 +212,11 @@ export function PromptVersionsList({ promptId, onCreateNew }: PromptVersionsList
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         version={editingVersion}
-        onSuccess={refetchVersions}
+        agentId={agentId}
+        onSuccess={() => {
+          refetchVersions();
+          if (agentId) queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+        }}
       />
     </>
   );

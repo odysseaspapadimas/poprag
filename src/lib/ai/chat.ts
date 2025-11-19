@@ -6,7 +6,6 @@
 import { db } from "@/db";
 import {
   agent,
-  agentIndexPin,
   agentModelPolicy,
   modelAlias,
   prompt,
@@ -14,14 +13,23 @@ import {
   runMetric,
   transcript,
 } from "@/db/schema";
-import { findRelevantContent } from "@/lib/ai/embedding";
-import { createModel } from "@/lib/ai/models";
+import {
+  findRelevantContent,
+  searchDocumentChunksFTS,
+} from "@/lib/ai/embedding";
+import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 import type { UIMessage } from "ai";
-import { convertToModelMessages, generateObject, stepCountIs, streamText, tool, type LanguageModel } from "ai";
+import {
+  convertToModelMessages,
+  generateObject,
+  streamText,
+  type LanguageModel,
+} from "ai";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import z from "zod";
+import { reciprocalRankFusion } from "../utils";
 
 export interface ChatRequest {
   agentSlug: string;
@@ -65,18 +73,24 @@ User message: ${query}`;
       model,
       prompt: promptText,
       schema: z.object({
-        queries: z.array(z.string()).describe(
-          "Similar queries to the user's query. Be concise but comprehensive."
-        ),
-        keywords: z.array(z.string()).describe(
-          "Keywords from the query to use for full-text search"
-        ),
+        queries: z
+          .array(z.string())
+          .describe(
+            "Similar queries to the user's query. Be concise but comprehensive."
+          ),
+        keywords: z
+          .array(z.string())
+          .describe("Keywords from the query to use for full-text search"),
       }),
     });
 
     console.log(`[Query Rewriting] Original: "${query.substring(0, 50)}..."`);
-    console.log(`[Query Rewriting] Generated ${result.object.queries.length} query variations`);
-    console.log(`[Query Rewriting] Extracted ${result.object.keywords.length} keywords`);
+    console.log(
+      `[Query Rewriting] Generated ${result.object.queries.length} query variations`
+    );
+    console.log(
+      `[Query Rewriting] Extracted ${result.object.keywords.length} keywords`
+    );
 
     return result.object;
   } catch (error) {
@@ -167,16 +181,15 @@ export async function handleChatRequest(
       mergedVariables
     );
 
-    // 5. RAG retrieval - proactive context loading with query rewriting
+    // 5. RAG retrieval with hybrid search (vector + FTS)
     let ragContext;
-    let rewrittenQueries: string[] = [];
-    let extractedKeywords: string[] = [];
-    
+
     const ragEnabled = Boolean(
-      request.rag || 
-      (Array.isArray(policy.enabledTools) && policy.enabledTools.includes("retrieval"))
+      request.rag ||
+        (Array.isArray(policy.enabledTools) &&
+          policy.enabledTools.includes("retrieval"))
     );
-    
+
     console.log(
       "[Chat] RAG config - request.rag:",
       request.rag,
@@ -185,132 +198,115 @@ export async function handleChatRequest(
       "ragEnabled:",
       ragEnabled
     );
-    
-    // Always attempt retrieval if policy enables it OR if explicitly requested
+
     if (ragEnabled) {
-      const [indexPin] = await db
-        .select()
-        .from(agentIndexPin)
-        .where(eq(agentIndexPin.agentId, agentData.id))
-        .limit(1);
+      // Extract query from request or use last user message
+      const lastUserMessage = request.messages[request.messages.length - 1];
+      const userQuery =
+        request.rag?.query ||
+        (lastUserMessage?.parts.find((p) => p.type === "text")
+          ?.text as string) ||
+        "";
 
-      if (indexPin) {
-        // Extract query from request or use last user message
-        const lastUserMessage = request.messages[request.messages.length - 1];
-        const query =
-          request.rag?.query ||
-          (lastUserMessage?.parts.find((p) => p.type === "text")?.text as string) ||
-          "";
-          
-        if (query && query.trim().length > 0) {
-          console.log(`[Chat] Performing initial RAG retrieval for: "${query.substring(0, 100)}..."`);
-          
-          // Optional: Use query rewriting for improved retrieval
-          // Create a temporary model for query rewriting (lightweight model)
-          const tempModelConfig = {
-            alias: "gpt-4o-mini",
-            provider: "openai" as const,
-            modelId: "gpt-4o-mini",
-          };
-          const tempModel = createModel(tempModelConfig, options?.env);
-          
-          // Rewrite query into multiple variations
-          const { queries, keywords } = await rewriteQuery(tempModel, query);
-          rewrittenQueries = queries;
-          extractedKeywords = keywords;
-          
-          // Perform retrieval for ALL query variations and merge results
-          const retrievalPromises = queries.map(q => 
-            findRelevantContent(q, agentData.id, {
-              topK: Math.ceil((request.rag?.topK || 6) / queries.length), // Distribute topK across queries
-              indexVersion: indexPin.indexVersion,
-              minSimilarity: 0.3, // Lower threshold for initial context
-              keywords: extractedKeywords,
-              useHybridSearch: true,
-            })
-          );
-          
-          const retrievalResults = await Promise.all(retrievalPromises);
-          
-          // Merge and deduplicate results from all queries
-          const allMatches = retrievalResults.flatMap(r => r.matches);
-          
-          // Use reciprocal rank fusion to merge results
-          const { reciprocalRankFusion } = await import("@/lib/utils");
-          const fusedResults = reciprocalRankFusion(
-            retrievalResults.map(r => r.matches),
-            60 // k constant
-          );
-          
-          // Take top K after fusion
-          const topMatches = fusedResults.slice(0, request.rag?.topK || 6);
+      if (userQuery && userQuery.trim().length > 0) {
+        console.log(
+          `[Chat] Performing hybrid RAG search for: "${userQuery.substring(
+            0,
+            100
+          )}..."`
+        );
 
-          if (topMatches.length > 0) {
-            console.log(`[Chat] Initial RAG retrieved ${topMatches.length} chunks after query rewriting and fusion`);
-            console.log(`[Chat] Query variations used: ${rewrittenQueries.length}, Keywords: ${extractedKeywords.join(", ")}`);
-            console.log(`[Chat] Score range: ${topMatches[0].score.toFixed(3)} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`);
-            
-            ragContext = {
-              chunks: topMatches.map((match) => ({
-                content: String(match.content), // Ensure content is string
-                sourceId: (match.metadata?.sourceId as string) || match.id,
-                score: match.score,
-                metadata: match.metadata,
-              })),
-            };
-          } else {
-            console.log(`[Chat] Initial RAG found no relevant chunks for query: "${query.substring(0, 50)}..."`);
+        // Step 1: Rewrite query into multiple variations
+        const { queries, keywords } = await rewriteQuery(
+          createModel({
+            alias: "@cf/meta/llama-3.1-8b-instruct-fast",
+            provider: "workers-ai",
+            modelId: "@cf/meta/llama-3.1-8b-instruct-fast",
+          }),
+          userQuery
+        );
+
+        console.log(
+          `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`
+        );
+
+        // Step 2: Perform vector search for all query variations
+        const vectorSearchPromises = queries.map((q) =>
+          findRelevantContent(q, agentData.id, {
+            topK: 5,
+            minSimilarity: 0.3,
+          })
+        );
+
+        // Step 3: Perform FTS search for keywords
+        const ftsResults = await searchDocumentChunksFTS(
+          keywords,
+          agentData.id,
+          {
+            limit: 5,
           }
+        );
+
+        const [vectorResults] = await Promise.all([
+          Promise.all(vectorSearchPromises),
+        ]);
+
+        console.log(
+          `[Chat] Vector search: ${vectorResults.reduce(
+            (sum, r) => sum + r.matches.length,
+            0
+          )} results`
+        );
+        console.log(`[Chat] FTS search: ${ftsResults.length} results`);
+
+        // Step 4: Apply reciprocal rank fusion to merge vector and FTS results
+
+        // Convert FTS results to match format
+        const ftsMatches = ftsResults.map((r, idx) => ({
+          id: r.id,
+          content: r.text,
+          score: -r.rank, // FTS rank is negative, convert to positive score
+          metadata: {},
+        }));
+
+        // Merge all result sets
+        const allResultSets = [
+          ...vectorResults.map((r) => r.matches),
+          ftsMatches,
+        ];
+
+        const fusedResults = reciprocalRankFusion(allResultSets, 60);
+        const topMatches = fusedResults.slice(0, request.rag?.topK || 6);
+
+        if (topMatches.length > 0) {
+          console.log(
+            `[Chat] Hybrid search retrieved ${topMatches.length} chunks after RRF fusion`
+          );
+          console.log(
+            `[Chat] Score range: ${topMatches[0].score.toFixed(
+              3
+            )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`
+          );
+
+          ragContext = {
+            chunks: topMatches.map((match) => ({
+              content: String(match.content),
+              sourceId: (match.metadata as any)?.sourceId || match.id,
+              score: match.score,
+              metadata: match.metadata,
+            })),
+          };
         } else {
-          console.log("[Chat] No valid query for initial RAG retrieval");
+          console.log(`[Chat] Hybrid search found no relevant chunks`);
         }
-      } else {
-        console.log("[Chat] No index pin found for agent - RAG disabled");
       }
-    } else {
-      console.log("[Chat] RAG not enabled for this request");
     }
 
-    // 6. Build final system prompt with RAG context and tool instructions
+    // 6. Build final system prompt with RAG context
     let systemPrompt = basePrompt;
-    
-    // Add tool usage instruction FIRST before any context
-    systemPrompt += `
 
-## Available Tools
-You have access to a "getInformation" tool that searches your knowledge base using advanced semantic search.
-
-**CRITICAL INSTRUCTION**: For ANY question about:
-- Implementation plans, timelines, or project details
-- Technical specifications or architecture
-- Factual information about the project
-- Code examples or documentation
-
-You MUST use the "getInformation" tool FIRST before responding. Do not rely solely on the context provided below or your training data. Always verify with the knowledge base.
-
-## How to Use the Tool
-1. Extract the user's main question or query (be specific)
-2. Call getInformation with that question
-3. The tool will automatically:
-   - Rewrite your query into multiple variations
-   - Search using both semantic similarity and keyword matching
-   - Rank and merge results from different search methods
-4. Use the retrieved context to formulate your answer
-5. Cite sources when relevant
-
-## Initial Context
-The following context was retrieved based on the user's query${rewrittenQueries.length > 1 ? ` (using ${rewrittenQueries.length} query variations)` : ''}:`;
-
-    // Add initial RAG context if available (this is from initial retrieval with query rewriting)
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
-      systemPrompt += `
-
-**Note**: This initial context is based on query expansion and hybrid search. If you need more specific information, use the getInformation tool with a focused query.`;
-    } else {
-      systemPrompt += `
-
-No initial context was found. Use the getInformation tool to search the knowledge base.`;
     }
 
     // 7. Create model instance
@@ -330,9 +326,8 @@ No initial context was found. Use the getInformation tool to search the knowledg
 
       modelConfig = {
         alias: aliasRecord.alias,
-        provider: aliasRecord.provider as any,
+        provider: aliasRecord.provider as ProviderType,
         modelId: aliasRecord.modelId,
-        gatewayRoute: aliasRecord.gatewayRoute || undefined,
       };
     } else {
       // Fallback - use policy.modelAlias if present
@@ -343,102 +338,15 @@ No initial context was found. Use the getInformation tool to search the knowledg
       };
     }
 
-    const model = createModel(modelConfig, options?.env);
+    const model = createModel(modelConfig);
 
     // 8. Stream response
     const result = streamText({
       model,
       system: systemPrompt,
       messages: convertToModelMessages(request.messages),
-      stopWhen: stepCountIs(5),
       temperature: policy.temperature || 0.7,
       topP: policy.topP || 1,
-      tools: {
-        getInformation: tool({
-          description: `Search your knowledge base using advanced contextual RAG. This tool:
-1. Rewrites your query into multiple variations for better coverage
-2. Performs hybrid search (semantic + keyword matching)
-3. Merges and ranks results using reciprocal rank fusion
-Use this EVERY TIME before answering questions about project-specific information.`,
-          inputSchema: z.object({
-            question: z.string().describe("The user's question or the specific information you need to retrieve from the knowledge base"),
-          }),
-          execute: async ({ question }) => {
-            console.log(`[RAG Tool] Searching knowledge base for: "${question}"`);
-            
-            // Rewrite query for better retrieval
-            const { queries, keywords } = await rewriteQuery(model, question);
-            console.log(`[RAG Tool] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`);
-            
-            // Perform retrieval for all query variations
-            const retrievalPromises = queries.map(q => 
-              findRelevantContent(q, agentData.id, {
-                topK: Math.ceil(6 / queries.length), // Distribute topK
-                keywords: keywords,
-                useHybridSearch: true,
-              })
-            );
-            
-            const retrievalResults = await Promise.all(retrievalPromises);
-            
-            // Merge results using reciprocal rank fusion
-            const { reciprocalRankFusion } = await import("@/lib/utils");
-            const fusedResults = reciprocalRankFusion(
-              retrievalResults.map(r => r.matches),
-              60
-            );
-            
-            const topMatches = fusedResults.slice(0, 6);
-            
-            console.log(`[RAG Tool] Found ${topMatches.length} results after fusion`);
-            
-            if (topMatches.length === 0) {
-              return {
-                status: "no_results",
-                message: "No relevant information found in the knowledge base for this query. The knowledge base may need to be updated with relevant content.",
-                query: question,
-                queryVariations: queries,
-                keywords: keywords,
-              };
-            }
-            
-            // Format with clear structure for LLM consumption
-            const formattedResults = topMatches.map((match, idx) => ({
-              rank: idx + 1,
-              relevanceScore: match.score.toFixed(3),
-              content: match.content,
-              source: match.metadata?.fileName || "Unknown",
-              sourceId: match.metadata?.sourceId,
-            }));
-            
-            // Create a well-structured text response
-            const contextText = formattedResults
-              .map(r => 
-                `[Result ${r.rank} - Relevance: ${r.relevanceScore} - Source: ${r.source}]\n${r.content}`
-              )
-              .join("\n\n" + "─".repeat(80) + "\n\n");
-
-            return {
-              status: "success",
-              query: question,
-              queryVariations: queries,
-              keywords: keywords,
-              resultsFound: topMatches.length,
-              context: contextText,
-              sources: formattedResults.map(r => ({
-                source: r.source,
-                relevance: r.relevanceScore,
-              })),
-              matches: formattedResults.map(r => ({
-                content: r.content,
-                score: Number(r.relevanceScore),
-                source: r.source,
-                sourceId: r.sourceId,
-              })),
-            };
-          },
-        }),
-      },
       onFinish: async (event) => {
         const latency = Date.now() - startTime;
 
@@ -476,7 +384,10 @@ Use this EVERY TIME before answering questions about project-specific informatio
 
             const tokens = event.usage?.totalTokens ?? undefined;
             const maxPricePer1k = aliasRecord?.caps?.maxPricePer1k;
-            if (typeof tokens === "number" && typeof maxPricePer1k === "number") {
+            if (
+              typeof tokens === "number" &&
+              typeof maxPricePer1k === "number"
+            ) {
               const costDollars = (tokens / 1000) * maxPricePer1k;
               // Store microcents (1 dollar == 1_000_000 microcents)
               costMicrocents = Math.round(costDollars * 1_000_000);
@@ -496,7 +407,9 @@ Use this EVERY TIME before answering questions about project-specific informatio
             latencyMs: latency,
             createdAt: new Date(),
           });
-          console.debug(`[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`);
+          console.debug(
+            `[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`
+          );
         } catch (err) {
           console.warn("[Chat] Failed to insert run metric:", err);
         }
@@ -519,7 +432,9 @@ Use this EVERY TIME before answering questions about project-specific informatio
           errorType: error instanceof Error ? error.name : "UnknownError",
           createdAt: new Date(),
         });
-        console.debug(`[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`);
+        console.debug(
+          `[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`
+        );
       }
     } catch (err) {
       console.warn("[Chat] Failed to insert error run metric:", err);

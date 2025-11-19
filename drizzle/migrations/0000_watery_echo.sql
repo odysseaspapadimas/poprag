@@ -1,3 +1,21 @@
+CREATE TABLE `account` (
+	`id` text PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`access_token` text,
+	`refresh_token` text,
+	`id_token` text,
+	`access_token_expires_at` integer,
+	`refresh_token_expires_at` integer,
+	`scope` text,
+	`password` text,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`updated_at` integer NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `account_user_id_idx` ON `account` (`user_id`);--> statement-breakpoint
 CREATE TABLE `agent` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -59,22 +77,48 @@ CREATE TABLE `audit_log` (
 --> statement-breakpoint
 CREATE INDEX `audit_log_target_idx` ON `audit_log` (`target_type`,`target_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `audit_log_actor_idx` ON `audit_log` (`actor_id`);--> statement-breakpoint
-CREATE TABLE `chunk` (
+CREATE TABLE `document_chunks` (
 	`id` text PRIMARY KEY NOT NULL,
-	`agent_id` text NOT NULL,
 	`source_id` text NOT NULL,
 	`text` text NOT NULL,
-	`meta` text,
-	`embedding_dim` integer,
-	`index_version` integer NOT NULL,
+	`agent_id` text NOT NULL,
+	`chunk_index` integer NOT NULL,
 	`vectorize_id` text,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	FOREIGN KEY (`agent_id`) REFERENCES `agent`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`source_id`) REFERENCES `knowledge_source`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `chunk_agent_version_idx` ON `chunk` (`agent_id`,`index_version`);--> statement-breakpoint
-CREATE INDEX `chunk_source_idx` ON `chunk` (`source_id`);--> statement-breakpoint
+CREATE INDEX `document_chunks_document_idx` ON `document_chunks` (`source_id`);--> statement-breakpoint
+CREATE INDEX `document_chunks_session_idx` ON `document_chunks` (`agent_id`);--> statement-breakpoint
+CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
+    id UNINDEXED,
+    source_id UNINDEXED,
+    text,
+    agent_id UNINDEXED,
+    content = 'document_chunks'
+);
+--> statement-breakpoint
+CREATE TRIGGER document_chunks_ai
+AFTER INSERT ON document_chunks
+BEGIN
+INSERT INTO document_chunks_fts(id, source_id, text, agent_id)
+VALUES (new.id, new.source_id, new.text, new.agent_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER document_chunks_au
+AFTER UPDATE ON document_chunks
+BEGIN
+DELETE FROM document_chunks_fts WHERE id = old.id;
+INSERT INTO document_chunks_fts(id, source_id, text, agent_id)
+VALUES (new.id, new.source_id, new.text, new.agent_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER document_chunks_ad
+AFTER DELETE ON document_chunks
+BEGIN
+DELETE FROM document_chunks_fts WHERE id = old.id;
+END;
+--> statement-breakpoint
 CREATE TABLE `eval_dataset` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -95,6 +139,7 @@ CREATE TABLE `knowledge_source` (
 	`checksum` text,
 	`status` text DEFAULT 'uploaded' NOT NULL,
 	`parser_errors` text,
+	`vectorize_ids` text,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
 	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
 	FOREIGN KEY (`agent_id`) REFERENCES `agent`(`id`) ON UPDATE no action ON DELETE cascade
@@ -106,7 +151,6 @@ CREATE TABLE `model_alias` (
 	`alias` text PRIMARY KEY NOT NULL,
 	`provider` text NOT NULL,
 	`model_id` text NOT NULL,
-	`gateway_route` text,
 	`caps` text,
 	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
 );
@@ -151,6 +195,21 @@ CREATE TABLE `run_metric` (
 );
 --> statement-breakpoint
 CREATE INDEX `run_metric_agent_idx` ON `run_metric` (`agent_id`,`created_at`);--> statement-breakpoint
+CREATE TABLE `session` (
+	`id` text PRIMARY KEY NOT NULL,
+	`expires_at` integer NOT NULL,
+	`token` text NOT NULL,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`updated_at` integer NOT NULL,
+	`ip_address` text,
+	`user_agent` text,
+	`user_id` text NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `session_token_unique` ON `session` (`token`);--> statement-breakpoint
+CREATE INDEX `session_user_id_idx` ON `session` (`user_id`);--> statement-breakpoint
+CREATE INDEX `session_token_idx` ON `session` (`token`);--> statement-breakpoint
 CREATE TABLE `transcript` (
 	`id` text PRIMARY KEY NOT NULL,
 	`agent_id` text NOT NULL,
@@ -167,4 +226,27 @@ CREATE TABLE `transcript` (
 );
 --> statement-breakpoint
 CREATE INDEX `transcript_agent_idx` ON `transcript` (`agent_id`);--> statement-breakpoint
-CREATE INDEX `transcript_conversation_idx` ON `transcript` (`conversation_id`);
+CREATE INDEX `transcript_conversation_idx` ON `transcript` (`conversation_id`);--> statement-breakpoint
+CREATE TABLE `user` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`email` text NOT NULL,
+	`email_verified` integer DEFAULT false NOT NULL,
+	`image` text,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`is_admin` integer DEFAULT false
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `user_email_unique` ON `user` (`email`);--> statement-breakpoint
+CREATE INDEX `user_email_idx` ON `user` (`email`);--> statement-breakpoint
+CREATE TABLE `verification` (
+	`id` text PRIMARY KEY NOT NULL,
+	`identifier` text NOT NULL,
+	`value` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `verification_identifier_idx` ON `verification` (`identifier`);

@@ -25,11 +25,11 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
   );
 
   const [formState, setFormState] = useState(() => ({
-    modelAlias: policy.modelAlias,
-    temperature: policy.temperature,
-    topP: policy.topP,
-    maxTokens: policy.maxTokens,
-    retrievalEnabled: Array.isArray(policy.enabledTools) && policy.enabledTools.includes("retrieval"),
+    modelAlias: policy?.modelAlias,
+    temperature: policy?.temperature,
+    topP: policy?.topP,
+    maxTokens: policy?.maxTokens,
+    retrievalEnabled: Array.isArray(policy?.enabledTools) && policy?.enabledTools.includes("retrieval"),
   }));
 
   useEffect(() => {

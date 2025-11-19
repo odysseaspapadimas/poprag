@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { PromptVersion } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +22,7 @@ interface EditPromptVersionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   version: PromptVersion | null;
+  agentId?: string;
   onSuccess: () => void;
 }
 
@@ -29,11 +30,14 @@ export function EditPromptVersionDialog({
   open,
   onOpenChange,
   version,
+  agentId,
   onSuccess,
 }: EditPromptVersionDialogProps) {
   const trpc = useTRPC();
   const [content, setContent] = useState("");
   const [changelog, setChangelog] = useState("");
+
+  const queryClient = useQueryClient();
 
   const updateVersionMutation = useMutation(
     trpc.prompt.updateVersion.mutationOptions({
@@ -42,6 +46,13 @@ export function EditPromptVersionDialog({
         onSuccess();
         onOpenChange(false);
         resetForm();
+        if (version?.promptId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId: version.promptId }) });
+        }
+        if (agentId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+        }
       },
       onError: (error) => {
         toast.error(`Failed to update version: ${error.message}`);

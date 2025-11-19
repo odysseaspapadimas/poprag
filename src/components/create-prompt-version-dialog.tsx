@@ -13,8 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import type { Prompt } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 interface CreatePromptVersionDialogProps {
@@ -38,12 +38,20 @@ export function CreatePromptVersionDialog({
   const [changelog, setChangelog] = useState("");
   const [label, setLabel] = useState<"dev" | "staging" | "prod" | "none">("none");
 
+  const queryClient = useQueryClient();
+
   const createVersionMutation = useMutation(
     trpc.prompt.createVersion.mutationOptions({
       onSuccess: () => {
         toast.success("Prompt version created successfully");
         onSuccess();
         resetForm();
+        // invalidate versions and prompt list for agent
+        if (selectedPromptId) {
+          queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId: selectedPromptId }) });
+        }
+        queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+        queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
       },
       onError: (error) => {
         toast.error(`Failed to create version: ${error.message}`);
@@ -57,6 +65,13 @@ export function CreatePromptVersionDialog({
     setChangelog("");
     setLabel("none");
   };
+
+  // Auto-select prompt if there's only one available
+  useEffect(() => {
+    if (open && prompts?.length === 1) {
+      setSelectedPromptId(prompts[0].id);
+    }
+  }, [open, prompts]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

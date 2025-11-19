@@ -177,7 +177,6 @@ export function Chat({ agentId }: ChatProps) {
   const [input, setInput] = useState("");
 
   const Layout = messages.length ? ChattingLayout : InitialLayout;
-  console.log(messages)
 
   return (
     <div className="relative flex flex-col h-full">
