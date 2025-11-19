@@ -7,7 +7,6 @@ import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { VectorizeDiagnostics } from "@/components/vectorize-diagnostics";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -347,10 +346,6 @@ function AgentDetailPage() {
                   </p>
                 )}
               </div>
-              <section>
-                <h2>RAG Diagnostics</h2>
-                <VectorizeDiagnostics agentId={agentId} />
-              </section>
             </div>
           )}
 

@@ -109,6 +109,7 @@ export const columns: ColumnDef<Agent>[] = [
   {
     id: "actions",
     enableHiding: false,
+    header: "Actions",
     cell: ({ row }) => {
       const agent = row.original;
 

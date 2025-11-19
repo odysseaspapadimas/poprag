@@ -40,17 +40,12 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
           const body = await request.json();
           const validated = chatRequestSchema.parse(body);
 
-          // Get environment variables
-          const env = {
-            OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-            OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-            CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
-          };
-
           // Handle chat request
-          const result = await handleChatRequest({ agentSlug: params.agentSlug, ...validated }, { env });
+          const result = await handleChatRequest({
+            agentSlug: params.agentSlug,
+            ...validated,
+          });
 
-          // Return streaming response
           return result.toUIMessageStreamResponse();
         } catch (error) {
           console.error("Chat API error:", error);

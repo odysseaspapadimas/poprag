@@ -179,4 +179,47 @@ export const modelRouter = createTRPCRouter({
       await db.delete(modelAlias).where(eq(modelAlias.alias, input.alias));
       return { success: true };
     }),
+
+  update: adminProcedure
+    .input(
+      z.object({
+        alias: z.string().min(1).max(100),
+        newAlias: z.string().min(1).max(100).optional(),
+        provider: z.enum(["openai", "openrouter", "huggingface", "workers-ai"]).optional(),
+        modelId: z.string().optional(),
+        caps: z
+          .object({
+            maxTokens: z.number().optional(),
+            maxPricePer1k: z.number().optional(),
+            streaming: z.boolean().optional(),
+            contextLength: z.number().optional(),
+          })
+          .optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { alias, newAlias, ...updates } = input;
+
+      // If changing alias, check if new alias exists
+      if (newAlias && newAlias !== alias) {
+        const [existing] = await db
+          .select()
+          .from(modelAlias)
+          .where(eq(modelAlias.alias, newAlias))
+          .limit(1);
+        if (existing) {
+          throw new Error("Model alias already exists");
+        }
+      }
+
+      // Update
+      await db.update(modelAlias)
+        .set({
+          ...(newAlias && { alias: newAlias }),
+          ...updates,
+        })
+        .where(eq(modelAlias.alias, alias));
+
+      return { success: true };
+    }),
 });

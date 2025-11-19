@@ -106,10 +106,7 @@ User message: ${query}`;
 /**
  * Handle chat request with RAG
  */
-export async function handleChatRequest(
-  request: ChatRequest,
-  options?: ChatOptions
-) {
+export async function handleChatRequest(request: ChatRequest) {
   const runId = nanoid();
   const startTime = Date.now();
 

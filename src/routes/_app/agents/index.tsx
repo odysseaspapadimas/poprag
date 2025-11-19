@@ -1,7 +1,7 @@
-import { CreateAgentDialog } from "@/components/create-agent-dialog";
+import { CreateAgentForm } from "@/components/create-agent-form";
+import { PageHeaderWithDialog } from "@/components/page-header-with-dialog";
 import { columns } from "@/components/tables/columns";
 import { DataTable } from "@/components/tables/data-table";
-import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -26,15 +26,15 @@ function AgentsPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Agents</h1>
-          <p className="text-muted-foreground mt-2">
-            Manage your AI agents and their knowledge bases
-          </p>
-        </div>
-        <CreateAgentDialog trigger={<Button>Create Agent</Button>} />
-      </div>
+      <PageHeaderWithDialog
+        title="Agents"
+        description="Manage your AI agents and their knowledge bases"
+        buttonText="Create Agent"
+        dialogTitle="Create New Agent"
+        dialogDescription="Create a new AI agent with a custom knowledge base. The slug will be used in the agent's URL."
+      >
+        <CreateAgentForm />
+      </PageHeaderWithDialog>
       <DataTable columns={columns} data={agents} />
     </div>
   );
