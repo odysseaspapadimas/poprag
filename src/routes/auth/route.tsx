@@ -1,13 +1,6 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/auth")({
-  beforeLoad: ({ context: { session } }) => {
-    if (session?.user) {
-      throw redirect({
-        to: "/",
-      });
-    }
-  },
   component: RouteComponent,
 });
 

@@ -9,8 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as AuthRouteRouteImport } from './routes/auth/route'
+import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
@@ -25,19 +25,19 @@ import { Route as AppAgentsAgentIdRouteRouteImport } from './routes/_app/agents/
 import { Route as AppAgentsAgentIdIndexRouteImport } from './routes/_app/agents/$agentId/index'
 import { Route as AppAgentsAgentIdChatRouteImport } from './routes/_app/agents/$agentId/chat'
 
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/auth',
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRouteRoute = AppRouteRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AuthSignUpRoute = AuthSignUpRouteImport.update({
   id: '/sign-up',
@@ -52,17 +52,17 @@ const AuthSignInRoute = AuthSignInRouteImport.update({
 const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
   path: '/users',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AppModelsIndexRoute = AppModelsIndexRouteImport.update({
   id: '/models/',
   path: '/models/',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
   id: '/agents/',
   path: '/agents/',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const ApiUploadKnowledgeSplatRoute = ApiUploadKnowledgeSplatRouteImport.update({
   id: '/api/upload-knowledge/$',
@@ -87,7 +87,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 const AppAgentsAgentIdRouteRoute = AppAgentsAgentIdRouteRouteImport.update({
   id: '/agents/$agentId',
   path: '/agents/$agentId',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AppAgentsAgentIdIndexRoute = AppAgentsAgentIdIndexRouteImport.update({
   id: '/',
@@ -133,8 +133,8 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/_app': typeof AppRouteRouteWithChildren
   '/auth': typeof AuthRouteRouteWithChildren
-  '/_app': typeof AppRouteWithChildren
   '/_app/users': typeof AppUsersRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
@@ -183,8 +183,8 @@ export interface FileRouteTypes {
     | '/agents/$agentId'
   id:
     | '__root__'
-    | '/auth'
     | '/_app'
+    | '/auth'
     | '/_app/users'
     | '/auth/sign-in'
     | '/auth/sign-up'
@@ -201,8 +201,8 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  AppRouteRoute: typeof AppRouteRouteWithChildren
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
-  AppRoute: typeof AppRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatAgentSlugRoute: typeof ApiChatAgentSlugRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -211,13 +211,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: ''
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -225,12 +218,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: ''
+      preLoaderRoute: typeof AppRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/': {
       id: '/_app/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppRouteRoute
     }
     '/auth/sign-up': {
       id: '/auth/sign-up'
@@ -251,21 +251,21 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/users'
       preLoaderRoute: typeof AppUsersRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppRouteRoute
     }
     '/_app/models/': {
       id: '/_app/models/'
       path: '/models'
       fullPath: '/models'
       preLoaderRoute: typeof AppModelsIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppRouteRoute
     }
     '/_app/agents/': {
       id: '/_app/agents/'
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AppAgentsIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppRouteRoute
     }
     '/api/upload-knowledge/$': {
       id: '/api/upload-knowledge/$'
@@ -300,7 +300,7 @@ declare module '@tanstack/react-router' {
       path: '/agents/$agentId'
       fullPath: '/agents/$agentId'
       preLoaderRoute: typeof AppAgentsAgentIdRouteRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppRouteRoute
     }
     '/_app/agents/$agentId/': {
       id: '/_app/agents/$agentId/'
@@ -319,20 +319,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface AuthRouteRouteChildren {
-  AuthSignInRoute: typeof AuthSignInRoute
-  AuthSignUpRoute: typeof AuthSignUpRoute
-}
-
-const AuthRouteRouteChildren: AuthRouteRouteChildren = {
-  AuthSignInRoute: AuthSignInRoute,
-  AuthSignUpRoute: AuthSignUpRoute,
-}
-
-const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
-  AuthRouteRouteChildren,
-)
-
 interface AppAgentsAgentIdRouteRouteChildren {
   AppAgentsAgentIdChatRoute: typeof AppAgentsAgentIdChatRoute
   AppAgentsAgentIdIndexRoute: typeof AppAgentsAgentIdIndexRoute
@@ -348,7 +334,7 @@ const AppAgentsAgentIdRouteRouteWithChildren =
     AppAgentsAgentIdRouteRouteChildren,
   )
 
-interface AppRouteChildren {
+interface AppRouteRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
   AppAgentsAgentIdRouteRoute: typeof AppAgentsAgentIdRouteRouteWithChildren
@@ -356,7 +342,7 @@ interface AppRouteChildren {
   AppModelsIndexRoute: typeof AppModelsIndexRoute
 }
 
-const AppRouteChildren: AppRouteChildren = {
+const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
   AppAgentsAgentIdRouteRoute: AppAgentsAgentIdRouteRouteWithChildren,
@@ -364,11 +350,27 @@ const AppRouteChildren: AppRouteChildren = {
   AppModelsIndexRoute: AppModelsIndexRoute,
 }
 
-const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
+  AppRouteRouteChildren,
+)
+
+interface AuthRouteRouteChildren {
+  AuthSignInRoute: typeof AuthSignInRoute
+  AuthSignUpRoute: typeof AuthSignUpRoute
+}
+
+const AuthRouteRouteChildren: AuthRouteRouteChildren = {
+  AuthSignInRoute: AuthSignInRoute,
+  AuthSignUpRoute: AuthSignUpRoute,
+}
+
+const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
+  AuthRouteRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
+  AppRouteRoute: AppRouteRouteWithChildren,
   AuthRouteRoute: AuthRouteRouteWithChildren,
-  AppRoute: AppRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatAgentSlugRoute: ApiChatAgentSlugRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

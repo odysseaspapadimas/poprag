@@ -1,7 +1,4 @@
-import {
-  ChevronsUpDown,
-  LogOut
-} from "lucide-react";
+import { ChevronsUpDown, LogOut } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -10,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   SidebarMenu,
@@ -20,7 +17,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation } from "@tanstack/react-query";
-import { useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 
 export function NavUser({
   user,
@@ -33,12 +30,15 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar();
   const trpc = useTRPC();
+  const navigate = useNavigate();
   const router = useRouter();
 
   const logoutMutation = useMutation(
     trpc.auth.logout.mutationOptions({
-      onSuccess: () => {
-        router.invalidate();
+      onSuccess: async () => {
+        await router.invalidate();
+        
+        navigate({ to: "/auth/sign-in" });
       },
     })
   );
