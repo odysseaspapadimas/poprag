@@ -1,21 +1,41 @@
-import { QueryCache, QueryClient } from '@tanstack/react-query'
-import { createTRPCClient, httpBatchLink, httpBatchStreamLink, loggerLink, splitLink, type TRPCClientErrorLike } from '@trpc/client'
-import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query'
-import superjson from 'superjson'
+import { QueryCache, QueryClient } from "@tanstack/react-query";
+import {
+  createTRPCClient,
+  httpBatchLink,
+  httpBatchStreamLink,
+  loggerLink,
+  splitLink,
+  type TRPCClientErrorLike,
+} from "@trpc/client";
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import superjson from "superjson";
 
-import type { AppRouter } from '@/integrations/trpc/router'
+import type { AppRouter } from "@/integrations/trpc/router";
 
-import { TRPCProvider } from '@/integrations/trpc/react'
-import { createIsomorphicFn } from '@tanstack/react-start'
-import { getRequestHeaders } from '@tanstack/react-start/server'
+import { TRPCProvider } from "@/integrations/trpc/react";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
 
 function getUrl() {
-  const base = (() => {
-    if (typeof window !== 'undefined') return ''
-    return `http://localhost:${process.env.PORT ?? 3000}`
-  })()
-  return `${base}/api/trpc`
+  if (typeof window !== "undefined") {
+    // Client-side: always use relative URL
+    return "/api/trpc";
+  }
+
+  // Server-side: use relative URL in production/Workers, absolute in local dev
+  // In Cloudflare Workers, relative URLs work for internal fetch
+  // In local dev with Vite, we need absolute localhost URL
+  const isDev = process.env.NODE_ENV === "development";
+
+  if (isDev) {
+    // Local development: Vite dev server on port 3000
+    return "http://localhost:3000/api/trpc";
+  }
+
+  // Production/Cloudflare Workers: use relative URL for same-worker routing
+  return "/api/trpc";
 }
+
 const headers = createIsomorphicFn()
   .client(() => ({}))
   .server(() => getRequestHeaders());
@@ -87,31 +107,29 @@ export const createServerHelpers = ({
   return serverHelpers;
 };
 
-
-
 export function getContext() {
   const queryClient = createQueryClient();
 
   const serverHelpers = createTRPCOptionsProxy({
     client: trpcClient,
     queryClient: queryClient,
-  })
+  });
   return {
     queryClient,
     trpc: serverHelpers,
-  }
+  };
 }
 
 export function Provider({
   children,
   queryClient,
 }: {
-  children: React.ReactNode
-  queryClient: QueryClient
+  children: React.ReactNode;
+  queryClient: QueryClient;
 }) {
   return (
     <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
       {children}
     </TRPCProvider>
-  )
+  );
 }
