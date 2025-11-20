@@ -1,17 +1,17 @@
-import { db } from "@/db";
-import {
-	documentChunks,
-	type InsertKnowledgeSource,
-	knowledgeSource,
-} from "@/db/schema";
 import type { TextSplitter } from "@langchain/textsplitters";
 import {
-	MarkdownTextSplitter,
-	RecursiveCharacterTextSplitter,
+  MarkdownTextSplitter,
+  RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { extractText, getDocumentProxy } from "unpdf";
+import { db } from "@/db";
+import {
+  documentChunks,
+  type InsertKnowledgeSource,
+  knowledgeSource,
+} from "@/db/schema";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -255,7 +255,9 @@ export async function processKnowledgeSource(
       const embeddingBatch: number[][] = embeddingResult.data;
       const embeddingTime = Date.now() - startTime;
 
-      console.log(`Batch ${batchIdx + 1} embedding took ${embeddingTime}ms for ${batch.length} chunks`);
+      console.log(
+        `Batch ${batchIdx + 1} embedding took ${embeddingTime}ms for ${batch.length} chunks`,
+      );
 
       // Insert chunks into database FIRST to get the IDs
       const chunkInsertResults = await db
@@ -295,7 +297,9 @@ export async function processKnowledgeSource(
       );
       const vectorizeTime = Date.now() - vectorizeStartTime;
 
-      console.log(`Batch ${batchIdx + 1} vectorize insert took ${vectorizeTime}ms`);
+      console.log(
+        `Batch ${batchIdx + 1} vectorize insert took ${vectorizeTime}ms`,
+      );
 
       processedChunks += batch.length;
       const progressPercent = ((batchIdx + 1) / chunkBatches.length) * 100;

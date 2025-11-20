@@ -1,3 +1,6 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,9 +13,6 @@ import {
 import { FileUpload } from "@/components/ui/file-upload";
 import { Progress } from "@/components/ui/progress";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
 
 interface KnowledgeUploadDialogProps {
   agentId: string;
@@ -80,7 +80,9 @@ export function KnowledgeUploadDialog({
 
         if (!uploadResponse.ok) {
           const errorText = await uploadResponse.text();
-          throw new Error(`Upload failed: ${uploadResponse.statusText}${errorText ? ` - ${errorText}` : ""}`);
+          throw new Error(
+            `Upload failed: ${uploadResponse.statusText}${errorText ? ` - ${errorText}` : ""}`,
+          );
         }
 
         setUploadProgress({
@@ -102,7 +104,8 @@ export function KnowledgeUploadDialog({
 
         // Step 4: Trigger indexing with direct content for small files (< 1MB)
         // This avoids the R2 download round-trip for better performance
-        if (file.size < 1024 * 1024) { // 1MB threshold
+        if (file.size < 1024 * 1024) {
+          // 1MB threshold
           // Read file content directly
           let content: string | ArrayBuffer;
           if (file.type === "application/pdf") {
@@ -114,7 +117,8 @@ export function KnowledgeUploadDialog({
           await uploadIndex.mutateAsync({
             sourceId: uploadResult.sourceId,
             content: typeof content === "string" ? content : undefined,
-            contentBuffer: content instanceof ArrayBuffer ? Buffer.from(content) : undefined,
+            contentBuffer:
+              content instanceof ArrayBuffer ? Buffer.from(content) : undefined,
           });
         } else {
           // For larger files, use the standard R2 download approach
@@ -133,7 +137,7 @@ export function KnowledgeUploadDialog({
       } catch (error) {
         console.error("Upload failed:", error);
         setUploadProgress(null);
-        
+
         // Mark the upload as failed in the database
         if (sourceId) {
           try {
@@ -145,7 +149,7 @@ export function KnowledgeUploadDialog({
             console.error("Failed to mark upload as failed:", markError);
           }
         }
-        
+
         toast.error(error instanceof Error ? error.message : "Upload failed");
         throw error;
       }
@@ -160,7 +164,11 @@ export function KnowledgeUploadDialog({
     setOpen(false);
   };
 
-  const isUploading = uploadStart.isPending || uploadConfirm.isPending || uploadIndex.isPending || uploadProgress !== null;
+  const isUploading =
+    uploadStart.isPending ||
+    uploadConfirm.isPending ||
+    uploadIndex.isPending ||
+    uploadProgress !== null;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>

@@ -1,3 +1,4 @@
+import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
@@ -9,7 +10,6 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -162,21 +162,18 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     trpc.agent.get.queryOptions({ id: agentId }),
   );
 
-  if (!agent) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold">Agent not found</h1>
-        <p className="text-muted-foreground mt-2">
-          The agent could not be found. Please check the agent id or contact
-          your workspace admin.
-        </p>
-      </div>
-    );
-  }
+  const { data: setupStatus } = useSuspenseQuery(
+    trpc.agent.getSetupStatus.queryOptions({ agentId }),
+  );
+
+  const isFullySetUp =
+    setupStatus?.hasModelAlias &&
+    setupStatus?.hasProdPrompt &&
+    setupStatus?.isActive;
 
   const { messages, sendMessage } = useChat({
     transport: new DefaultChatTransport({
-      api: `/api/chat/${agent.slug}`,
+      api: `/api/chat/${agent?.slug}`,
       body: {
         // Always enable RAG for better results
         rag: {
@@ -190,6 +187,18 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   });
   const [input, setInput] = useState("");
 
+  if (!agent) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold">Agent not found</h1>
+        <p className="text-muted-foreground mt-2">
+          The agent could not be found. Please check the agent id or contact
+          your workspace admin.
+        </p>
+      </div>
+    );
+  }
+
   const Layout = messages.length ? ChattingLayout : InitialLayout;
 
   return (
@@ -198,44 +207,59 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
         <Messages messages={messages} />
 
         <Layout>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage({ text: input });
-              setInput("");
-            }}
-          >
-            <div className="relative max-w-xl mx-auto">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Type something..."
-                className="w-full rounded-lg border border-primary/20 bg-card/50 pl-4 pr-12 py-3 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent resize-none overflow-hidden shadow-lg"
-                rows={1}
-                style={{ minHeight: "44px", maxHeight: "200px" }}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  target.style.height = "auto";
-                  target.style.height =
-                    Math.min(target.scrollHeight, 200) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage({ text: input });
-                    setInput("");
-                  }
-                }}
-              />
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-primary hover:text-primary/80 disabled:text-muted-foreground transition-colors focus:outline-none"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+          {isFullySetUp ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendMessage({ text: input });
+                setInput("");
+              }}
+            >
+              <div className="relative max-w-xl mx-auto">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Type something..."
+                  className="w-full rounded-lg border border-primary/20 bg-card/50 pl-4 pr-12 py-3 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent resize-none overflow-hidden shadow-lg"
+                  rows={1}
+                  style={{ minHeight: "44px", maxHeight: "200px" }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = "auto";
+                    target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage({ text: input });
+                      setInput("");
+                    }
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-primary hover:text-primary/80 disabled:text-muted-foreground transition-colors focus:outline-none"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="text-center">
+              <p className="text-muted-foreground mb-4">
+                This agent is not fully configured yet. Please complete the
+                setup to start chatting.
+              </p>
+              <div className="text-sm text-muted-foreground">
+                {!setupStatus?.isActive && <div>Agent must be active</div>}
+                {!setupStatus?.hasModelAlias && <div>Model alias required</div>}
+                {!setupStatus?.hasProdPrompt && (
+                  <div>Production prompt required</div>
+                )}
+              </div>
             </div>
-          </form>
+          )}
         </Layout>
       </div>
     </div>

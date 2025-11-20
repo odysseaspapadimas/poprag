@@ -595,6 +595,15 @@ export const agentRouter = createTRPCRouter({
   getSetupStatus: protectedProcedure
     .input(z.object({ agentId: z.string() }))
     .query(async ({ input }) => {
+      // Check agent status
+      const [agentData] = await db
+        .select()
+        .from(agent)
+        .where(eq(agent.id, input.agentId))
+        .limit(1);
+
+      const isActive = agentData?.status === "active";
+
       // Check for a model policy with a modelAlias
       const [policy] = await db
         .select()
@@ -620,6 +629,6 @@ export const agentRouter = createTRPCRouter({
 
       const hasProdPrompt = !!prodPromptVersion;
 
-      return { hasModelAlias, hasProdPrompt };
+      return { hasModelAlias, hasProdPrompt, isActive };
     }),
 });

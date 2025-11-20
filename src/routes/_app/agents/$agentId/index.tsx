@@ -159,26 +159,73 @@ function AgentDetailPage() {
             <EditAgentDialog
               agent={agent}
               trigger={
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" data-edit-settings>
                   Edit Settings
                 </Button>
               }
             />
           </div>
         </div>
-        {(!setupStatus?.hasModelAlias || !setupStatus?.hasProdPrompt) && (
+        {(!setupStatus?.hasModelAlias ||
+          !setupStatus?.hasProdPrompt ||
+          !setupStatus?.isActive) && (
           <div className="mt-4">
             <Alert variant="destructive">
               <div className="flex-1">
                 <AlertTitle>Agent not fully configured</AlertTitle>
                 <AlertDescription>
-                  {(!setupStatus?.hasModelAlias && "No model selected.") || ""}
-                  {!setupStatus?.hasModelAlias &&
-                    !setupStatus?.hasProdPrompt &&
-                    " "}
-                  {(!setupStatus?.hasProdPrompt &&
-                    "No production prompt found.") ||
-                    ""}
+                  {!setupStatus?.isActive && (
+                    <div>
+                      Agent is not active.{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          (
+                            document.querySelector(
+                              "[data-edit-settings]",
+                            ) as HTMLElement
+                          )?.click()
+                        }
+                        className="underline hover:no-underline"
+                      >
+                        Edit settings
+                      </button>{" "}
+                      to activate.
+                    </div>
+                  )}
+                  {!setupStatus?.hasModelAlias && (
+                    <div>
+                      No model selected.{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate({ search: { tab: "models" }, replace: true })
+                        }
+                        className="underline hover:no-underline"
+                      >
+                        Configure models
+                      </button>
+                      .
+                    </div>
+                  )}
+                  {!setupStatus?.hasProdPrompt && (
+                    <div>
+                      No production prompt found.{" "}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate({
+                            search: { tab: "prompts" },
+                            replace: true,
+                          })
+                        }
+                        className="underline hover:no-underline"
+                      >
+                        Manage prompts
+                      </button>
+                      .
+                    </div>
+                  )}
                 </AlertDescription>
               </div>
             </Alert>

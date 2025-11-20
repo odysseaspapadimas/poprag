@@ -88,6 +88,9 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
           queryKey: trpc.agent.get.queryKey({ id: agent.id }),
         });
         queryClient.invalidateQueries({ queryKey: trpc.agent.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getSetupStatus.queryKey({ agentId: agent.id }),
+        });
         setOpen(false);
         toast.success("Agent updated");
       },
@@ -105,6 +108,9 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
           queryKey: trpc.agent.get.queryKey({ id: agent.id }),
         });
         queryClient.invalidateQueries({ queryKey: trpc.agent.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getSetupStatus.queryKey({ agentId: agent.id }),
+        });
         setShowArchiveDialog(false);
         toast.success("Agent archived");
       },

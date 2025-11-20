@@ -1,16 +1,16 @@
+import { AwsClient } from "aws4fetch";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import { db } from "@/db";
 import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { generateEmbedding } from "@/lib/ai/embedding";
 import {
-    createKnowledgeSource,
-    deleteKnowledgeSource,
-    processKnowledgeSource,
+  createKnowledgeSource,
+  deleteKnowledgeSource,
+  processKnowledgeSource,
 } from "@/lib/ai/ingestion";
-import { AwsClient } from "aws4fetch";
-import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -126,7 +126,7 @@ export const knowledgeRouter = createTRPCRouter({
       // Update status to uploaded and checksum if provided
       await db
         .update(knowledgeSource)
-        .set({ 
+        .set({
           status: "uploaded",
           checksum: input.checksum,
           updatedAt: new Date(),

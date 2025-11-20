@@ -39,6 +39,9 @@ export function AgentActions({ agent }: AgentActionsProps) {
     trpc.agent.update.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: trpc.agent.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getSetupStatus.queryKey({ agentId: agent.id }),
+        });
         toast.success("Agent updated");
       },
       onError: (err: any) => {
@@ -51,6 +54,9 @@ export function AgentActions({ agent }: AgentActionsProps) {
     trpc.agent.archive.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: trpc.agent.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getSetupStatus.queryKey({ agentId: agent.id }),
+        });
         toast.success("Agent archived");
       },
       onError: (err: any) => {
