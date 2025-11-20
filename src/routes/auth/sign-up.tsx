@@ -1,9 +1,3 @@
-import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
-import { z } from "zod";
-import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -14,6 +8,11 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useForm } from "@tanstack/react-form";
+import { useMutation } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
+import { z } from "zod";
 
 const signUpSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -61,7 +60,6 @@ function RouteComponent() {
   return (
     <main className="flex-1 flex flex-col items-center justify-center gap-4 p-4">
       <header className="flex flex-col justify-center items-center gap-2">
-        <Logo />
         <h1 className="font-extrabold text-2xl">Sign Up</h1>
       </header>
 
