@@ -3,6 +3,16 @@
  * Implements the RAG-powered chat flow following AI SDK cookbook pattern
  */
 
+import type { UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  generateObject,
+  type LanguageModel,
+  streamText,
+} from "ai";
+import { and, desc, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import z from "zod";
 import { db } from "@/db";
 import {
   agent,
@@ -19,16 +29,6 @@ import {
 } from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
-import type { UIMessage } from "ai";
-import {
-  convertToModelMessages,
-  generateObject,
-  streamText,
-  type LanguageModel,
-} from "ai";
-import { and, desc, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import z from "zod";
 import { reciprocalRankFusion } from "../utils";
 
 export interface ChatRequest {
@@ -59,7 +59,7 @@ export interface ChatOptions {
  */
 export async function rewriteQuery(
   model: LanguageModel,
-  query: string
+  query: string,
 ): Promise<{ queries: string[]; keywords: string[] }> {
   const promptText = `Given the following user message, rewrite it into 3-5 distinct queries that could be used to search for relevant information, and provide additional keywords related to the query.
 
@@ -76,7 +76,7 @@ User message: ${query}`;
         queries: z
           .array(z.string())
           .describe(
-            "Similar queries to the user's query. Be concise but comprehensive."
+            "Similar queries to the user's query. Be concise but comprehensive.",
           ),
         keywords: z
           .array(z.string())
@@ -86,10 +86,10 @@ User message: ${query}`;
 
     console.log(`[Query Rewriting] Original: "${query.substring(0, 50)}..."`);
     console.log(
-      `[Query Rewriting] Generated ${result.object.queries.length} query variations`
+      `[Query Rewriting] Generated ${result.object.queries.length} query variations`,
     );
     console.log(
-      `[Query Rewriting] Extracted ${result.object.keywords.length} keywords`
+      `[Query Rewriting] Extracted ${result.object.keywords.length} keywords`,
     );
 
     return result.object;
@@ -147,8 +147,8 @@ export async function handleChatRequest(request: ChatRequest) {
       .where(
         and(
           eq(promptVersion.promptId, systemPromptData.id),
-          eq(promptVersion.label, "prod")
-        )
+          eq(promptVersion.label, "prod"),
+        ),
       )
       .limit(1);
 
@@ -175,7 +175,7 @@ export async function handleChatRequest(request: ChatRequest) {
     };
     const basePrompt = renderPrompt(
       activePromptVersion.content,
-      mergedVariables
+      mergedVariables,
     );
 
     // 5. RAG retrieval with hybrid search (vector + FTS)
@@ -184,7 +184,7 @@ export async function handleChatRequest(request: ChatRequest) {
     const ragEnabled = Boolean(
       request.rag ||
         (Array.isArray(policy.enabledTools) &&
-          policy.enabledTools.includes("retrieval"))
+          policy.enabledTools.includes("retrieval")),
     );
 
     console.log(
@@ -193,7 +193,7 @@ export async function handleChatRequest(request: ChatRequest) {
       "policy.enabledTools:",
       policy.enabledTools,
       "ragEnabled:",
-      ragEnabled
+      ragEnabled,
     );
 
     if (ragEnabled) {
@@ -209,8 +209,8 @@ export async function handleChatRequest(request: ChatRequest) {
         console.log(
           `[Chat] Performing hybrid RAG search for: "${userQuery.substring(
             0,
-            100
-          )}..."`
+            100,
+          )}..."`,
         );
 
         // Step 1: Rewrite query into multiple variations
@@ -220,11 +220,11 @@ export async function handleChatRequest(request: ChatRequest) {
             provider: "workers-ai",
             modelId: "@cf/meta/llama-3.1-8b-instruct-fast",
           }),
-          userQuery
+          userQuery,
         );
 
         console.log(
-          `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`
+          `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`,
         );
 
         // Step 2: Perform vector search for all query variations
@@ -232,7 +232,7 @@ export async function handleChatRequest(request: ChatRequest) {
           findRelevantContent(q, agentData.id, {
             topK: 5,
             minSimilarity: 0.3,
-          })
+          }),
         );
 
         // Step 3: Perform FTS search for keywords
@@ -241,7 +241,7 @@ export async function handleChatRequest(request: ChatRequest) {
           agentData.id,
           {
             limit: 5,
-          }
+          },
         );
 
         const [vectorResults] = await Promise.all([
@@ -251,8 +251,8 @@ export async function handleChatRequest(request: ChatRequest) {
         console.log(
           `[Chat] Vector search: ${vectorResults.reduce(
             (sum, r) => sum + r.matches.length,
-            0
-          )} results`
+            0,
+          )} results`,
         );
         console.log(`[Chat] FTS search: ${ftsResults.length} results`);
 
@@ -277,12 +277,12 @@ export async function handleChatRequest(request: ChatRequest) {
 
         if (topMatches.length > 0) {
           console.log(
-            `[Chat] Hybrid search retrieved ${topMatches.length} chunks after RRF fusion`
+            `[Chat] Hybrid search retrieved ${topMatches.length} chunks after RRF fusion`,
           );
           console.log(
             `[Chat] Score range: ${topMatches[0].score.toFixed(
-              3
-            )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`
+              3,
+            )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`,
           );
 
           ragContext = {
@@ -379,7 +379,7 @@ export async function handleChatRequest(request: ChatRequest) {
             createdAt: new Date(),
           });
           console.debug(
-            `[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`
+            `[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`,
           );
         } catch (err) {
           console.warn("[Chat] Failed to insert run metric:", err);
@@ -404,7 +404,7 @@ export async function handleChatRequest(request: ChatRequest) {
           createdAt: new Date(),
         });
         console.debug(
-          `[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`
+          `[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`,
         );
       }
     } catch (err) {

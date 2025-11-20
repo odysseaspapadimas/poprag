@@ -1,26 +1,30 @@
-import {
-    Form,
-    FormControl,
-    FormDescription,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTRPC } from "@/integrations/trpc/react";
 
 const createAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -30,7 +34,7 @@ const createAgentSchema = z.object({
     .max(50)
     .regex(
       /^[a-z0-9-]+$/,
-      "Slug must contain only lowercase letters, numbers, and hyphens"
+      "Slug must contain only lowercase letters, numbers, and hyphens",
     ),
   description: z.string().optional(),
   modelAlias: z.string(),
@@ -48,7 +52,9 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
   const queryClient = useQueryClient();
 
   // Fetch model aliases
-  const { data: modelAliases } = useSuspenseQuery(trpc.model.list.queryOptions());
+  const { data: modelAliases } = useSuspenseQuery(
+    trpc.model.list.queryOptions(),
+  );
 
   // Form setup
   const form = useForm<CreateAgentForm>({
@@ -74,7 +80,7 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
       onError: (err: any) => {
         toast.error(`Failed to create agent: ${err?.message ?? err}`);
       },
-    })
+    }),
   );
 
   const onSubmit = (data: CreateAgentForm) => {
@@ -100,10 +106,7 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
 
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-4"
-      >
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <FormField
           control={form.control}
           name="name"
@@ -117,9 +120,7 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
                   onChange={(e) => handleNameChange(e.target.value)}
                 />
               </FormControl>
-              <FormDescription>
-                A friendly name for your agent
-              </FormDescription>
+              <FormDescription>A friendly name for your agent</FormDescription>
               <FormMessage />
             </FormItem>
           )}

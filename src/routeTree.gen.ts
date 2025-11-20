@@ -17,7 +17,6 @@ import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppModelsIndexRouteImport } from './routes/_app/models/index'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
-import { Route as ApiUploadKnowledgeSplatRouteImport } from './routes/api/upload-knowledge.$'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc.$'
 import { Route as ApiChatAgentSlugRouteImport } from './routes/api/chat.$agentSlug'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
@@ -64,11 +63,6 @@ const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
   path: '/agents/',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const ApiUploadKnowledgeSplatRoute = ApiUploadKnowledgeSplatRouteImport.update({
-  id: '/api/upload-knowledge/$',
-  path: '/api/upload-knowledge/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -110,7 +104,6 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
   '/models': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -125,7 +118,6 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/agents': typeof AppAgentsIndexRoute
   '/models': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -143,7 +135,6 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/api/upload-knowledge/$': typeof ApiUploadKnowledgeSplatRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
   '/_app/models/': typeof AppModelsIndexRoute
   '/_app/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -161,7 +152,6 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/chat/$agentSlug'
     | '/api/trpc/$'
-    | '/api/upload-knowledge/$'
     | '/agents'
     | '/models'
     | '/agents/$agentId/chat'
@@ -176,7 +166,6 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/chat/$agentSlug'
     | '/api/trpc/$'
-    | '/api/upload-knowledge/$'
     | '/agents'
     | '/models'
     | '/agents/$agentId/chat'
@@ -193,7 +182,6 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/chat/$agentSlug'
     | '/api/trpc/$'
-    | '/api/upload-knowledge/$'
     | '/_app/agents/'
     | '/_app/models/'
     | '/_app/agents/$agentId/chat'
@@ -206,7 +194,6 @@ export interface RootRouteChildren {
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatAgentSlugRoute: typeof ApiChatAgentSlugRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
-  ApiUploadKnowledgeSplatRoute: typeof ApiUploadKnowledgeSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -266,13 +253,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents'
       preLoaderRoute: typeof AppAgentsIndexRouteImport
       parentRoute: typeof AppRouteRoute
-    }
-    '/api/upload-knowledge/$': {
-      id: '/api/upload-knowledge/$'
-      path: '/api/upload-knowledge/$'
-      fullPath: '/api/upload-knowledge/$'
-      preLoaderRoute: typeof ApiUploadKnowledgeSplatRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/api/trpc/$': {
       id: '/api/trpc/$'
@@ -374,7 +354,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatAgentSlugRoute: ApiChatAgentSlugRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
-  ApiUploadKnowledgeSplatRoute: ApiUploadKnowledgeSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,15 +1,17 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { CreateModelAliasForm } from "@/components/create-model-alias-form";
 import { ModelAliasManagement } from "@/components/model-alias-management";
 import { PageHeaderWithDialog } from "@/components/page-header-with-dialog";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/models/")({
   component: ModelsPage,
   beforeLoad: async ({ context }) => {
     // Prefetch model alias list for performance
-    await context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions());
+    await context.queryClient.prefetchQuery(
+      context.trpc.model.list.queryOptions(),
+    );
   },
 });
 

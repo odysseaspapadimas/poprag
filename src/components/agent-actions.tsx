@@ -1,20 +1,29 @@
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import type { Agent } from "@/db/schema";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { Agent } from "@/db/schema";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface AgentActionsProps {
   agent: Agent;
@@ -35,7 +44,7 @@ export function AgentActions({ agent }: AgentActionsProps) {
       onError: (err: any) => {
         toast.error(`Failed to update agent: ${err.message}`);
       },
-    })
+    }),
   );
 
   const archiveAgent = useMutation(
@@ -47,7 +56,7 @@ export function AgentActions({ agent }: AgentActionsProps) {
       onError: (err: any) => {
         toast.error(`Failed to archive agent: ${err.message}`);
       },
-    })
+    }),
   );
 
   const handleToggleStatus = () => {
@@ -80,10 +89,16 @@ export function AgentActions({ agent }: AgentActionsProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => navigate({ to: `/agents/${agent.id}`, search: { tab: "overview" } })}>
+        <DropdownMenuItem
+          onClick={() =>
+            navigate({ to: `/agents/${agent.id}`, search: { tab: "overview" } })
+          }
+        >
           View Details
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(agent.id)}>
+        <DropdownMenuItem
+          onClick={() => navigator.clipboard.writeText(agent.id)}
+        >
           Copy agent ID
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -94,7 +109,10 @@ export function AgentActions({ agent }: AgentActionsProps) {
           Change Visibility ({agent.visibility})
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setConfirmOpen(true)} className="text-destructive">
+        <DropdownMenuItem
+          onClick={() => setConfirmOpen(true)}
+          className="text-destructive"
+        >
           Delete / Archive
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -108,12 +126,18 @@ export function AgentActions({ agent }: AgentActionsProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Agent</AlertDialogTitle>
             <p>
-              Are you sure you want to delete (archive) this agent? This will archive the agent and cannot be undone.
+              Are you sure you want to delete (archive) this agent? This will
+              archive the agent and cannot be undone.
             </p>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleArchive} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogAction
+              onClick={handleArchive}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

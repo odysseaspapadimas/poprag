@@ -1,5 +1,6 @@
+import { useMutation } from "@tanstack/react-query";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { ChevronsUpDown, LogOut } from "lucide-react";
-
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -16,8 +17,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate, useRouter } from "@tanstack/react-router";
 
 export function NavUser({
   user,
@@ -37,10 +36,10 @@ export function NavUser({
     trpc.auth.logout.mutationOptions({
       onSuccess: async () => {
         await router.invalidate();
-        
+
         navigate({ to: "/auth/sign-in" });
       },
-    })
+    }),
   );
 
   const handleSignOut = async () => {

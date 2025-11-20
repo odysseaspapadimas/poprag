@@ -1,23 +1,27 @@
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
+import { Edit, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PromptVersion } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
-import { Edit, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 import { EditPromptVersionDialog } from "./edit-prompt-version-dialog";
 
 interface PromptVersionsListProps {
@@ -26,13 +30,19 @@ interface PromptVersionsListProps {
   onCreateNew: () => void;
 }
 
-export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVersionsListProps) {
+export function PromptVersionsList({
+  promptId,
+  agentId,
+  onCreateNew,
+}: PromptVersionsListProps) {
   const trpc = useTRPC();
-  const [editingVersion, setEditingVersion] = useState<PromptVersion | null>(null);
+  const [editingVersion, setEditingVersion] = useState<PromptVersion | null>(
+    null,
+  );
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const { data: versions, refetch: refetchVersions } = useSuspenseQuery(
-    trpc.prompt.getVersions.queryOptions({ promptId })
+    trpc.prompt.getVersions.queryOptions({ promptId }),
   );
 
   const queryClient = useQueryClient();
@@ -44,14 +54,18 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
         refetchVersions();
         // Also invalidate prompt list for the agent to maintain consistent UI
         if (agentId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
-          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.list.queryKey({ agentId }),
+          });
+          queryClient.invalidateQueries({
+            queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+          });
         }
       },
       onError: (error) => {
         toast.error(`Failed to delete version: ${error.message}`);
       },
-    })
+    }),
   );
 
   const getLabelColor = (label: string) => {
@@ -110,10 +124,7 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
         ) : (
           <div className="space-y-4 max-h-96 overflow-y-auto">
             {versions.map((version) => (
-              <div
-                key={version.id}
-                className="border rounded-lg p-4 space-y-3"
-              >
+              <div key={version.id} className="border rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">v{version.version}</span>
@@ -123,7 +134,9 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">
-                      {formatDistanceToNow(new Date(version.createdAt), { addSuffix: true })}
+                      {formatDistanceToNow(new Date(version.createdAt), {
+                        addSuffix: true,
+                      })}
                     </span>
                     {canEditOrDelete(version) && (
                       <div className="flex gap-1">
@@ -142,10 +155,12 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Version</AlertDialogTitle>
+                              <AlertDialogTitle>
+                                Delete Version
+                              </AlertDialogTitle>
                               <AlertDialogDescription>
-                                Are you sure you want to delete version v{version.version}?
-                                This action cannot be undone.
+                                Are you sure you want to delete version v
+                                {version.version}? This action cannot be undone.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -190,18 +205,23 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
                   </pre>
                 </div>
 
-                {version.variables && Object.keys(version.variables).length > 0 && (
-                  <div>
-                    <p className="text-sm font-medium mb-2">Variables:</p>
-                    <div className="flex flex-wrap gap-1">
-                      {Object.keys(version.variables).map((key) => (
-                        <Badge key={key} variant="outline" className="text-xs">
-                          {key}
-                        </Badge>
-                      ))}
+                {version.variables &&
+                  Object.keys(version.variables).length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium mb-2">Variables:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {Object.keys(version.variables).map((key) => (
+                          <Badge
+                            key={key}
+                            variant="outline"
+                            className="text-xs"
+                          >
+                            {key}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
               </div>
             ))}
           </div>
@@ -215,7 +235,10 @@ export function PromptVersionsList({ promptId, agentId, onCreateNew }: PromptVer
         agentId={agentId}
         onSuccess={() => {
           refetchVersions();
-          if (agentId) queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
+          if (agentId)
+            queryClient.invalidateQueries({
+              queryKey: trpc.prompt.list.queryKey({ agentId }),
+            });
         }}
       />
     </>

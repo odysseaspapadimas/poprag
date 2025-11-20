@@ -1,22 +1,22 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
+import React, { useState } from "react";
+import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { PromptVersion } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
-import React, { useState } from "react";
-import { toast } from "sonner";
 
 interface EditPromptVersionDialogProps {
   open: boolean;
@@ -47,17 +47,25 @@ export function EditPromptVersionDialog({
         onOpenChange(false);
         resetForm();
         if (version?.promptId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId: version.promptId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.getVersions.queryKey({
+              promptId: version.promptId,
+            }),
+          });
         }
         if (agentId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
-          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.list.queryKey({ agentId }),
+          });
+          queryClient.invalidateQueries({
+            queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+          });
         }
       },
       onError: (error) => {
         toast.error(`Failed to update version: ${error.message}`);
       },
-    })
+    }),
   );
 
   const resetForm = () => {
@@ -106,8 +114,9 @@ export function EditPromptVersionDialog({
           <Alert className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950">
             <AlertTriangle className="h-4 w-4 text-orange-600" />
             <AlertDescription className="text-orange-800 dark:text-orange-200">
-              <strong>Warning:</strong> This version is currently labeled as <strong>{version.label}</strong>.
-              Editing it will affect the prompt used in the {version.label} environment.
+              <strong>Warning:</strong> This version is currently labeled as{" "}
+              <strong>{version.label}</strong>. Editing it will affect the
+              prompt used in the {version.label} environment.
             </AlertDescription>
           </Alert>
         )}
@@ -147,7 +156,9 @@ export function EditPromptVersionDialog({
               type="submit"
               disabled={!content.trim() || updateVersionMutation.isPending}
             >
-              {updateVersionMutation.isPending ? "Updating..." : "Update Version"}
+              {updateVersionMutation.isPending
+                ? "Updating..."
+                : "Update Version"}
             </Button>
           </DialogFooter>
         </form>

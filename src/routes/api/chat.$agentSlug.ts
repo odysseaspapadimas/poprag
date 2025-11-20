@@ -3,9 +3,9 @@
  * POST /api/chat/$agentSlug
  */
 
-import { handleChatRequest } from "@/lib/ai/chat";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { handleChatRequest } from "@/lib/ai/chat";
 
 const chatRequestSchema = z.object({
   messages: z.array(z.any()), // UIMessage[]
@@ -56,7 +56,7 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
                 error: "Invalid request",
                 details: error.issues,
               }),
-              { status: 400, headers: { "Content-Type": "application/json" } }
+              { status: 400, headers: { "Content-Type": "application/json" } },
             );
           }
 
@@ -67,7 +67,7 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
                   ? error.message
                   : "Internal server error",
             }),
-            { status: 500, headers: { "Content-Type": "application/json" } }
+            { status: 500, headers: { "Content-Type": "application/json" } },
           );
         }
       },

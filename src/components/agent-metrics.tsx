@@ -1,5 +1,5 @@
-import { useTRPC } from "@/integrations/trpc/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface Props {
   agentId: string;
@@ -8,13 +8,22 @@ interface Props {
 export function AgentMetrics({ agentId }: Props) {
   const trpc = useTRPC();
   const { data: metrics } = useSuspenseQuery(
-    trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 })
+    trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 }),
   );
 
   const totalRuns = metrics?.length ?? 0;
-  const totalTokens = (metrics || []).reduce((acc, m) => acc + (m.tokens ?? 0), 0);
-  const totalCostMicrocents = (metrics || []).reduce((acc, m) => acc + (m.costMicrocents ?? 0), 0);
-  const avgLatency = Math.round((metrics || []).reduce((acc, m) => acc + (m.latencyMs ?? 0), 0) / Math.max(1, totalRuns));
+  const totalTokens = (metrics || []).reduce(
+    (acc, m) => acc + (m.tokens ?? 0),
+    0,
+  );
+  const totalCostMicrocents = (metrics || []).reduce(
+    (acc, m) => acc + (m.costMicrocents ?? 0),
+    0,
+  );
+  const avgLatency = Math.round(
+    (metrics || []).reduce((acc, m) => acc + (m.latencyMs ?? 0), 0) /
+      Math.max(1, totalRuns),
+  );
 
   const formatCurrency = (microcents?: number | null) => {
     if (typeof microcents !== "number" || Number.isNaN(microcents)) return "-";
@@ -35,7 +44,9 @@ export function AgentMetrics({ agentId }: Props) {
         </div>
         <div className="bg-card border rounded-lg p-4">
           <div className="text-sm text-muted-foreground">Cost (estimated)</div>
-          <div className="text-xl font-semibold">{formatCurrency(totalCostMicrocents)}</div>
+          <div className="text-xl font-semibold">
+            {formatCurrency(totalCostMicrocents)}
+          </div>
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -48,7 +59,9 @@ export function AgentMetrics({ agentId }: Props) {
       <div className="bg-card border rounded p-4">
         <h3 className="text-lg font-semibold mb-3">Recent Runs</h3>
         {(!metrics || metrics.length === 0) && (
-          <div className="text-sm text-muted-foreground">No metrics recorded yet.</div>
+          <div className="text-sm text-muted-foreground">
+            No metrics recorded yet.
+          </div>
         )}
         {metrics && metrics.length > 0 && (
           <div className="overflow-auto">
@@ -69,7 +82,9 @@ export function AgentMetrics({ agentId }: Props) {
                       {new Date(m.createdAt).toLocaleString()}
                     </td>
                     <td className="py-2 align-top">{m.tokens ?? "-"}</td>
-                    <td className="py-2 align-top">{formatCurrency(m.costMicrocents)}</td>
+                    <td className="py-2 align-top">
+                      {formatCurrency(m.costMicrocents)}
+                    </td>
                     <td className="py-2 align-top">{m.latencyMs ?? "-"}</td>
                     <td className="py-2 align-top">{m.errorType ?? "-"}</td>
                   </tr>

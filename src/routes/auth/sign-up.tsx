@@ -1,7 +1,8 @@
 import { useForm } from "@tanstack/react-form";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { z } from "zod";
-
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +14,6 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { toast } from "sonner";
 
 const signUpSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -39,7 +37,7 @@ function RouteComponent() {
       onError: (error) => {
         toast.error("Sign up failed: " + error.message);
       },
-    })
+    }),
   );
 
   const form = useForm({

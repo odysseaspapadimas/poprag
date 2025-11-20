@@ -266,7 +266,9 @@ export const knowledgeSource = sqliteTable(
       .default("uploaded")
       .notNull(),
     parserErrors: text("parser_errors", { mode: "json" }).$type<string[]>(),
-    vectorizeIds: text("vectorize_ids", { mode: "json" }).$type<string[] | null>(), // Track vectors for this source
+    vectorizeIds: text("vectorize_ids", { mode: "json" }).$type<
+      string[] | null
+    >(), // Track vectors for this source
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -285,11 +287,11 @@ export const documentChunks = sqliteTable(
   "document_chunks",
   {
     id: text("id").primaryKey(),
-    documentId: text("source_id")  // Maps to source_id column in database
+    documentId: text("source_id") // Maps to source_id column in database
       .notNull()
       .references(() => knowledgeSource.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
-    sessionId: text("agent_id").notNull(),  // Maps to agent_id column in database
+    sessionId: text("agent_id").notNull(), // Maps to agent_id column in database
     chunkIndex: integer("chunk_index").notNull(),
     vectorizeId: text("vectorize_id"), // Link to Vectorize vector
     createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -402,9 +404,7 @@ export const runMetric = sqliteTable(
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
   },
-  (table) => [
-    index("run_metric_agent_idx").on(table.agentId, table.createdAt),
-  ],
+  (table) => [index("run_metric_agent_idx").on(table.agentId, table.createdAt)],
 );
 
 // ─────────────────────────────────────────────────────

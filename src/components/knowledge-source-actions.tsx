@@ -1,3 +1,7 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,10 +23,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { KnowledgeSource } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 
 interface KnowledgeSourceActionsProps {
   source: KnowledgeSource;
@@ -50,7 +50,7 @@ export function KnowledgeSourceActions({
       onError: (error) => {
         toast.error(`Re-indexing failed: ${error.message}`);
       },
-    })
+    }),
   );
 
   const deleteMutation = useMutation(
@@ -65,7 +65,7 @@ export function KnowledgeSourceActions({
       onError: (error) => {
         toast.error(`Deletion failed: ${error.message}`);
       },
-    })
+    }),
   );
 
   const handleReindex = () => {

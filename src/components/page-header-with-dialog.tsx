@@ -1,12 +1,12 @@
+import React, { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
-import React, { ReactNode, useState } from "react";
 
 interface PageHeaderWithDialogProps {
   title: string;
@@ -33,7 +33,9 @@ export function PageHeaderWithDialog({
 
   // Clone children and pass handleSuccess if it's a function component
   const childrenWithProps = React.isValidElement(children)
-    ? React.cloneElement(children as React.ReactElement<any>, { onSuccess: handleSuccess })
+    ? React.cloneElement(children as React.ReactElement<any>, {
+        onSuccess: handleSuccess,
+      })
     : children;
 
   return (

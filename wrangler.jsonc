@@ -1,35 +1,33 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "poprag",
-	"compatibility_date": "2025-10-22",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"main": "@tanstack/react-start/server-entry",
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "poprag",
-			"database_id": "6da51806-c6ac-4ea3-9b62-cb17fa21b4a0",
-			"migrations_dir": "drizzle/migrations",
-			"remote": true
-		}
-	],
-	"r2_buckets": [
-		{
-			"binding": "R2",
-			"bucket_name": "poprag",
-			"remote": true
-		}
-	],
-	"ai": {
-		"binding": "AI"
-	},
-	"vectorize": [
-		{
-			"binding": "VECTORIZE",
-			"index_name": "rag",
-			"remote": true
-		}
-	]
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "poprag",
+  "compatibility_date": "2025-10-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "poprag",
+      "database_id": "6da51806-c6ac-4ea3-9b62-cb17fa21b4a0",
+      "migrations_dir": "drizzle/migrations",
+      "remote": true,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "poprag",
+      "remote": true,
+    },
+  ],
+  "ai": {
+    "binding": "AI",
+  },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "rag",
+      "remote": true,
+    },
+  ],
 }

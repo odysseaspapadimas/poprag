@@ -1,12 +1,22 @@
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 
 interface ModelPolicyEditorProps {
   agentId: string;
@@ -16,12 +26,12 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
   const trpc = useTRPC();
 
   const { data: modelAliases } = useSuspenseQuery(
-    trpc.model.list.queryOptions()
+    trpc.model.list.queryOptions(),
   );
   const modelAliasesLoading = (modelAliases?.length ?? 0) === 0;
 
   const { data: policy } = useSuspenseQuery(
-    trpc.agent.getModelPolicy.queryOptions({ agentId })
+    trpc.agent.getModelPolicy.queryOptions({ agentId }),
   );
 
   const [formState, setFormState] = useState(() => ({
@@ -29,7 +39,9 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
     temperature: policy?.temperature,
     topP: policy?.topP,
     maxTokens: policy?.maxTokens,
-    retrievalEnabled: Array.isArray(policy?.enabledTools) && policy?.enabledTools.includes("retrieval"),
+    retrievalEnabled:
+      Array.isArray(policy?.enabledTools) &&
+      policy?.enabledTools.includes("retrieval"),
   }));
 
   useEffect(() => {
@@ -40,7 +52,9 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
         temperature: policy.temperature ?? s.temperature,
         topP: policy.topP ?? s.topP,
         maxTokens: policy.maxTokens ?? s.maxTokens,
-        retrievalEnabled: Array.isArray(policy.enabledTools) && policy.enabledTools.includes("retrieval"),
+        retrievalEnabled:
+          Array.isArray(policy.enabledTools) &&
+          policy.enabledTools.includes("retrieval"),
       }));
     }
   }, [policy]);
@@ -57,14 +71,16 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
     trpc.agent.updateModelPolicy.mutationOptions({
       onSuccess: () => {
         // Invalidate queries or refresh
-        queryClient.invalidateQueries({ queryKey: trpc.agent.getModelPolicy.queryKey({ agentId }) });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getModelPolicy.queryKey({ agentId }),
+        });
         toast.success("Model policy updated");
       },
       onError: (err: any) => {
         console.error("Failed to update model policy:", err);
         toast.error(`Failed to update model policy: ${err.message}`);
       },
-    })
+    }),
   );
 
   const handleSave = async () => {
@@ -112,7 +128,9 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
           <Input
             type="number"
             value={String(formState.maxTokens)}
-            onChange={(e) => setFormState({ ...formState, maxTokens: Number(e.target.value) })}
+            onChange={(e) =>
+              setFormState({ ...formState, maxTokens: Number(e.target.value) })
+            }
           />
         </Field>
       </div>
@@ -126,7 +144,12 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
             max={2}
             step={0.1}
             value={String(formState.temperature)}
-            onChange={(e) => setFormState({ ...formState, temperature: Number(e.target.value) })}
+            onChange={(e) =>
+              setFormState({
+                ...formState,
+                temperature: Number(e.target.value),
+              })
+            }
           />
         </Field>
 
@@ -138,7 +161,9 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
             max={1}
             step={0.01}
             value={String(formState.topP)}
-            onChange={(e) => setFormState({ ...formState, topP: Number(e.target.value) })}
+            onChange={(e) =>
+              setFormState({ ...formState, topP: Number(e.target.value) })
+            }
           />
         </Field>
 
@@ -149,9 +174,19 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
               id="retrieval-enabled"
               type="checkbox"
               checked={formState.retrievalEnabled}
-              onChange={(e) => setFormState({ ...formState, retrievalEnabled: e.target.checked })}
+              onChange={(e) =>
+                setFormState({
+                  ...formState,
+                  retrievalEnabled: e.target.checked,
+                })
+              }
             />
-            <label htmlFor="retrieval-enabled" className="text-sm text-muted-foreground">Allow RAG retrieval for this agent</label>
+            <label
+              htmlFor="retrieval-enabled"
+              className="text-sm text-muted-foreground"
+            >
+              Allow RAG retrieval for this agent
+            </label>
           </div>
         </Field>
       </div>

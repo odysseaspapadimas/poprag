@@ -1,7 +1,7 @@
+import { env } from "cloudflare:workers";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { createAiGateway } from "ai-gateway-provider";
-import { env } from "cloudflare:workers";
 import { createWorkersAI } from "workers-ai-provider";
 
 export type ProviderType =
@@ -21,15 +21,14 @@ export interface ModelConfig {
  * Create a language model instance from configuration
  * All AI calls now go through AI SDK with AI Gateway integration
  */
-export function createModel(
-  config: ModelConfig,
-): LanguageModel {
+export function createModel(config: ModelConfig): LanguageModel {
   // Create AI Gateway instance if configured - applies to all providers
-  const aigateway = env.AI_GATEWAY_ID && env.AI
-    ? createAiGateway({
-        binding: env.AI.gateway(env.AI_GATEWAY_ID),
-      })
-    : null;
+  const aigateway =
+    env.AI_GATEWAY_ID && env.AI
+      ? createAiGateway({
+          binding: env.AI.gateway(env.AI_GATEWAY_ID),
+        })
+      : null;
 
   switch (config.provider) {
     case "openai": {
@@ -103,7 +102,7 @@ export function createEmbeddingModel(
   },
   env: {
     OPENAI_API_KEY?: string;
-  }
+  },
 ) {
   switch (config.provider) {
     case "openai":
@@ -112,12 +111,12 @@ export function createEmbeddingModel(
     case "workers-ai":
       // Workers AI embedding would use binding
       throw new Error(
-        "Workers AI embeddings require Cloudflare AI binding - implement in runtime"
+        "Workers AI embeddings require Cloudflare AI binding - implement in runtime",
       );
 
     default:
       throw new Error(
-        `Embedding not supported for provider: ${config.provider}`
+        `Embedding not supported for provider: ${config.provider}`,
       );
   }
 }

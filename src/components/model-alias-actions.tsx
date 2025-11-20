@@ -1,18 +1,27 @@
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ModelAliasActionsProps {
   alias: {
@@ -28,15 +37,17 @@ export function ModelAliasActions({ alias, onEdit }: ModelAliasActionsProps) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const deleteMutation = useMutation(trpc.model.delete.mutationOptions({
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpc.model.list.queryKey() });
-      toast.success("Model alias deleted");
-    },
-    onError: (err: any) => {
-      toast.error(`Failed to delete alias: ${err.message}`);
-    },
-  }));
+  const deleteMutation = useMutation(
+    trpc.model.delete.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.model.list.queryKey() });
+        toast.success("Model alias deleted");
+      },
+      onError: (err: any) => {
+        toast.error(`Failed to delete alias: ${err.message}`);
+      },
+    }),
+  );
 
   const handleDelete = async () => {
     if (!confirm(`Delete alias ${alias.alias}?`)) return;
@@ -54,14 +65,17 @@ export function ModelAliasActions({ alias, onEdit }: ModelAliasActionsProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-        <DropdownMenuItem onClick={onEdit}>
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(alias.alias)}>
+        <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => navigator.clipboard.writeText(alias.alias)}
+        >
           Copy alias
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setConfirmOpen(true)} className="text-destructive">
+        <DropdownMenuItem
+          onClick={() => setConfirmOpen(true)}
+          className="text-destructive"
+        >
           Delete
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -75,12 +89,18 @@ export function ModelAliasActions({ alias, onEdit }: ModelAliasActionsProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Model Alias</AlertDialogTitle>
             <p>
-              Are you sure you want to delete the alias "{alias.alias}"? This action cannot be undone.
+              Are you sure you want to delete the alias "{alias.alias}"? This
+              action cannot be undone.
             </p>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

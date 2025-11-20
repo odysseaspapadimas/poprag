@@ -1,9 +1,9 @@
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle, File, Upload, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 interface FileUploadProps {
   onUpload: (files: File[]) => Promise<void>;
@@ -27,7 +27,9 @@ export function FileUpload({
     "text/plain": [".txt"],
     "text/markdown": [".md"],
     "application/msword": [".doc"],
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+      ".docx",
+    ],
     "text/csv": [".csv"],
     "application/json": [".json"],
   },
@@ -62,7 +64,7 @@ export function FileUpload({
             ...upload,
             progress: 100,
             status: "success",
-          }))
+          })),
         );
       } catch (error) {
         // Mark all as failed
@@ -72,13 +74,13 @@ export function FileUpload({
             progress: 0,
             status: "error",
             error: error instanceof Error ? error.message : "Upload failed",
-          }))
+          })),
         );
       } finally {
         setIsUploading(false);
       }
     },
-    [onUpload, disabled, isUploading]
+    [onUpload, disabled, isUploading],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

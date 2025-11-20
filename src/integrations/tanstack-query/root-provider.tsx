@@ -1,4 +1,6 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import { getRequestHeaders } from "@tanstack/react-start/server";
 import {
   createTRPCClient,
   httpBatchLink,
@@ -9,12 +11,8 @@ import {
 } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import superjson from "superjson";
-
-import type { AppRouter } from "@/integrations/trpc/router";
-
 import { TRPCProvider } from "@/integrations/trpc/react";
-import { createIsomorphicFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
+import type { AppRouter } from "@/integrations/trpc/router";
 
 function getUrl() {
   if (typeof window !== "undefined") {

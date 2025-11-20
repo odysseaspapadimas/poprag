@@ -1,4 +1,4 @@
-import type { NotFoundRouteProps } from '@tanstack/react-router';
+import type { NotFoundRouteProps } from "@tanstack/react-router";
 
 export function NotFound(props: NotFoundRouteProps) {
   return (

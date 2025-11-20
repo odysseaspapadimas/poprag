@@ -269,11 +269,11 @@ wrangler deploy
 
 ## Roadmap
 
-- [ ] R2 presigned URL generation for direct uploads
-- [ ] Vectorize integration (replace placeholder)
+- [x] R2 presigned URL generation for direct uploads
+- [x] Vectorize integration (replace placeholder)
 - [ ] Workers AI model support
 - [ ] PDF/XLSX parsing (WASM libraries)
-- [ ] Advanced chunking strategies
+- [x] Advanced chunking strategies
 - [ ] Multi-step tool calling
 - [ ] Guardrails (moderation, denylist)
 - [ ] Cost estimation & budget caps

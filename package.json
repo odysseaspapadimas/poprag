@@ -60,6 +60,7 @@
     "@trpc/tanstack-react-query": "^11.7.1",
     "ai": "^5.0.93",
     "ai-gateway-provider": "^2.0.1",
+    "aws4fetch": "^1.0.20",
     "better-auth": "^1.3.34",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

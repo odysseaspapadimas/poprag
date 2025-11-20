@@ -1,4 +1,3 @@
-import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
@@ -10,6 +9,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -132,7 +132,7 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
                                         {match.content}
                                       </div>
                                     </div>
-                                  )
+                                  ),
                                 )}
                               </div>
                             ) : (
@@ -159,7 +159,7 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
 export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const trpc = useTRPC();
   const { data: agent } = useSuspenseQuery(
-    trpc.agent.get.queryOptions({ id: agentId })
+    trpc.agent.get.queryOptions({ id: agentId }),
   );
 
   if (!agent) {

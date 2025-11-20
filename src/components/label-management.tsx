@@ -1,8 +1,18 @@
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface LabelManagementProps {
   promptId: string;
@@ -15,7 +25,7 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
   const queryClient = useQueryClient();
 
   const { data: versions, refetch: refetchVersions } = useSuspenseQuery(
-    trpc.prompt.getVersions.queryOptions({ promptId })
+    trpc.prompt.getVersions.queryOptions({ promptId }),
   );
 
   const assignLabelMutation = useMutation(
@@ -24,15 +34,21 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
         toast.success("Label assigned successfully");
         refetchVersions();
         if (agentId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
-          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.list.queryKey({ agentId }),
+          });
+          queryClient.invalidateQueries({
+            queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+          });
         }
-        queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId }) });
+        queryClient.invalidateQueries({
+          queryKey: trpc.prompt.getVersions.queryKey({ promptId }),
+        });
       },
       onError: (error) => {
         toast.error(`Failed to assign label: ${error.message}`);
       },
-    })
+    }),
   );
 
   const rollbackLabelMutation = useMutation(
@@ -41,26 +57,38 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
         toast.success("Label rolled back successfully");
         refetchVersions();
         if (agentId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
-          queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.list.queryKey({ agentId }),
+          });
+          queryClient.invalidateQueries({
+            queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+          });
         }
-        queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId }) });
+        queryClient.invalidateQueries({
+          queryKey: trpc.prompt.getVersions.queryKey({ promptId }),
+        });
       },
       onError: (error) => {
         toast.error(`Failed to rollback label: ${error.message}`);
       },
-    })
+    }),
   );
 
   const getCurrentVersionForLabel = (label: "dev" | "staging" | "prod") => {
-    return versions.find(v => v.label === label);
+    return versions.find((v) => v.label === label);
   };
 
-  const handleAssignLabel = (label: "dev" | "staging" | "prod", version: number) => {
+  const handleAssignLabel = (
+    label: "dev" | "staging" | "prod",
+    version: number,
+  ) => {
     assignLabelMutation.mutate({ promptId, label, version });
   };
 
-  const handleRollbackLabel = (label: "dev" | "staging" | "prod", toVersion: number) => {
+  const handleRollbackLabel = (
+    label: "dev" | "staging" | "prod",
+    toVersion: number,
+  ) => {
     rollbackLabelMutation.mutate({ promptId, label, toVersion });
   };
 
@@ -91,13 +119,17 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
       <div className="space-y-6">
         {labels.map((label) => {
           const currentVersion = getCurrentVersionForLabel(label);
-          const availableVersions = versions.filter(v => v.label === "none" || v.label === label);
+          const availableVersions = versions.filter(
+            (v) => v.label === "none" || v.label === label,
+          );
 
           return (
             <div key={label} className="border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-medium capitalize">{label} Environment</h4>
+                  <h4 className="font-medium capitalize">
+                    {label} Environment
+                  </h4>
                   {currentVersion && (
                     <Badge className={getLabelColor(label)}>
                       v{currentVersion.version}
@@ -121,8 +153,12 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
                     </SelectTrigger>
                     <SelectContent>
                       {availableVersions.map((version) => (
-                        <SelectItem key={version.id} value={version.version.toString()}>
-                          v{version.version} {version.changelog && `(${version.changelog})`}
+                        <SelectItem
+                          key={version.id}
+                          value={version.version.toString()}
+                        >
+                          v{version.version}{" "}
+                          {version.changelog && `(${version.changelog})`}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -142,9 +178,12 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
                       </SelectTrigger>
                       <SelectContent>
                         {versions
-                          .filter(v => v.version < currentVersion.version)
+                          .filter((v) => v.version < currentVersion.version)
                           .map((version) => (
-                            <SelectItem key={version.id} value={version.version.toString()}>
+                            <SelectItem
+                              key={version.id}
+                              value={version.version.toString()}
+                            >
                               v{version.version}
                             </SelectItem>
                           ))}
@@ -156,7 +195,9 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
 
               {currentVersion && (
                 <div className="mt-3 text-sm text-muted-foreground">
-                  <p>Content preview: {currentVersion.content.slice(0, 100)}...</p>
+                  <p>
+                    Content preview: {currentVersion.content.slice(0, 100)}...
+                  </p>
                 </div>
               )}
             </div>
@@ -167,9 +208,16 @@ export function LabelManagement({ promptId, agentId }: LabelManagementProps) {
       <div className="mt-6 p-4 bg-muted rounded-lg">
         <h4 className="font-medium mb-2">Label Guidelines</h4>
         <ul className="text-sm text-muted-foreground space-y-1">
-          <li><strong>Dev:</strong> Latest development version for testing</li>
-          <li><strong>Staging:</strong> Stable version ready for production testing</li>
-          <li><strong>Prod:</strong> Live production version used by the agent</li>
+          <li>
+            <strong>Dev:</strong> Latest development version for testing
+          </li>
+          <li>
+            <strong>Staging:</strong> Stable version ready for production
+            testing
+          </li>
+          <li>
+            <strong>Prod:</strong> Live production version used by the agent
+          </li>
         </ul>
       </div>
     </div>

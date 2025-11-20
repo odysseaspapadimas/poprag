@@ -7,6 +7,7 @@ import {
     deleteKnowledgeSource,
     processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import { AwsClient } from "aws4fetch";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -58,25 +59,46 @@ export const knowledgeRouter = createTRPCRouter({
         fileName: input.fileName,
         mime: input.mime,
         bytes: input.bytes,
-        status: "uploaded",
+        status: "uploaded", // Will be set to "uploaded" again after confirm, or "failed" on error
         r2Bucket: "poprag", // Match wrangler.jsonc bucket name
         r2Key,
-      }); // In production, generate R2 pre-signed URL
-      // const uploadUrl = await env.R2.createPresignedUrl({
-      //   method: 'PUT',
-      //   key: r2Key,
-      //   expiresIn: 3600, // 1 hour
-      //   conditions: [
-      //     ['content-length-range', 1, maxFileSize],
-      //     ['eq', '$Content-Type', mime],
-      //   ],
-      // });
+      });
 
-      // For development, we'll use direct upload to our API endpoint
+      // Generate R2 presigned URL for direct upload
+      const { env } = await import("cloudflare:workers");
+
+      // Create AWS4 client for R2 with credentials from environment
+      const aws = new AwsClient({
+        accessKeyId: env.R2_ACCESS_KEY_ID,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      });
+
+      // Build the R2 URL following Cloudflare's format: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
+      const url = new URL(
+        `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
+      );
+
+      // Set expiry in search params (as per Cloudflare docs)
+      url.searchParams.set("X-Amz-Expires", "3600"); // 1 hour
+
+      // Create the request to sign
+      // Important: When using signQuery, do NOT include headers in the signed request
+      // The headers must be sent by the client but are not part of the signature
+      const request = new Request(url, {
+        method: "PUT",
+      });
+
+      // Sign the request with query parameters (generates presigned URL)
+      const signedRequest = await aws.sign(request, {
+        aws: { signQuery: true },
+      });
+
+      const uploadUrl = signedRequest.url;
+
       return {
         sourceId,
-        uploadUrl: `/api/upload-knowledge`, // Our custom upload endpoint
-        uploadMethod: "direct",
+        uploadUrl,
+        uploadMethod: "presigned",
       };
     }),
 
@@ -101,13 +123,15 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Source not found");
       }
 
-      // Update checksum if provided
-      if (input.checksum) {
-        await db
-          .update(knowledgeSource)
-          .set({ checksum: input.checksum })
-          .where(eq(knowledgeSource.id, input.sourceId));
-      }
+      // Update status to uploaded and checksum if provided
+      await db
+        .update(knowledgeSource)
+        .set({ 
+          status: "uploaded",
+          checksum: input.checksum,
+          updatedAt: new Date(),
+        })
+        .where(eq(knowledgeSource.id, input.sourceId));
 
       // Audit log
       await db.insert(auditLog).values({
@@ -124,13 +148,62 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /**
+   * Mark upload as failed
+   */
+  markFailed: protectedProcedure
+    .input(
+      z.object({
+        sourceId: z.string(),
+        error: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [source] = await db
+        .select()
+        .from(knowledgeSource)
+        .where(eq(knowledgeSource.id, input.sourceId))
+        .limit(1);
+
+      if (!source) {
+        throw new Error("Source not found");
+      }
+
+      // Update status to failed
+      await db
+        .update(knowledgeSource)
+        .set({
+          status: "failed",
+          parserErrors: input.error ? [input.error] : [],
+          updatedAt: new Date(),
+        })
+        .where(eq(knowledgeSource.id, input.sourceId));
+
+      // Audit log
+      await db.insert(auditLog).values({
+        id: nanoid(),
+        actorId: ctx.session.user.id,
+        eventType: "knowledge.failed",
+        targetType: "knowledge_source",
+        targetId: input.sourceId,
+        diff: { error: input.error },
+        createdAt: new Date(),
+      });
+
+      return { success: true };
+    }),
+
+  /**
    * Index knowledge source (parse + embed + vectorize)
+   * Optimized to avoid R2 round-trip for small files
    */
   index: protectedProcedure
     .input(
       z.object({
         sourceId: z.string(),
         reindex: z.boolean().default(false),
+        // Optional: pass content directly to avoid R2 download
+        content: z.string().optional(),
+        contentBuffer: z.instanceof(Buffer).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -162,20 +235,27 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Access denied");
       }
 
-      // Fetch content from R2
-      const { env } = await import("cloudflare:workers");
-      const r2Object = await env.R2.get(source.r2Key!);
-      if (!r2Object) {
-        throw new Error("File not found in storage");
-      }
-
-      // Get content based on file type - PDFs need Buffer, others can be text
+      // Get content - either from input or from R2
       let content: string | Buffer;
-      if (source.mime === "application/pdf") {
-        const arrayBuffer = await r2Object.arrayBuffer();
-        content = Buffer.from(arrayBuffer);
+      if (input.content) {
+        content = input.content;
+      } else if (input.contentBuffer) {
+        content = input.contentBuffer;
       } else {
-        content = await r2Object.text();
+        // Fallback: fetch from R2
+        const { env } = await import("cloudflare:workers");
+        const r2Object = await env.R2.get(source.r2Key!);
+        if (!r2Object) {
+          throw new Error("File not found in storage");
+        }
+
+        // Get content based on file type - PDFs need Buffer, others can be text
+        if (source.mime === "application/pdf") {
+          const arrayBuffer = await r2Object.arrayBuffer();
+          content = Buffer.from(arrayBuffer);
+        } else {
+          content = await r2Object.text();
+        }
       }
 
       try {

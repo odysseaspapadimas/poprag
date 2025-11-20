@@ -1,13 +1,13 @@
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/db";
-import { modelAlias } from "@/db/schema";
+import { agentModelPolicy, modelAlias } from "@/db/schema";
 import {
   adminProcedure,
   createTRPCRouter,
   publicProcedure,
 } from "@/integrations/trpc/init";
-import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
 
 // Types for external API responses
 interface CloudflareModel {
@@ -45,7 +45,7 @@ export const modelRouter = createTRPCRouter({
         task: z.string().optional(),
         page: z.number().optional(),
         perPage: z.number().optional(),
-      })
+      }),
     )
     .query(async ({ input }) => {
       const { CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_WORKERS_API_TOKEN } = env;
@@ -71,7 +71,7 @@ export const modelRouter = createTRPCRouter({
 
       if (!response.ok) {
         throw new Error(
-          `Failed to fetch Cloudflare models: ${response.statusText}`
+          `Failed to fetch Cloudflare models: ${response.statusText}`,
         );
       }
 
@@ -126,7 +126,7 @@ export const modelRouter = createTRPCRouter({
         (model) =>
           model.id.includes("gpt") ||
           model.id.includes("text-embedding") ||
-          model.id.includes("whisper")
+          model.id.includes("whisper"),
       )
       .map((model) => ({
         id: model.id,
@@ -149,7 +149,7 @@ export const modelRouter = createTRPCRouter({
             contextLength: z.number().optional(),
           })
           .optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       // Ensure alias doesn't already exist
@@ -185,7 +185,9 @@ export const modelRouter = createTRPCRouter({
       z.object({
         alias: z.string().min(1).max(100),
         newAlias: z.string().min(1).max(100).optional(),
-        provider: z.enum(["openai", "openrouter", "huggingface", "workers-ai"]).optional(),
+        provider: z
+          .enum(["openai", "openrouter", "huggingface", "workers-ai"])
+          .optional(),
         modelId: z.string().optional(),
         caps: z
           .object({
@@ -195,31 +197,67 @@ export const modelRouter = createTRPCRouter({
             contextLength: z.number().optional(),
           })
           .optional(),
-      })
+      }),
     )
-    .mutation(async ({ input, ctx }) => {
-      const { alias, newAlias, ...updates } = input;
+    .mutation(async ({ input }) => {
+      try {
+        const { alias, newAlias, ...updates } = input;
 
-      // If changing alias, check if new alias exists
-      if (newAlias && newAlias !== alias) {
-        const [existing] = await db
-          .select()
-          .from(modelAlias)
-          .where(eq(modelAlias.alias, newAlias))
-          .limit(1);
-        if (existing) {
-          throw new Error("Model alias already exists");
+        // If changing alias, check if new alias exists
+        if (newAlias && newAlias !== alias) {
+          const [existing] = await db
+            .select()
+            .from(modelAlias)
+            .where(eq(modelAlias.alias, newAlias))
+            .limit(1);
+          if (existing) {
+            throw new Error("Model alias already exists");
+          }
         }
+
+        // If changing alias, we need to handle foreign key references
+        if (newAlias && newAlias !== alias) {
+          // Get current model alias data
+          const [current] = await db
+            .select()
+            .from(modelAlias)
+            .where(eq(modelAlias.alias, alias))
+            .limit(1);
+          if (!current) {
+            throw new Error("Model alias not found");
+          }
+
+          // Insert new alias with updated data
+          await db.insert(modelAlias).values({
+            alias: newAlias,
+            provider: updates.provider ?? current.provider,
+            modelId: updates.modelId ?? current.modelId,
+            updatedAt: new Date(),
+          });
+
+          // Update foreign key references
+          await db
+            .update(agentModelPolicy)
+            .set({ modelAlias: newAlias })
+            .where(eq(agentModelPolicy.modelAlias, alias));
+
+          // Delete old alias
+          await db.delete(modelAlias).where(eq(modelAlias.alias, alias));
+        } else {
+          // Simple update without alias change
+          await db
+            .update(modelAlias)
+            .set(updates)
+            .where(eq(modelAlias.alias, alias));
+        }
+
+        return { success: true };
+      } catch (error) {
+        throw new Error(
+          `Failed to update model alias: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       }
-
-      // Update
-      await db.update(modelAlias)
-        .set({
-          ...(newAlias && { alias: newAlias }),
-          ...updates,
-        })
-        .where(eq(modelAlias.alias, alias));
-
-      return { success: true };
     }),
 });

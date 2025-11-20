@@ -1,3 +1,5 @@
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -8,8 +10,6 @@ import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,
@@ -21,29 +21,27 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
     // Prefetch all data for this agent
     await Promise.all([
       context.queryClient.prefetchQuery(
-        context.trpc.agent.get.queryOptions({ id: agentId })
+        context.trpc.agent.get.queryOptions({ id: agentId }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.prompt.list.queryOptions({ agentId })
+        context.trpc.prompt.list.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getKnowledgeSources.queryOptions({ agentId })
+        context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getIndexPin.queryOptions({ agentId })
+        context.trpc.agent.getIndexPin.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getModelPolicy.queryOptions({ agentId })
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.model.list.queryOptions()
+        context.trpc.agent.getModelPolicy.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
+      context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 })
+        context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 })
+        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 }),
       ),
     ]);
   },
@@ -70,13 +68,13 @@ function AgentDetailPage() {
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
     queryClient.invalidateQueries({
-      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 50 })
+      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 50 }),
     });
   };
 
   // Fetch agent data with suspense
   const { data: agent } = useSuspenseQuery(
-    trpc.agent.get.queryOptions({ id: agentId })
+    trpc.agent.get.queryOptions({ id: agentId }),
   );
 
   if (!agent) {
@@ -97,23 +95,23 @@ function AgentDetailPage() {
   }
 
   const { data: knowledgeSources } = useSuspenseQuery(
-    trpc.agent.getKnowledgeSources.queryOptions({ agentId })
+    trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
   );
 
   const { data: indexPin } = useSuspenseQuery(
-    trpc.agent.getIndexPin.queryOptions({ agentId })
+    trpc.agent.getIndexPin.queryOptions({ agentId }),
   );
 
   const { data: modelPolicy } = useSuspenseQuery(
-    trpc.agent.getModelPolicy.queryOptions({ agentId })
+    trpc.agent.getModelPolicy.queryOptions({ agentId }),
   );
 
   const { data: auditLog } = useSuspenseQuery(
-    trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 })
+    trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
   );
 
   const { data: setupStatus } = useSuspenseQuery(
-    trpc.agent.getSetupStatus.queryOptions({ agentId })
+    trpc.agent.getSetupStatus.queryOptions({ agentId }),
   );
 
   const tabs: { id: Tab; label: string }[] = [
@@ -152,8 +150,8 @@ function AgentDetailPage() {
                 agent.status === "active"
                   ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                   : agent.status === "draft"
-                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                  : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                    : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
               }`}
             >
               {agent.status}
@@ -175,8 +173,12 @@ function AgentDetailPage() {
                 <AlertTitle>Agent not fully configured</AlertTitle>
                 <AlertDescription>
                   {(!setupStatus?.hasModelAlias && "No model selected.") || ""}
-                  {(!setupStatus?.hasModelAlias && !setupStatus?.hasProdPrompt) && " "}
-                  {(!setupStatus?.hasProdPrompt && "No production prompt found.") || ""}
+                  {!setupStatus?.hasModelAlias &&
+                    !setupStatus?.hasProdPrompt &&
+                    " "}
+                  {(!setupStatus?.hasProdPrompt &&
+                    "No production prompt found.") ||
+                    ""}
                 </AlertDescription>
               </div>
             </Alert>
@@ -292,10 +294,10 @@ function AgentDetailPage() {
                             source.status === "indexed"
                               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                               : source.status === "parsed"
-                              ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                              : source.status === "failed"
-                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                : source.status === "failed"
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                  : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                           }`}
                         >
                           {source.status}
@@ -388,10 +390,10 @@ function AgentDetailPage() {
                           source.status === "indexed"
                             ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                             : source.status === "parsed"
-                            ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                            : source.status === "failed"
-                            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                            : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                              ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                              : source.status === "failed"
+                                ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                         }`}
                       >
                         {source.status}

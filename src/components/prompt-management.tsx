@@ -1,8 +1,8 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Suspense, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { Suspense, useEffect, useState } from "react";
 import { CreatePromptVersionDialog } from "./create-prompt-version-dialog";
 import { LabelManagement } from "./label-management";
 import { PromptVersionsList } from "./prompt-versions-list";
@@ -21,7 +21,7 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const { data: prompts, refetch: refetchPrompts } = useSuspenseQuery(
-    trpc.prompt.list.queryOptions({ agentId })
+    trpc.prompt.list.queryOptions({ agentId }),
   );
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
@@ -123,7 +123,10 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
               )}
 
               {viewMode === "labels" && (
-                <LabelManagement promptId={selectedPrompt.id} agentId={agentId} />
+                <LabelManagement
+                  promptId={selectedPrompt.id}
+                  agentId={agentId}
+                />
               )}
             </div>
           ) : (

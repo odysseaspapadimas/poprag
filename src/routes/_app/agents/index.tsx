@@ -1,19 +1,19 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { CreateAgentForm } from "@/components/create-agent-form";
 import { PageHeaderWithDialog } from "@/components/page-header-with-dialog";
 import { columns } from "@/components/tables/columns";
 import { DataTable } from "@/components/tables/data-table";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/agents/")({
   component: AgentsPage,
   beforeLoad: async ({ context }) => {
     await context.queryClient.prefetchQuery(
-      context.trpc.agent.list.queryOptions()
+      context.trpc.agent.list.queryOptions(),
     );
     await context.queryClient.prefetchQuery(
-      context.trpc.model.list.queryOptions()
+      context.trpc.model.list.queryOptions(),
     );
   },
 });

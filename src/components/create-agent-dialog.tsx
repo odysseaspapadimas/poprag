@@ -1,37 +1,41 @@
-import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-    Form,
-    FormControl,
-    FormDescription,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTRPC } from "@/integrations/trpc/react";
 
 const createAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -41,7 +45,7 @@ const createAgentSchema = z.object({
     .max(50)
     .regex(
       /^[a-z0-9-]+$/,
-      "Slug must contain only lowercase letters, numbers, and hyphens"
+      "Slug must contain only lowercase letters, numbers, and hyphens",
     ),
   description: z.string().optional(),
   modelAlias: z.string(),
@@ -51,7 +55,7 @@ const createAgentSchema = z.object({
 type CreateAgentForm = z.infer<typeof createAgentSchema>;
 
 interface CreateAgentDialogProps {
-	trigger: React.ReactNode;
+  trigger: React.ReactNode;
 }
 
 export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
@@ -60,7 +64,9 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
   const [open, setOpen] = useState(false);
 
   // Fetch model aliases
-  const { data: modelAliases } = useSuspenseQuery(trpc.model.list.queryOptions());
+  const { data: modelAliases } = useSuspenseQuery(
+    trpc.model.list.queryOptions(),
+  );
 
   // Form setup
   const form = useForm<CreateAgentForm>({
@@ -87,7 +93,7 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
       onError: (err: any) => {
         toast.error(`Failed to create agent: ${err?.message ?? err}`);
       },
-    })
+    }),
   );
 
   const onSubmit = (data: CreateAgentForm) => {
@@ -120,15 +126,12 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
         <DialogHeader>
           <DialogTitle>Create New Agent</DialogTitle>
           <DialogDescription>
-            Create a new AI agent with a custom knowledge base. The slug
-            will be used in the agent's URL.
+            Create a new AI agent with a custom knowledge base. The slug will be
+            used in the agent's URL.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className="space-y-4"
-          >
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
               name="name"
@@ -187,7 +190,10 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Model</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a model" />

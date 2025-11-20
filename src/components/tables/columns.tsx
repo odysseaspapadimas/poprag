@@ -1,10 +1,9 @@
+import { Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/db/schema";
-import { Link } from "@tanstack/react-router";
 import AgentActions from "../agent-actions";
 
 export const columns: ColumnDef<Agent>[] = [
@@ -67,8 +66,8 @@ export const columns: ColumnDef<Agent>[] = [
             status === "active"
               ? "default"
               : status === "draft"
-              ? "secondary"
-              : "outline"
+                ? "secondary"
+                : "outline"
           }
         >
           {status}

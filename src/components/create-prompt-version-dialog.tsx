@@ -1,21 +1,27 @@
-import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import type { Prompt } from "@/db/schema";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import type { Prompt } from "@/db/schema";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface CreatePromptVersionDialogProps {
   open: boolean;
@@ -36,7 +42,9 @@ export function CreatePromptVersionDialog({
   const [selectedPromptId, setSelectedPromptId] = useState<string>("");
   const [content, setContent] = useState("");
   const [changelog, setChangelog] = useState("");
-  const [label, setLabel] = useState<"dev" | "staging" | "prod" | "none">("none");
+  const [label, setLabel] = useState<"dev" | "staging" | "prod" | "none">(
+    "none",
+  );
 
   const queryClient = useQueryClient();
 
@@ -48,15 +56,23 @@ export function CreatePromptVersionDialog({
         resetForm();
         // invalidate versions and prompt list for agent
         if (selectedPromptId) {
-          queryClient.invalidateQueries({ queryKey: trpc.prompt.getVersions.queryKey({ promptId: selectedPromptId }) });
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.getVersions.queryKey({
+              promptId: selectedPromptId,
+            }),
+          });
         }
-        queryClient.invalidateQueries({ queryKey: trpc.prompt.list.queryKey({ agentId }) });
-        queryClient.invalidateQueries({ queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }) });
+        queryClient.invalidateQueries({
+          queryKey: trpc.prompt.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+        });
       },
       onError: (error) => {
         toast.error(`Failed to create version: ${error.message}`);
       },
-    })
+    }),
   );
 
   const resetForm = () => {
@@ -96,21 +112,26 @@ export function CreatePromptVersionDialog({
         <DialogHeader>
           <DialogTitle>Create New Prompt Version</DialogTitle>
           <DialogDescription>
-            Create a new version of an existing prompt or define a new prompt type.
+            Create a new version of an existing prompt or define a new prompt
+            type.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="prompt">Prompt Type</Label>
-            <Select value={selectedPromptId} onValueChange={setSelectedPromptId}>
+            <Select
+              value={selectedPromptId}
+              onValueChange={setSelectedPromptId}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select a prompt type" />
               </SelectTrigger>
               <SelectContent>
                 {prompts.map((prompt) => (
                   <SelectItem key={prompt.id} value={prompt.id}>
-                    {prompt.key} {prompt.description && `(${prompt.description})`}
+                    {prompt.key}{" "}
+                    {prompt.description && `(${prompt.description})`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -131,7 +152,10 @@ export function CreatePromptVersionDialog({
 
           <div className="space-y-2">
             <Label htmlFor="label">Label</Label>
-            <Select value={label} onValueChange={(value: any) => setLabel(value)}>
+            <Select
+              value={label}
+              onValueChange={(value: any) => setLabel(value)}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -164,9 +188,15 @@ export function CreatePromptVersionDialog({
             </Button>
             <Button
               type="submit"
-              disabled={!selectedPromptId || !content.trim() || createVersionMutation.isPending}
+              disabled={
+                !selectedPromptId ||
+                !content.trim() ||
+                createVersionMutation.isPending
+              }
             >
-              {createVersionMutation.isPending ? "Creating..." : "Create Version"}
+              {createVersionMutation.isPending
+                ? "Creating..."
+                : "Create Version"}
             </Button>
           </DialogFooter>
         </form>
