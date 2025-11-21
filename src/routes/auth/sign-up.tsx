@@ -1,61 +1,26 @@
+import { authClient } from "@/auth/client";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { useTRPC } from "@/integrations/trpc/react";
-import { useForm } from "@tanstack/react-form";
-import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { z } from "zod";
-
-const signUpSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
 
 export const Route = createFileRoute("/auth/sign-up")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const trpc = useTRPC();
   const navigate = useNavigate();
 
-  const signUpMutation = useMutation(
-    trpc.auth.signUp.mutationOptions({
-      onSuccess: () => {
-        navigate({ to: "/" });
-      },
-      onError: (error) => {
-        toast.error("Sign up failed: " + error.message);
-      },
-    }),
-  );
-
-  const form = useForm({
-    defaultValues: {
-      name: "",
-      email: "",
-      password: "",
-    },
-    validators: {
-      onSubmit: signUpSchema,
-    },
-    onSubmit: async ({ value }) => {
-      await signUpMutation.mutateAsync({
-        name: value.name,
-        email: value.email,
-        password: value.password,
+  const handleGoogleSignIn = async () => {
+    try {
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
       });
-    },
-  });
+      // The redirect will happen automatically
+    } catch (error) {
+      toast.error("Failed to sign up with Google");
+    }
+  };
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center gap-4 p-4">
@@ -63,104 +28,15 @@ function RouteComponent() {
         <h1 className="font-extrabold text-2xl">Sign Up</h1>
       </header>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          form.handleSubmit();
-        }}
-        className="w-full max-w-md space-y-4"
-      >
-        <FieldGroup>
-          <form.Field
-            name="name"
-            children={(field) => {
-              const isInvalid =
-                field.state.meta.isTouched && !field.state.meta.isValid;
-              return (
-                <Field data-invalid={isInvalid}>
-                  <FieldLabel htmlFor={field.name}>Name</FieldLabel>
-                  <Input
-                    id={field.name}
-                    name={field.name}
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
-                    aria-invalid={isInvalid}
-                    placeholder="Your name"
-                    autoComplete="name"
-                  />
-                  <FieldDescription>Enter your full name.</FieldDescription>
-                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                </Field>
-              );
-            }}
-          />
-
-          <form.Field
-            name="email"
-            children={(field) => {
-              const isInvalid =
-                field.state.meta.isTouched && !field.state.meta.isValid;
-              return (
-                <Field data-invalid={isInvalid}>
-                  <FieldLabel htmlFor={field.name}>Email</FieldLabel>
-                  <Input
-                    id={field.name}
-                    name={field.name}
-                    type="email"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
-                    aria-invalid={isInvalid}
-                    placeholder="your@email.com"
-                    autoComplete="email"
-                  />
-                  <FieldDescription>
-                    We'll use this to create your account.
-                  </FieldDescription>
-                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                </Field>
-              );
-            }}
-          />
-
-          <form.Field
-            name="password"
-            children={(field) => {
-              const isInvalid =
-                field.state.meta.isTouched && !field.state.meta.isValid;
-              return (
-                <Field data-invalid={isInvalid}>
-                  <FieldLabel htmlFor={field.name}>Password</FieldLabel>
-                  <Input
-                    id={field.name}
-                    name={field.name}
-                    type="password"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
-                    aria-invalid={isInvalid}
-                    placeholder="••••••••"
-                    autoComplete="new-password"
-                  />
-                  <FieldDescription>
-                    Must be at least 6 characters.
-                  </FieldDescription>
-                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                </Field>
-              );
-            }}
-          />
-        </FieldGroup>
-
+      <div className="w-full max-w-md space-y-4">
         <Button
-          type="submit"
+          onClick={handleGoogleSignIn}
           className="w-full"
-          disabled={signUpMutation.isPending}
+          variant="outline"
         >
-          Sign Up
+          Sign up with Google
         </Button>
-      </form>
+      </div>
 
       <p className="text-sm text-muted-foreground">
         Already have an account?{" "}

@@ -1,6 +1,3 @@
-import { and, desc, eq, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 import { db } from "@/db";
 import {
   agent,
@@ -15,6 +12,9 @@ import {
   runMetric,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 /**
  * Agent management router
@@ -46,10 +46,8 @@ export const agentRouter = createTRPCRouter({
         conditions.push(eq(agent.visibility, input.visibility));
       }
 
-      // Basic RBAC: only show user's own agents unless admin
-      if (!ctx.session.user.isAdmin) {
-        conditions.push(eq(agent.createdBy, ctx.session.user.id));
-      }
+      // No RBAC - all users can see all agents
+      // conditions.push(eq(agent.createdBy, ctx.session.user.id));
 
       const agents = await db
         .select()
@@ -88,15 +86,13 @@ export const agentRouter = createTRPCRouter({
         return null;
       }
 
+      // No RBAC - all users can see all agents
       // Check permissions
-      if (
-        !ctx.session.user.isAdmin &&
-        result.createdBy !== ctx.session.user.id
-      ) {
-        if (result.visibility === "private") {
-          throw new Error("Access denied");
-        }
-      }
+      // if (result.createdBy !== ctx.session.user.id) {
+      //   if (result.visibility === "private") {
+      //     throw new Error("Access denied");
+      //   }
+      // }
 
       return result;
     }),
@@ -235,10 +231,7 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        existing.createdBy !== ctx.session.user.id
-      ) {
+      if (existing.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -284,10 +277,7 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        existing.createdBy !== ctx.session.user.id
-      ) {
+      if (existing.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -325,10 +315,7 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        existing.createdBy !== ctx.session.user.id
-      ) {
+      if (existing.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -509,10 +496,7 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 

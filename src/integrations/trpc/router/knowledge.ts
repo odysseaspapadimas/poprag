@@ -1,16 +1,16 @@
-import { AwsClient } from "aws4fetch";
-import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 import { db } from "@/db";
 import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { generateEmbedding } from "@/lib/ai/embedding";
 import {
-  createKnowledgeSource,
-  deleteKnowledgeSource,
-  processKnowledgeSource,
+    createKnowledgeSource,
+    deleteKnowledgeSource,
+    processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import { AwsClient } from "aws4fetch";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -41,10 +41,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -228,10 +225,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -348,10 +342,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -399,10 +390,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -449,10 +437,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 
@@ -554,10 +539,7 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (
-        !ctx.session.user.isAdmin &&
-        agentData.createdBy !== ctx.session.user.id
-      ) {
+      if (agentData.createdBy !== ctx.session.user.id) {
         throw new Error("Access denied");
       }
 

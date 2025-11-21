@@ -1,8 +1,8 @@
+import { db } from "@/db";
+import * as schema from "@/db/schema";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { reactStartCookies } from "better-auth/react-start";
-import { db } from "@/db";
-import * as schema from "@/db/schema";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db as any, {
@@ -19,15 +19,12 @@ export const auth = betterAuth({
       },
     },
   },
-  // Simple password-only authentication
-  emailAndPassword: {
-    enabled: true,
-    // TEMPORARILY enable sign-up to create admin account
-    // Set this to true after creating admin user
-    disableSignUp: false,
-    // No email verification needed for admin
-    requireEmailVerification: false,
-    autoSignIn: true,
+  // Google OAuth
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
   },
 
   // Session configuration
