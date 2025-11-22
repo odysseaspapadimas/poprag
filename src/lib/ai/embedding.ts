@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
 
 /**
  * Default embedding model configuration
@@ -89,39 +89,6 @@ export async function generateChunks(
   }
 
   return filteredChunks;
-}
-
-/**
- * Generate embeddings for multiple values (batch processing)
- * Used during ingestion pipeline
- *
- * CRITICAL: dimensions MUST match between indexing and querying
- */
-export async function generateEmbeddings(
-  value: string,
-): Promise<Array<{ embedding: number[]; content: string }>> {
-  const chunks = await generateChunks(value);
-
-  // Generate embeddings using Workers AI BGE model through AI Gateway if configured
-  const aiOptions = env.AI_GATEWAY_ID
-    ? { gateway: { id: env.AI_GATEWAY_ID } }
-    : {};
-  const embeddings: number[][] = [];
-
-  for (const chunk of chunks) {
-    const response = await env.AI.run(
-      "@cf/baai/bge-base-en-v1.5",
-      {
-        text: [chunk],
-      },
-      aiOptions,
-    );
-    embeddings.push((response as { data: number[][] }).data[0]);
-  }
-
-  console.log(`Generated ${embeddings.length} embeddings with BGE model`);
-
-  return embeddings.map((embedding, i) => ({ content: chunks[i], embedding }));
 }
 
 /**

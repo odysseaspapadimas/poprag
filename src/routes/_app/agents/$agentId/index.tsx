@@ -1,3 +1,5 @@
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -8,8 +10,6 @@ import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,

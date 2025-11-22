@@ -1,9 +1,8 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { AlertCircle, CheckCircle, File, Upload, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 
 interface FileUploadProps {
   onUpload: (files: File[]) => Promise<void>;
@@ -13,9 +12,8 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
-interface UploadProgress {
+interface UploadStatus {
   file: File;
-  progress: number;
   status: "uploading" | "success" | "error";
   error?: string;
 }
@@ -60,7 +58,7 @@ export function FileUpload({
   maxFiles = 5,
   disabled = false,
 }: FileUploadProps) {
-  const [uploads, setUploads] = useState<UploadProgress[]>([]);
+  const [uploads, setUploads] = useState<UploadStatus[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
   const onDrop = useCallback(
@@ -69,10 +67,9 @@ export function FileUpload({
 
       setIsUploading(true);
 
-      // Initialize upload progress
-      const initialUploads: UploadProgress[] = acceptedFiles.map((file) => ({
+      // Initialize upload status
+      const initialUploads: UploadStatus[] = acceptedFiles.map((file) => ({
         file,
-        progress: 0,
         status: "uploading",
       }));
 
@@ -85,7 +82,6 @@ export function FileUpload({
         setUploads((prev) =>
           prev.map((upload) => ({
             ...upload,
-            progress: 100,
             status: "success",
           })),
         );
@@ -94,7 +90,6 @@ export function FileUpload({
         setUploads((prev) =>
           prev.map((upload) => ({
             ...upload,
-            progress: 0,
             status: "error",
             error: error instanceof Error ? error.message : "Upload failed",
           })),
@@ -181,8 +176,6 @@ export function FileUpload({
                   )}
                 </span>
               </div>
-
-              <Progress value={upload.progress} className="h-2" />
 
               {upload.error && (
                 <Alert variant="destructive">

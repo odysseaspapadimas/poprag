@@ -3,16 +3,6 @@
  * Implements the RAG-powered chat flow following AI SDK cookbook pattern
  */
 
-import type { UIMessage } from "ai";
-import {
-  convertToModelMessages,
-  generateObject,
-  type LanguageModel,
-  streamText,
-} from "ai";
-import { and, desc, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import z from "zod";
 import { db } from "@/db";
 import {
   type Agent,
@@ -31,6 +21,16 @@ import {
 } from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
+import type { UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  generateObject,
+  type LanguageModel,
+  streamText,
+} from "ai";
+import { and, desc, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import z from "zod";
 import { reciprocalRankFusion } from "../utils";
 
 export interface ChatRequest {
@@ -236,9 +236,9 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         // Step 1: Rewrite query into multiple variations
         const { queries, keywords } = await rewriteQuery(
           createModel({
-            alias: "@cf/meta/llama-3.1-8b-instruct-fast",
+            alias: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             provider: "workers-ai",
-            modelId: "@cf/meta/llama-3.1-8b-instruct-fast",
+            modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
           }),
           userQuery,
         );
