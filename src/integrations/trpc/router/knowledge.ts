@@ -1,3 +1,7 @@
+import { AwsClient } from "aws4fetch";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import { db } from "@/db";
 import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
@@ -7,10 +11,6 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
-import { AwsClient } from "aws4fetch";
-import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 
 /**
  * Knowledge management router

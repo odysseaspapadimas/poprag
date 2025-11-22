@@ -1,5 +1,3 @@
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
@@ -12,6 +10,8 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;

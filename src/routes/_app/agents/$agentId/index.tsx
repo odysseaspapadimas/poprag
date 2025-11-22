@@ -305,6 +305,24 @@ function AgentDetailPage() {
                       {new Date(agent.updatedAt).toLocaleDateString()}
                     </dd>
                   </div>
+                  {(() => {
+                    const lastUpdateLog = auditLog.find(
+                      (log) =>
+                        log.eventType === "agent.updated" &&
+                        log.targetType === "agent" &&
+                        log.targetId === agent.id,
+                    );
+                    return lastUpdateLog ? (
+                      <div>
+                        <dt className="text-sm font-medium text-muted-foreground">
+                          Updated By
+                        </dt>
+                        <dd className="text-sm">
+                          {lastUpdateLog.actorName || lastUpdateLog.actorEmail}
+                        </dd>
+                      </div>
+                    ) : null;
+                  })()}
                   {indexPin && (
                     <div>
                       <dt className="text-sm font-medium text-muted-foreground">

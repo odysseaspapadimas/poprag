@@ -1,9 +1,9 @@
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { AlertCircle, CheckCircle, File, Upload, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 interface FileUploadProps {
   onUpload: (files: File[]) => Promise<void>;

@@ -1,3 +1,6 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,9 +13,6 @@ import {
 import { FileUpload } from "@/components/ui/file-upload";
 import { Progress } from "@/components/ui/progress";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
 
 interface KnowledgeUploadDialogProps {
   agentId: string;
