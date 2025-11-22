@@ -1,5 +1,3 @@
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -10,6 +8,8 @@ import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,
@@ -371,15 +371,19 @@ function AgentDetailPage() {
                 {auditLog.length > 0 ? (
                   <div className="space-y-2">
                     {auditLog.slice(0, 5).map((log) => (
-                      <div
-                        key={log.id}
-                        className="flex justify-between items-start p-3 bg-muted rounded"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{log.eventType}</p>
-                          <p className="text-xs text-muted-foreground">
+                      <div key={log.id} className="p-3 bg-muted rounded">
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">
+                              {log.eventType}
+                            </p>
+                            <p className="text-xs text-muted-foreground overflow-wrap-anywhere">
+                              by {log.actorName || log.actorEmail}
+                            </p>
+                          </div>
+                          <div className="text-xs text-muted-foreground shrink-0">
                             {new Date(log.createdAt).toLocaleString()}
-                          </p>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -491,24 +495,27 @@ function AgentDetailPage() {
               <h2 className="text-xl font-semibold mb-4">Audit Log</h2>
               <div className="space-y-2">
                 {auditLog.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex justify-between items-start p-3 bg-muted rounded"
-                  >
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{log.eventType}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {log.targetType} • {log.targetId}
-                      </p>
-                      {log.diff && (
-                        <pre className="text-xs mt-2 bg-background p-2 rounded overflow-auto">
-                          {JSON.stringify(log.diff, null, 2)}
-                        </pre>
-                      )}
+                  <div key={log.id} className="p-3 bg-muted rounded space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">{log.eventType}</p>
+                        <p className="text-xs text-muted-foreground mt-1 overflow-wrap-anywhere">
+                          by {log.actorName || log.actorEmail} •{" "}
+                          {log.targetType} •{" "}
+                          <span className="font-mono text-xs">
+                            {log.targetId.slice(0, 8)}...
+                          </span>
+                        </p>
+                      </div>
+                      <div className="text-xs text-muted-foreground shrink-0">
+                        {new Date(log.createdAt).toLocaleString()}
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground whitespace-nowrap ml-4">
-                      {new Date(log.createdAt).toLocaleString()}
-                    </div>
+                    {log.diff && (
+                      <pre className="text-xs mt-2 bg-background p-2 rounded overflow-x-auto max-w-full">
+                        {JSON.stringify(log.diff, null, 2)}
+                      </pre>
+                    )}
                   </div>
                 ))}
                 {auditLog.length === 0 && (

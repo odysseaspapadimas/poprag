@@ -1,3 +1,7 @@
+import { AwsClient } from "aws4fetch";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import { db } from "@/db";
 import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
@@ -7,10 +11,6 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
-import { AwsClient } from "aws4fetch";
-import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -221,7 +221,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-
       // Get content - either from input or from R2
       let content: string | Buffer;
       if (input.content) {
@@ -335,7 +334,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-
       // Generate embedding for the query
       const queryEmbedding = await generateEmbedding(input.query);
 
@@ -380,7 +378,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-
       // Build query with optional status filter
       const whereConditions = input.status
         ? and(
@@ -423,7 +420,6 @@ export const knowledgeRouter = createTRPCRouter({
       if (!agentData) {
         throw new Error("Agent not found");
       }
-
 
       // Check if source has R2 file
       if (!source.r2Key) {
@@ -522,7 +518,6 @@ export const knowledgeRouter = createTRPCRouter({
       if (!agentData) {
         throw new Error("Agent not found");
       }
-
 
       await deleteKnowledgeSource(input.sourceId);
 

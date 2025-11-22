@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
-import { ImageIcon, Send, X } from "lucide-react";
+import { ImageIcon, Send, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -207,7 +207,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     trpc.chat.confirmImageUpload.mutationOptions(),
   );
 
-  const { messages, sendMessage } = useChat({
+  const { messages, sendMessage, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: `/api/chat/${agent?.slug}`,
       body: {
@@ -303,6 +303,22 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
 
   return (
     <div className="relative flex flex-col h-full">
+      {/* Chat Header */}
+      <div className="flex justify-end p-2.5 border-b border-border/50">
+        <button
+          type="button"
+          onClick={() => {
+            setMessages([]);
+            setAttachedImages([]);
+          }}
+          disabled={messages.length === 0}
+          className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-md"
+        >
+          <Trash2 className="w-4 h-4" />
+          Clear chat
+        </button>
+      </div>
+
       <div className="flex-1 flex flex-col min-h-0">
         <Messages messages={messages} />
 

@@ -1,3 +1,6 @@
+import { and, desc, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import { db } from "@/db";
 import {
   agent,
@@ -10,11 +13,9 @@ import {
   prompt,
   promptVersion,
   runMetric,
+  user,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 
 /**
  * Agent management router
@@ -33,7 +34,7 @@ export const agentRouter = createTRPCRouter({
           limit: z.number().min(1).max(100).default(50),
           offset: z.number().min(0).default(0),
         })
-        .optional()
+        .optional(),
     )
     .query(async ({ input, ctx }) => {
       const conditions = [];
@@ -68,7 +69,7 @@ export const agentRouter = createTRPCRouter({
       z.object({
         id: z.string().optional(),
         slug: z.string().optional(),
-      })
+      }),
     )
     .query(async ({ input, ctx }) => {
       if (!input.id && !input.slug) {
@@ -107,7 +108,7 @@ export const agentRouter = createTRPCRouter({
           .default("private"),
         modelAlias: z.string(),
         systemPrompt: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       const agentId = nanoid();
@@ -209,7 +210,7 @@ export const agentRouter = createTRPCRouter({
         description: z.string().optional(),
         status: z.enum(["draft", "active", "archived"]).optional(),
         visibility: z.enum(["private", "workspace", "public"]).optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       const [existing] = await db
@@ -355,7 +356,7 @@ export const agentRouter = createTRPCRouter({
       z.object({
         agentId: z.string(),
         indexVersion: z.number(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       // Check if pin exists
@@ -408,20 +409,86 @@ export const agentRouter = createTRPCRouter({
       z.object({
         agentId: z.string(),
         limit: z.number().min(1).max(100).default(50),
-      })
+      }),
     )
     .query(async ({ input }) => {
-      return await db
-        .select()
+      // Get audit logs for the agent itself
+      const agentLogs = await db
+        .select({
+          id: auditLog.id,
+          actorId: auditLog.actorId,
+          actorName: user.name,
+          actorEmail: user.email,
+          eventType: auditLog.eventType,
+          targetType: auditLog.targetType,
+          targetId: auditLog.targetId,
+          diff: auditLog.diff,
+          createdAt: auditLog.createdAt,
+        })
         .from(auditLog)
+        .innerJoin(user, eq(auditLog.actorId, user.id))
         .where(
           and(
             eq(auditLog.targetType, "agent"),
-            eq(auditLog.targetId, input.agentId)
-          )
+            eq(auditLog.targetId, input.agentId),
+          ),
+        );
+
+      // Get audit logs for knowledge sources belonging to this agent
+      const knowledgeLogs = await db
+        .select({
+          id: auditLog.id,
+          actorId: auditLog.actorId,
+          actorName: user.name,
+          actorEmail: user.email,
+          eventType: auditLog.eventType,
+          targetType: auditLog.targetType,
+          targetId: auditLog.targetId,
+          diff: auditLog.diff,
+          createdAt: auditLog.createdAt,
+        })
+        .from(auditLog)
+        .innerJoin(user, eq(auditLog.actorId, user.id))
+        .innerJoin(knowledgeSource, eq(auditLog.targetId, knowledgeSource.id))
+        .where(
+          and(
+            eq(auditLog.targetType, "knowledge_source"),
+            eq(knowledgeSource.agentId, input.agentId),
+          ),
+        );
+
+      // Get audit logs for prompts belonging to this agent
+      const promptLogs = await db
+        .select({
+          id: auditLog.id,
+          actorId: auditLog.actorId,
+          actorName: user.name,
+          actorEmail: user.email,
+          eventType: auditLog.eventType,
+          targetType: auditLog.targetType,
+          targetId: auditLog.targetId,
+          diff: auditLog.diff,
+          createdAt: auditLog.createdAt,
+        })
+        .from(auditLog)
+        .innerJoin(user, eq(auditLog.actorId, user.id))
+        .innerJoin(prompt, eq(auditLog.targetId, prompt.id))
+        .where(
+          and(
+            eq(auditLog.targetType, "prompt"),
+            eq(prompt.agentId, input.agentId),
+          ),
+        );
+
+      // Combine and sort all logs
+      const allLogs = [...agentLogs, ...knowledgeLogs, ...promptLogs]
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         )
-        .orderBy(desc(auditLog.createdAt))
-        .limit(input.limit);
+        .slice(0, input.limit);
+
+      return allLogs;
     }),
 
   /**
@@ -433,7 +500,7 @@ export const agentRouter = createTRPCRouter({
         agentId: z.string(),
         limit: z.number().min(1).max(100).default(50),
         sinceMs: z.number().optional(),
-      })
+      }),
     )
     .query(async ({ input }) => {
       const conditions: any[] = [eq(runMetric.agentId, input.agentId)];
@@ -461,7 +528,7 @@ export const agentRouter = createTRPCRouter({
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),
         maxTokens: z.number().min(1).max(32000).optional(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       const [agentData] = await db
@@ -533,7 +600,7 @@ export const agentRouter = createTRPCRouter({
     .input(
       z.object({
         agentId: z.string(),
-      })
+      }),
     )
     .query(async ({ input }) => {
       const [policy] = await db
@@ -580,8 +647,8 @@ export const agentRouter = createTRPCRouter({
         .where(
           and(
             eq(promptVersion.label, "prod"),
-            eq(prompt.agentId, input.agentId)
-          )
+            eq(prompt.agentId, input.agentId),
+          ),
         )
         .limit(1);
 
