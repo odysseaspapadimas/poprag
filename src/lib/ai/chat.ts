@@ -15,8 +15,10 @@ import { nanoid } from "nanoid";
 import z from "zod";
 import { db } from "@/db";
 import {
+  type Agent,
   agent,
   agentModelPolicy,
+  chatImage,
   modelAlias,
   prompt,
   promptVersion,
@@ -50,6 +52,22 @@ export interface ChatOptions {
     OPENROUTER_API_KEY?: string;
     CLOUDFLARE_ACCOUNT_ID?: string;
   };
+}
+
+interface ImagePart {
+  type: "image";
+  image: {
+    id: string;
+    url: string;
+    fileName: string;
+    mime: string;
+    bytes: number;
+  };
+}
+
+interface MatchMetadata {
+  sourceId?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -106,29 +124,31 @@ User message: ${query}`;
 /**
  * Handle chat request with RAG
  */
-export async function handleChatRequest(request: ChatRequest) {
+export async function handleChatRequest(request: ChatRequest, env: Env) {
   const runId = nanoid();
   const startTime = Date.now();
 
   // Keep these in outer scope so we can record error metrics even when an
   // exception happens during agent/model resolution.
-  let agentData: any | undefined;
+  let agentData: Agent | undefined;
 
   try {
     // 1. Resolve agent
-    const [agentData] = await db
+    const [resolvedAgent] = await db
       .select()
       .from(agent)
       .where(eq(agent.slug, request.agentSlug))
       .limit(1);
 
-    if (!agentData) {
+    if (!resolvedAgent) {
       throw new Error(`Agent '${request.agentSlug}' not found`);
     }
 
-    if (agentData.status !== "active") {
+    if (resolvedAgent.status !== "active") {
       throw new Error(`Agent '${request.agentSlug}' is not active`);
     }
+
+    agentData = resolvedAgent;
 
     // 2. Load active prompt version (label=prod)
     const [systemPromptData] = await db
@@ -229,7 +249,7 @@ export async function handleChatRequest(request: ChatRequest) {
 
         // Step 2: Perform vector search for all query variations
         const vectorSearchPromises = queries.map((q) =>
-          findRelevantContent(q, agentData.id, {
+          findRelevantContent(q, agentData!.id, {
             topK: 5,
             minSimilarity: 0.3,
           }),
@@ -238,7 +258,7 @@ export async function handleChatRequest(request: ChatRequest) {
         // Step 3: Perform FTS search for keywords
         const ftsResults = await searchDocumentChunksFTS(
           keywords,
-          agentData.id,
+          agentData!.id,
           {
             limit: 5,
           },
@@ -255,6 +275,12 @@ export async function handleChatRequest(request: ChatRequest) {
           )} results`,
         );
         console.log(`[Chat] FTS search: ${ftsResults.length} results`);
+
+        if (keywords.length > 0 && ftsResults.length === 0) {
+          console.warn(
+            "[Chat] FTS search returned no results despite having keywords. FTS index may need rebuilding.",
+          );
+        }
 
         // Step 4: Apply reciprocal rank fusion to merge vector and FTS results
 
@@ -286,12 +312,15 @@ export async function handleChatRequest(request: ChatRequest) {
           );
 
           ragContext = {
-            chunks: topMatches.map((match) => ({
-              content: String(match.content),
-              sourceId: (match.metadata as any)?.sourceId || match.id,
-              score: match.score,
-              metadata: match.metadata,
-            })),
+            chunks: topMatches.map((match) => {
+              const metadata = match.metadata as MatchMetadata;
+              return {
+                content: String(match.content),
+                sourceId: metadata?.sourceId || match.id,
+                score: match.score,
+                metadata: match.metadata,
+              };
+            }),
           };
         } else {
           console.log(`[Chat] Hybrid search found no relevant chunks`);
@@ -337,11 +366,60 @@ export async function handleChatRequest(request: ChatRequest) {
 
     const model = createModel(modelConfig);
 
-    // 8. Stream response
+    // 8. Preprocess messages for model compatibility
+    // Always include image data - let the model handle unsupported formats
+    const processedMessages = await Promise.all(
+      request.messages.map(async (msg) => ({
+        ...msg,
+        parts: await Promise.all(
+          msg.parts.map(async (part) => {
+            // Type guard to check if this is an image part
+            if ("type" in part && (part as { type: string }).type === "image") {
+              const imagePart = part as unknown as ImagePart;
+              const imageData = imagePart.image;
+
+              // Fetch image metadata from database
+              const [imageRecord] = await db
+                .select()
+                .from(chatImage)
+                .where(eq(chatImage.id, imageData.id))
+                .limit(1);
+
+              if (!imageRecord || !imageRecord.r2Key) {
+                throw new Error(`Image not found: ${imageData.id}`);
+              }
+
+              // Fetch image from R2
+              const r2Object = await env.R2.get(imageRecord.r2Key);
+
+              if (!r2Object) {
+                throw new Error(`Image not found in R2: ${imageRecord.r2Key}`);
+              }
+
+              // Convert to base64
+              const arrayBuffer = await r2Object.arrayBuffer();
+              const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+              return {
+                type: "file" as const,
+                mediaType: imageData.mime,
+                url: `data:${imageData.mime};base64,${base64}`,
+              };
+            }
+            return part;
+          }),
+        ),
+      })),
+    );
+
+    // 9. Convert to model messages
+    const modelMessages = convertToModelMessages(processedMessages);
+
+    // 10. Stream response
     const result = streamText({
       model,
       system: systemPrompt,
-      messages: convertToModelMessages(request.messages),
+      messages: modelMessages,
       temperature: policy.temperature || 0.7,
       topP: policy.topP || 1,
       onFinish: async (event) => {
@@ -350,7 +428,7 @@ export async function handleChatRequest(request: ChatRequest) {
         // Save transcript
         await db.insert(transcript).values({
           id: nanoid(),
-          agentId: agentData.id,
+          agentId: agentData!.id,
           conversationId: request.requestTags?.[0] || nanoid(),
           runId,
           request: request as unknown as Record<string, unknown>,
@@ -372,14 +450,14 @@ export async function handleChatRequest(request: ChatRequest) {
           const metricId = nanoid();
           await db.insert(runMetric).values({
             id: metricId,
-            agentId: agentData.id,
+            agentId: agentData!.id,
             runId,
             tokens: event.usage?.totalTokens,
             latencyMs: latency,
             createdAt: new Date(),
           });
           console.debug(
-            `[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`,
+            `[Chat] Run metric saved for agent ${agentData!.id} (run=${runId}, id=${metricId})`,
           );
         } catch (err) {
           console.warn("[Chat] Failed to insert run metric:", err);
@@ -393,7 +471,7 @@ export async function handleChatRequest(request: ChatRequest) {
 
     // Log error metric if we have an agent id
     try {
-      if (typeof agentData !== "undefined" && agentData?.id) {
+      if (agentData?.id) {
         const metricId = nanoid();
         await db.insert(runMetric).values({
           id: metricId,

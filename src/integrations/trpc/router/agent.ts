@@ -33,7 +33,7 @@ export const agentRouter = createTRPCRouter({
           limit: z.number().min(1).max(100).default(50),
           offset: z.number().min(0).default(0),
         })
-        .optional(),
+        .optional()
     )
     .query(async ({ input, ctx }) => {
       const conditions = [];
@@ -68,7 +68,7 @@ export const agentRouter = createTRPCRouter({
       z.object({
         id: z.string().optional(),
         slug: z.string().optional(),
-      }),
+      })
     )
     .query(async ({ input, ctx }) => {
       if (!input.id && !input.slug) {
@@ -85,14 +85,6 @@ export const agentRouter = createTRPCRouter({
         // Return null so the UI can show a friendly 'not found' message instead of throwing an error
         return null;
       }
-
-      // No RBAC - all users can see all agents
-      // Check permissions
-      // if (result.createdBy !== ctx.session.user.id) {
-      //   if (result.visibility === "private") {
-      //     throw new Error("Access denied");
-      //   }
-      // }
 
       return result;
     }),
@@ -115,7 +107,7 @@ export const agentRouter = createTRPCRouter({
           .default("private"),
         modelAlias: z.string(),
         systemPrompt: z.string().optional(),
-      }),
+      })
     )
     .mutation(async ({ input, ctx }) => {
       const agentId = nanoid();
@@ -217,10 +209,9 @@ export const agentRouter = createTRPCRouter({
         description: z.string().optional(),
         status: z.enum(["draft", "active", "archived"]).optional(),
         visibility: z.enum(["private", "workspace", "public"]).optional(),
-      }),
+      })
     )
     .mutation(async ({ input, ctx }) => {
-      // Check permissions
       const [existing] = await db
         .select()
         .from(agent)
@@ -229,10 +220,6 @@ export const agentRouter = createTRPCRouter({
 
       if (!existing) {
         throw new Error("Agent not found");
-      }
-
-      if (existing.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
       }
 
       const updates: Partial<InsertAgent> = {
@@ -277,10 +264,6 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (existing.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
-
       await db
         .update(agent)
         .set({ status: "archived", updatedAt: new Date() })
@@ -313,10 +296,6 @@ export const agentRouter = createTRPCRouter({
 
       if (!existing) {
         throw new Error("Agent not found");
-      }
-
-      if (existing.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
       }
 
       // Only allow deletion of archived agents
@@ -376,7 +355,7 @@ export const agentRouter = createTRPCRouter({
       z.object({
         agentId: z.string(),
         indexVersion: z.number(),
-      }),
+      })
     )
     .mutation(async ({ input, ctx }) => {
       // Check if pin exists
@@ -429,7 +408,7 @@ export const agentRouter = createTRPCRouter({
       z.object({
         agentId: z.string(),
         limit: z.number().min(1).max(100).default(50),
-      }),
+      })
     )
     .query(async ({ input }) => {
       return await db
@@ -438,8 +417,8 @@ export const agentRouter = createTRPCRouter({
         .where(
           and(
             eq(auditLog.targetType, "agent"),
-            eq(auditLog.targetId, input.agentId),
-          ),
+            eq(auditLog.targetId, input.agentId)
+          )
         )
         .orderBy(desc(auditLog.createdAt))
         .limit(input.limit);
@@ -454,7 +433,7 @@ export const agentRouter = createTRPCRouter({
         agentId: z.string(),
         limit: z.number().min(1).max(100).default(50),
         sinceMs: z.number().optional(),
-      }),
+      })
     )
     .query(async ({ input }) => {
       const conditions: any[] = [eq(runMetric.agentId, input.agentId)];
@@ -482,10 +461,9 @@ export const agentRouter = createTRPCRouter({
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),
         maxTokens: z.number().min(1).max(32000).optional(),
-      }),
+      })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify agent exists and user has access
       const [agentData] = await db
         .select()
         .from(agent)
@@ -494,10 +472,6 @@ export const agentRouter = createTRPCRouter({
 
       if (!agentData) {
         throw new Error("Agent not found");
-      }
-
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
       }
 
       // Get current policy
@@ -559,7 +533,7 @@ export const agentRouter = createTRPCRouter({
     .input(
       z.object({
         agentId: z.string(),
-      }),
+      })
     )
     .query(async ({ input }) => {
       const [policy] = await db
@@ -606,8 +580,8 @@ export const agentRouter = createTRPCRouter({
         .where(
           and(
             eq(promptVersion.label, "prod"),
-            eq(prompt.agentId, input.agentId),
-          ),
+            eq(prompt.agentId, input.agentId)
+          )
         )
         .limit(1);
 

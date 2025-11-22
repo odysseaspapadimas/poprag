@@ -407,6 +407,36 @@ export const runMetric = sqliteTable(
   (table) => [index("run_metric_agent_idx").on(table.agentId, table.createdAt)],
 );
 
+export const chatImage = sqliteTable(
+  "chat_image",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    r2Bucket: text("r2_bucket"),
+    r2Key: text("r2_key"),
+    fileName: text("file_name"),
+    mime: text("mime"),
+    bytes: integer("bytes"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("chat_image_agent_idx").on(table.agentId),
+    index("chat_image_conversation_idx").on(table.conversationId),
+  ],
+);
+
 // ─────────────────────────────────────────────────────
 // Agent Type exports
 // ─────────────────────────────────────────────────────
@@ -445,3 +475,6 @@ export type InsertTranscript = typeof transcript.$inferInsert;
 
 export type RunMetric = typeof runMetric.$inferSelect;
 export type InsertRunMetric = typeof runMetric.$inferInsert;
+
+export type ChatImage = typeof chatImage.$inferSelect;
+export type InsertChatImage = typeof chatImage.$inferInsert;

@@ -1,6 +1,6 @@
-import { auth } from "@/auth/server";
 import type { TRPCRouterRecord } from "@trpc/server";
 import { z } from "zod";
+import { auth } from "@/auth/server";
 import { protectedProcedure, publicProcedure } from "../init";
 
 const LoginSchema = z.object({

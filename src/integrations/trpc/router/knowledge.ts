@@ -3,9 +3,9 @@ import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { generateEmbedding } from "@/lib/ai/embedding";
 import {
-    createKnowledgeSource,
-    deleteKnowledgeSource,
-    processKnowledgeSource,
+  createKnowledgeSource,
+  deleteKnowledgeSource,
+  processKnowledgeSource,
 } from "@/lib/ai/ingestion";
 import { AwsClient } from "aws4fetch";
 import { and, eq } from "drizzle-orm";
@@ -39,10 +39,6 @@ export const knowledgeRouter = createTRPCRouter({
 
       if (!agentData) {
         throw new Error("Agent not found");
-      }
-
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
       }
 
       // Create knowledge source record with agent-scoped R2 key
@@ -225,9 +221,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
 
       // Get content - either from input or from R2
       let content: string | Buffer;
@@ -342,9 +335,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
 
       // Generate embedding for the query
       const queryEmbedding = await generateEmbedding(input.query);
@@ -390,9 +380,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
 
       // Build query with optional status filter
       const whereConditions = input.status
@@ -437,9 +424,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
 
       // Check if source has R2 file
       if (!source.r2Key) {
@@ -539,9 +523,6 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Agent not found");
       }
 
-      if (agentData.createdBy !== ctx.session.user.id) {
-        throw new Error("Access denied");
-      }
 
       await deleteKnowledgeSource(input.sourceId);
 

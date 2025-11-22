@@ -1,7 +1,7 @@
-import { authClient } from "@/auth/client";
-import { Button } from "@/components/ui/button";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { authClient } from "@/auth/client";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/auth/sign-in")({
   component: RouteComponent,

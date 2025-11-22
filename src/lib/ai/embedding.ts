@@ -233,6 +233,11 @@ export async function searchDocumentChunksFTS(
     return uniqueResults.sort((a, b) => b.rank - a.rank).slice(0, limit * 2); // Return more for fusion
   } catch (error) {
     console.error("[FTS] Error searching document chunks:", error);
+    console.warn(
+      "[FTS] Full-text search failed. This may indicate FTS index corruption.",
+    );
+    console.warn("[FTS] To rebuild the FTS index, run: pnpm db:rebuild-fts");
+    console.warn("[FTS] Continuing with vector search only...");
     return [];
   }
 }

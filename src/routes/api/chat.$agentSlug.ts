@@ -40,11 +40,17 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
           const body = await request.json();
           const validated = chatRequestSchema.parse(body);
 
+          // Access Cloudflare Workers environment
+          const { env } = await import("cloudflare:workers");
+
           // Handle chat request
-          const result = await handleChatRequest({
-            agentSlug: params.agentSlug,
-            ...validated,
-          });
+          const result = await handleChatRequest(
+            {
+              agentSlug: params.agentSlug,
+              ...validated,
+            },
+            env,
+          );
 
           return result.toUIMessageStreamResponse();
         } catch (error) {

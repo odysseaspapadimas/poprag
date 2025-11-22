@@ -1,9 +1,11 @@
+import { Textarea } from "@/components/ui/textarea";
 import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
-import { Send } from "lucide-react";
+import { ImageIcon, Send, X } from "lucide-react";
+import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -14,6 +16,14 @@ import remarkGfm from "remark-gfm";
 interface ChatProps {
   agentId: string;
   onMessageComplete?: () => void;
+}
+
+interface AttachedImage {
+  id: string;
+  url: string;
+  fileName: string;
+  mime: string;
+  bytes: number;
 }
 
 function InitialLayout({ children }: { children: React.ReactNode }) {
@@ -100,6 +110,24 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
                       </div>
                     );
                   }
+                  if ((part as any).type === "image") {
+                    const image = (part as any).image;
+                    return (
+                      <div key={index} className="mb-4">
+                        <img
+                          src={image.url}
+                          alt={image.alt || image.fileName || "Uploaded image"}
+                          className="max-w-full h-auto rounded-lg border border-border"
+                          style={{ maxHeight: "400px" }}
+                        />
+                        {image.fileName && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {image.fileName}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
                   if (part.type === "tool-getInformation") {
                     const input = part.input as { question?: string };
                     const output = part.output as { matches?: any[] };
@@ -171,6 +199,14 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     setupStatus?.hasProdPrompt &&
     setupStatus?.isActive;
 
+  // Mutations for image upload
+  const uploadImageStart = useMutation(
+    trpc.chat.uploadImageStart.mutationOptions(),
+  );
+  const confirmImageUpload = useMutation(
+    trpc.chat.confirmImageUpload.mutationOptions(),
+  );
+
   const { messages, sendMessage } = useChat({
     transport: new DefaultChatTransport({
       api: `/api/chat/${agent?.slug}`,
@@ -186,6 +222,70 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     },
   });
   const [input, setInput] = useState("");
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      // Generate a conversation ID if we don't have messages yet
+      const conversationId = messages.length > 0 ? "default" : nanoid();
+
+      const uploadResult = await uploadImageStart.mutateAsync({
+        agentId,
+        conversationId,
+        fileName: file.name,
+        mime: file.type,
+        bytes: file.size,
+      });
+
+      // Upload the file to R2
+      const response = await fetch(uploadResult.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": file.type,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to upload image");
+      }
+
+      // Confirm upload
+      await confirmImageUpload.mutateAsync({
+        imageId: uploadResult.imageId,
+      });
+
+      // Add to attached images
+      const newImage: AttachedImage = {
+        id: uploadResult.imageId,
+        url: uploadResult.downloadUrl,
+        fileName: file.name,
+        mime: file.type,
+        bytes: file.size,
+      };
+
+      setAttachedImages((prev) => [...prev, newImage]);
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      // TODO: Show error toast
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleImageUpload(file);
+    }
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeImage = (imageId: string) => {
+    setAttachedImages((prev) => prev.filter((img) => img.id !== imageId));
+  };
 
   if (!agent) {
     return (
@@ -211,18 +311,62 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                sendMessage({ text: input });
-                setInput("");
+                const parts: any[] = [];
+
+                // Add attached images
+                attachedImages.forEach((img) => {
+                  parts.push({
+                    type: "image",
+                    image: {
+                      id: img.id,
+                      url: img.url,
+                      fileName: img.fileName,
+                      mime: img.mime,
+                      bytes: img.bytes,
+                    },
+                  });
+                });
+
+                // Add text if present
+                if (input.trim()) {
+                  parts.push({ type: "text", text: input });
+                }
+
+                if (parts.length > 0) {
+                  sendMessage({ parts });
+                  setInput("");
+                  setAttachedImages([]);
+                }
               }}
             >
+              {/* Display attached images */}
+              {attachedImages.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {attachedImages.map((img) => (
+                    <div key={img.id} className="relative">
+                      <img
+                        src={img.url}
+                        alt={img.fileName}
+                        className="w-16 h-16 object-cover rounded border"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(img.id)}
+                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full w-5 h-5 flex items-center justify-center text-xs"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="relative max-w-xl mx-auto">
-                <textarea
+                <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Type something..."
-                  className="w-full rounded-lg border border-primary/20 bg-card/50 pl-4 pr-12 py-3 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent resize-none overflow-hidden shadow-lg"
-                  rows={1}
-                  style={{ minHeight: "44px", maxHeight: "200px" }}
+                  className="pl-12 pr-20 py-3 resize-none overflow-hidden shadow-lg min-h-[44px] max-h-[200px]"
                   onInput={(e) => {
                     const target = e.target as HTMLTextAreaElement;
                     target.style.height = "auto";
@@ -231,19 +375,63 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      sendMessage({ text: input });
-                      setInput("");
+                      const parts: any[] = [];
+
+                      // Add attached images
+                      attachedImages.forEach((img) => {
+                        parts.push({
+                          type: "image",
+                          image: {
+                            id: img.id,
+                            url: img.url,
+                            fileName: img.fileName,
+                            mime: img.mime,
+                            bytes: img.bytes,
+                          },
+                        });
+                      });
+
+                      // Add text if present
+                      if (input.trim()) {
+                        parts.push({ type: "text", text: input });
+                      }
+
+                      if (parts.length > 0) {
+                        sendMessage({ parts });
+                        setInput("");
+                        setAttachedImages([]);
+                      }
                     }
                   }}
                 />
+
+                {/* Image upload button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute inset-y-0 left-2 flex items-center p-2 text-muted-foreground hover:text-primary transition-colors"
+                  disabled={uploadImageStart.isPending}
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </button>
+
                 <button
                   type="submit"
-                  disabled={!input.trim()}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-primary hover:text-primary/80 disabled:text-muted-foreground transition-colors focus:outline-none"
+                  disabled={!input.trim() && attachedImages.length === 0}
+                  className="absolute inset-y-0 right-2 flex items-center p-2 text-primary hover:text-primary/80 disabled:text-muted-foreground transition-colors focus:outline-none"
                 >
                   <Send className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
             </form>
           ) : (
             <div className="text-center">
