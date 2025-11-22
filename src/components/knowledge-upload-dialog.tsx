@@ -1,6 +1,3 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +10,9 @@ import {
 import { FileUpload } from "@/components/ui/file-upload";
 import { Progress } from "@/components/ui/progress";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 
 interface KnowledgeUploadDialogProps {
   agentId: string;
@@ -106,19 +106,14 @@ export function KnowledgeUploadDialog({
         // This avoids the R2 download round-trip for better performance
         if (file.size < 1024 * 1024) {
           // 1MB threshold
-          // Read file content directly
-          let content: string | ArrayBuffer;
-          if (file.type === "application/pdf") {
-            content = await file.arrayBuffer();
-          } else {
-            content = await file.text();
-          }
+          // Read file content as ArrayBuffer for all supported formats
+          // The backend will use toMarkdown for supported formats
+          const arrayBuffer = await file.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
 
           await uploadIndex.mutateAsync({
             sourceId: uploadResult.sourceId,
-            content: typeof content === "string" ? content : undefined,
-            contentBuffer:
-              content instanceof ArrayBuffer ? Buffer.from(content) : undefined,
+            contentBuffer: uint8Array,
           });
         } else {
           // For larger files, use the standard R2 download approach
@@ -177,7 +172,8 @@ export function KnowledgeUploadDialog({
           <DialogTitle>Upload Knowledge Sources</DialogTitle>
           <DialogDescription>
             Upload documents to enhance your agent's knowledge base. Supported
-            formats: PDF, TXT, MD, DOC, DOCX, CSV, JSON.
+            formats: PDF, Word (.docx), Excel (.xlsx, .xls), PowerPoint, HTML,
+            XML, CSV, OpenDocument (.ods, .odt), Apple Numbers, and more.
           </DialogDescription>
         </DialogHeader>
 

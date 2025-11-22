@@ -1,5 +1,5 @@
--- Rebuild FTS index for document_chunks
--- Run this if you get SQLITE_CORRUPT errors related to document_chunks_fts
+-- Fix FTS schema to match the document_chunks table schema
+-- The FTS table was missing source_id and agent_id columns
 
 -- Step 1: Drop the old triggers
 DROP TRIGGER IF EXISTS document_chunks_ai;
@@ -9,7 +9,7 @@ DROP TRIGGER IF EXISTS document_chunks_ad;
 -- Step 2: Drop the existing FTS table
 DROP TABLE IF EXISTS document_chunks_fts;
 
--- Step 3: Recreate the FTS table with correct schema matching document_chunks
+-- Step 3: Recreate the FTS table with correct schema
 CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
     id UNINDEXED,
     source_id UNINDEXED,
@@ -44,6 +44,3 @@ END;
 -- Step 5: Rebuild the index from current data (if any exists)
 INSERT INTO document_chunks_fts(rowid, id, source_id, text, agent_id)
 SELECT rowid, id, source_id, text, agent_id FROM document_chunks;
-
--- Step 6: Optimize the index
-INSERT INTO document_chunks_fts(document_chunks_fts) VALUES('optimize');

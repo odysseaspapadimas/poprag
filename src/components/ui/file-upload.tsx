@@ -1,9 +1,9 @@
-import { AlertCircle, CheckCircle, File, Upload, X } from "lucide-react";
-import { useCallback, useState } from "react";
-import { useDropzone } from "react-dropzone";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { AlertCircle, CheckCircle, File, Upload, X } from "lucide-react";
+import { useCallback, useState } from "react";
+import { useDropzone } from "react-dropzone";
 
 interface FileUploadProps {
   onUpload: (files: File[]) => Promise<void>;
@@ -23,14 +23,37 @@ interface UploadProgress {
 export function FileUpload({
   onUpload,
   accept = {
+    // PDF Documents
     "application/pdf": [".pdf"],
-    "text/plain": [".txt"],
-    "text/markdown": [".md"],
-    "application/msword": [".doc"],
+    // Images
+    "image/jpeg": [".jpeg", ".jpg"],
+    "image/png": [".png"],
+    "image/webp": [".webp"],
+    "image/svg+xml": [".svg"],
+    // HTML Documents
+    "text/html": [".html"],
+    // XML Documents
+    "application/xml": [".xml"],
+    // Microsoft Office Documents
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
+      ".xlsx",
+    ],
+    "application/vnd.ms-excel.sheet.macroenabled.12": [".xlsm"],
+    "application/vnd.ms-excel.sheet.binary.macroenabled.12": [".xlsb"],
+    "application/vnd.ms-excel": [".xls", ".et"],
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
       ".docx",
     ],
+    // Open Document Format
+    "application/vnd.oasis.opendocument.spreadsheet": [".ods"],
+    "application/vnd.oasis.opendocument.text": [".odt"],
+    // CSV
     "text/csv": [".csv"],
+    // Apple Documents
+    "application/vnd.apple.numbers": [".numbers"],
+    // Text formats
+    "text/plain": [".txt"],
+    "text/markdown": [".md", ".markdown"],
     "application/json": [".json"],
   },
   maxSize = 10 * 1024 * 1024, // 10MB
@@ -115,8 +138,9 @@ export function FileUpload({
             Drag & drop files here, or click to select files
           </p>
           <p className="text-xs text-muted-foreground">
-            Supports PDF, TXT, MD, DOC, DOCX, CSV, JSON • Max {maxFiles} files •{" "}
-            {(maxSize / (1024 * 1024)).toFixed(0)}MB each
+            Supports PDF, Word, Excel, PowerPoint, HTML, XML, CSV, images, and
+            more • Max {maxFiles} files • {(maxSize / (1024 * 1024)).toFixed(0)}
+            MB each
           </p>
         </div>
       </div>
@@ -135,8 +159,11 @@ export function FileUpload({
             </Button>
           </div>
 
-          {uploads.map((upload, index) => (
-            <div key={index} className="space-y-2">
+          {uploads.map((upload) => (
+            <div
+              key={`${upload.file.name}-${upload.file.size}`}
+              className="space-y-2"
+            >
               <div className="flex items-center gap-2">
                 <File className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium truncate">

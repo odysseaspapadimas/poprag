@@ -29,6 +29,13 @@
       "when": 1763753855108,
       "tag": "0003_loose_cammi",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1763824082000,
+      "tag": "0004_fix_fts_schema",
+      "breakpoints": true
     }
   ]
 }

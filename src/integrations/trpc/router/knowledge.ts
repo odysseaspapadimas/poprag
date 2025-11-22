@@ -1,7 +1,3 @@
-import { AwsClient } from "aws4fetch";
-import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 import { db } from "@/db";
 import { agent, auditLog, knowledgeSource } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
@@ -11,6 +7,10 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import { AwsClient } from "aws4fetch";
+import { and, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -196,7 +196,7 @@ export const knowledgeRouter = createTRPCRouter({
         reindex: z.boolean().default(false),
         // Optional: pass content directly to avoid R2 download
         content: z.string().optional(),
-        contentBuffer: z.instanceof(Buffer).optional(),
+        contentBuffer: z.instanceof(Uint8Array).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -222,7 +222,7 @@ export const knowledgeRouter = createTRPCRouter({
       }
 
       // Get content - either from input or from R2
-      let content: string | Buffer;
+      let content: string | Buffer | Uint8Array;
       if (input.content) {
         content = input.content;
       } else if (input.contentBuffer) {
@@ -436,7 +436,7 @@ export const knowledgeRouter = createTRPCRouter({
         }
 
         // Get content based on file type - PDFs need Buffer, others can be text
-        let content: string | Buffer;
+        let content: string | Buffer | Uint8Array;
         if (source.mime === "application/pdf") {
           const arrayBuffer = await r2Object.arrayBuffer();
           content = Buffer.from(arrayBuffer);

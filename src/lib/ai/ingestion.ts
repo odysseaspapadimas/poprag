@@ -1,17 +1,16 @@
+import { db } from "@/db";
+import {
+    documentChunks,
+    type InsertKnowledgeSource,
+    knowledgeSource,
+} from "@/db/schema";
 import type { TextSplitter } from "@langchain/textsplitters";
 import {
-  MarkdownTextSplitter,
-  RecursiveCharacterTextSplitter,
+    MarkdownTextSplitter,
+    RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulidx";
-import { extractText, getDocumentProxy } from "unpdf";
-import { db } from "@/db";
-import {
-  documentChunks,
-  type InsertKnowledgeSource,
-  knowledgeSource,
-} from "@/db/schema";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -87,41 +86,13 @@ export interface ParsedDocument {
 
 /**
  * Parse text content from uploaded file
- * Handles plain text, markdown, and PDF files
+ * Handles plain text, markdown, and various document formats using Cloudflare's toMarkdown service
  */
 export async function parseDocument(
-  content: string | Buffer,
+  content: string | Buffer | Uint8Array,
   mimeType: string,
   filename?: string,
 ): Promise<ParsedDocument> {
-  // Handle PDF files
-  if (mimeType === "application/pdf") {
-    if (typeof content === "string") {
-      throw new Error("PDF content must be a Buffer");
-    }
-    try {
-      const buffer = content as Buffer;
-      const pdf = await getDocumentProxy(new Uint8Array(buffer));
-      const result = await extractText(pdf, { mergePages: true });
-      const text = Array.isArray(result.text)
-        ? result.text.join(" ")
-        : result.text;
-
-      return {
-        content: text,
-        metadata: {
-          mimeType,
-          type: "pdf",
-          originalLength: text.length,
-        },
-      };
-    } catch (error) {
-      throw new Error(
-        `Failed to parse PDF: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
   // Convert buffer to string for text-based formats
   const text =
     typeof content === "string" ? content : content.toString("utf-8");
@@ -139,28 +110,117 @@ export async function parseDocument(
   }
 
   // Handle plain text
-  if (mimeType.startsWith("text/")) {
+  if (mimeType.startsWith("text/") && mimeType !== "text/csv") {
     return {
       content: text,
       metadata: { mimeType, type: "text", originalLength: text.length },
     };
   }
 
-  // For Excel/CSV files
-  if (
-    mimeType.includes("spreadsheet") ||
-    mimeType.includes("csv") ||
-    mimeType.includes("excel")
-  ) {
-    // For now, treat as text
-    // In production, use a library like xlsx or csv-parse for better parsing
-    return {
-      content: text,
-      metadata: { mimeType, type: "spreadsheet", originalLength: text.length },
-    };
+  // For binary formats supported by toMarkdown, use Cloudflare's toMarkdown service
+  const supportedMimeTypes = [
+    // PDF
+    "application/pdf",
+    // Images
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/svg+xml",
+    // HTML
+    "text/html",
+    // XML
+    "application/xml",
+    // Microsoft Office
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel.sheet.macroenabled.12",
+    "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    // Open Document Format
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.text",
+    // CSV
+    "text/csv",
+    // Apple Documents
+    "application/vnd.apple.numbers",
+  ];
+
+  const supportedExtensions = [
+    // PDF
+    ".pdf",
+    // Images
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".webp",
+    ".svg",
+    // HTML
+    ".html",
+    // XML
+    ".xml",
+    // Microsoft Office
+    ".xlsx",
+    ".xlsm",
+    ".xlsb",
+    ".xls",
+    ".et",
+    ".docx",
+    // Open Document Format
+    ".ods",
+    ".odt",
+    // CSV
+    ".csv",
+    // Apple Documents
+    ".numbers",
+  ];
+
+  const isSupportedFormat =
+    supportedMimeTypes.includes(mimeType) ||
+    (filename &&
+      supportedExtensions.some((ext) => filename.toLowerCase().endsWith(ext)));
+
+  if (isSupportedFormat && typeof content !== "string") {
+    try {
+      const { env } = await import("cloudflare:workers");
+      // Convert to proper Uint8Array for Blob creation
+      const uint8Array = Buffer.isBuffer(content)
+        ? new Uint8Array(
+            content.buffer.slice(
+              content.byteOffset,
+              content.byteOffset + content.byteLength,
+            ),
+          )
+        : content;
+      const blob = new Blob([uint8Array as any], { type: mimeType });
+      const file = { name: filename || "document", blob };
+
+      const result = await env.AI.toMarkdown(file);
+
+      if (result.format === "markdown") {
+        return {
+          content: result.data,
+          metadata: {
+            mimeType,
+            type: "markdown",
+            originalLength: result.data.length,
+            tokens: result.tokens,
+          },
+        };
+      } else {
+        throw new Error(`toMarkdown failed: ${result.error}`);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to convert document to markdown: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
-  throw new Error(`Unsupported file type: ${mimeType}`);
+  // For unsupported formats, treat as text
+  return {
+    content: text,
+    metadata: { mimeType, type: "text", originalLength: text.length },
+  };
 }
 
 /**
@@ -169,7 +229,7 @@ export async function parseDocument(
  */
 export async function processKnowledgeSource(
   sourceId: string,
-  content: string | Buffer,
+  content: string | Buffer | Uint8Array,
   options?: {
     embeddingModel?: string;
     embeddingDimensions?: number;
