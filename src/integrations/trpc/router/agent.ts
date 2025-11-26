@@ -1,21 +1,21 @@
+import { db } from "@/db";
+import {
+    agent,
+    agentIndexPin,
+    agentModelPolicy,
+    auditLog,
+    type InsertAgent,
+    knowledgeSource,
+    modelAlias,
+    prompt,
+    promptVersion,
+    runMetric,
+    user,
+} from "@/db/schema";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { db } from "@/db";
-import {
-  agent,
-  agentIndexPin,
-  agentModelPolicy,
-  auditLog,
-  type InsertAgent,
-  knowledgeSource,
-  modelAlias,
-  prompt,
-  promptVersion,
-  runMetric,
-  user,
-} from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
  * Agent management router
@@ -108,6 +108,11 @@ export const agentRouter = createTRPCRouter({
           .default("private"),
         modelAlias: z.string(),
         systemPrompt: z.string().optional(),
+        ragEnabled: z.boolean().default(true),
+        rewriteQuery: z.boolean().default(false),
+        rewriteModel: z.string().optional(),
+        rerank: z.boolean().default(false),
+        rerankModel: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -146,6 +151,11 @@ export const agentRouter = createTRPCRouter({
         description: input.description || null,
         visibility: input.visibility,
         status: "draft",
+        ragEnabled: input.ragEnabled,
+        rewriteQuery: input.rewriteQuery,
+        rewriteModel: input.rewriteModel,
+        rerank: input.rerank,
+        rerankModel: input.rerankModel,
         createdBy: ctx.session.user.id,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -210,6 +220,11 @@ export const agentRouter = createTRPCRouter({
         description: z.string().optional(),
         status: z.enum(["draft", "active", "archived"]).optional(),
         visibility: z.enum(["private", "workspace", "public"]).optional(),
+        ragEnabled: z.boolean().optional(),
+        rewriteQuery: z.boolean().optional(),
+        rewriteModel: z.string().optional(),
+        rerank: z.boolean().optional(),
+        rerankModel: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -232,6 +247,14 @@ export const agentRouter = createTRPCRouter({
         updates.description = input.description;
       if (input.status) updates.status = input.status;
       if (input.visibility) updates.visibility = input.visibility;
+      if (input.ragEnabled !== undefined) updates.ragEnabled = input.ragEnabled;
+      if (input.rewriteQuery !== undefined)
+        updates.rewriteQuery = input.rewriteQuery;
+      if (input.rewriteModel !== undefined)
+        updates.rewriteModel = input.rewriteModel;
+      if (input.rerank !== undefined) updates.rerank = input.rerank;
+      if (input.rerankModel !== undefined)
+        updates.rerankModel = input.rerankModel;
 
       await db.update(agent).set(updates).where(eq(agent.id, input.id));
 

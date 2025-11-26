@@ -1,5 +1,5 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 
 interface Props {
   agentId: string;
@@ -23,6 +23,14 @@ export function AgentMetrics({ agentId }: Props) {
   const avgLatency = Math.round(
     (metrics || []).reduce((acc, m) => acc + (m.latencyMs ?? 0), 0) /
       Math.max(1, totalRuns),
+  );
+
+  const ttftMetrics = (metrics || []).filter(
+    (m) => m.timeToFirstTokenMs != null,
+  );
+  const avgTtft = Math.round(
+    ttftMetrics.reduce((acc, m) => acc + (m.timeToFirstTokenMs ?? 0), 0) /
+      Math.max(1, ttftMetrics.length),
   );
 
   const formatCurrency = (microcents?: number | null) => {
@@ -54,6 +62,14 @@ export function AgentMetrics({ agentId }: Props) {
           <div className="text-sm text-muted-foreground">Average Latency</div>
           <div className="text-xl font-semibold">{avgLatency} ms</div>
         </div>
+        <div className="bg-card border rounded-lg p-4">
+          <div className="text-sm text-muted-foreground">
+            Average Time to First Token
+          </div>
+          <div className="text-xl font-semibold">
+            {ttftMetrics.length > 0 ? `${avgTtft} ms` : "-"}
+          </div>
+        </div>
       </div>
 
       <div className="bg-card border rounded p-4">
@@ -72,6 +88,7 @@ export function AgentMetrics({ agentId }: Props) {
                   <th>Tokens</th>
                   <th>Cost</th>
                   <th>Latency (ms)</th>
+                  <th>TTFT (ms)</th>
                   <th>Error</th>
                 </tr>
               </thead>
@@ -86,6 +103,9 @@ export function AgentMetrics({ agentId }: Props) {
                       {formatCurrency(m.costMicrocents)}
                     </td>
                     <td className="py-2 align-top">{m.latencyMs ?? "-"}</td>
+                    <td className="py-2 align-top">
+                      {m.timeToFirstTokenMs ?? "-"}
+                    </td>
                     <td className="py-2 align-top">{m.errorType ?? "-"}</td>
                   </tr>
                 ))}

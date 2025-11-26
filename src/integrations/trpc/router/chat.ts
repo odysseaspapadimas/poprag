@@ -1,9 +1,9 @@
 import { AwsClient } from "aws4fetch";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
-import { agent, auditLog, chatImage } from "@/db/schema";
+import { agent, auditLog, chatImage, transcript } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
@@ -236,5 +236,42 @@ export const chatRouter = createTRPCRouter({
       });
 
       return { success: true };
+    }),
+
+  /**
+   * Get RAG debug info for a transcript
+   */
+  getRAGDebugInfo: protectedProcedure
+    .input(
+      z.object({
+        runId: z.string().optional(),
+        conversationId: z.string().optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      if (!input.runId && !input.conversationId) {
+        throw new Error("Must provide either runId or conversationId");
+      }
+
+      const [latestTranscript] = await db
+        .select()
+        .from(transcript)
+        .where(
+          input.runId
+            ? eq(transcript.runId, input.runId)
+            : eq(transcript.conversationId, input.conversationId!),
+        )
+        .orderBy(desc(transcript.createdAt))
+        .limit(1);
+
+      if (!latestTranscript) {
+        return null;
+      }
+
+      // Extract RAG debug info from request
+      const request = latestTranscript.request as Record<string, unknown>;
+      const ragDebug = request.ragDebug as any;
+
+      return ragDebug || null;
     }),
 });

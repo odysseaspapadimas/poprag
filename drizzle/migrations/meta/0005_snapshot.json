@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0004_fix_fts_schema",
-  "prevId": "edf69e30-afd5-4b2e-93aa-c08cc71a0964",
+  "id": "1c9a941b-d24f-48ec-93d0-332f6fa5b2dc",
+  "prevId": "0004_fix_fts_schema",
   "tables": {
     "account": {
       "name": "account",
@@ -201,6 +201,44 @@
         "last_deployed_at": {
           "name": "last_deployed_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rag_enabled": {
+          "name": "rag_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "rewrite_query": {
+          "name": "rewrite_query",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "rewrite_model": {
+          "name": "rewrite_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rerank": {
+          "name": "rerank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "rerank_model": {
+          "name": "rerank_model",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1253,6 +1291,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "time_to_first_token_ms": {
+          "name": "time_to_first_token_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "error_type": {
           "name": "error_type",
           "type": "text",
@@ -1672,6 +1717,7 @@
       "checkConstraints": {}
     }
   },
+  "views": {},
   "enums": {},
   "_meta": {
     "schemas": {},

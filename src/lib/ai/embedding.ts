@@ -1,7 +1,8 @@
 import { db } from "@/db";
+import { documentChunks } from "@/db/schema";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { env } from "cloudflare:workers";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 
 /**
  * Default embedding model configuration
@@ -37,7 +38,7 @@ export async function generateChunks(
     chunkOverlap?: number;
     minChunkSize?: number;
     maxChunkSize?: number; // Hard limit for metadata
-  },
+  }
 ): Promise<string[]> {
   const {
     chunkSize = 1024, // Optimized for semantic coherence
@@ -60,7 +61,7 @@ export async function generateChunks(
     .map((chunk) => {
       if (chunk.length > maxChunkSize) {
         console.warn(
-          `Chunk exceeds max size (${chunk.length} > ${maxChunkSize}), truncating`,
+          `Chunk exceeds max size (${chunk.length} > ${maxChunkSize}), truncating`
         );
         return chunk.substring(0, maxChunkSize);
       }
@@ -68,23 +69,23 @@ export async function generateChunks(
     });
 
   console.log(
-    `Generated ${filteredChunks.length} chunks from ${input.length} characters`,
+    `Generated ${filteredChunks.length} chunks from ${input.length} characters`
   );
   if (filteredChunks.length > 0) {
     console.log(
       `Chunk sizes: min=${Math.min(
-        ...filteredChunks.map((c) => c.length),
+        ...filteredChunks.map((c) => c.length)
       )}, max=${Math.max(
-        ...filteredChunks.map((c) => c.length),
+        ...filteredChunks.map((c) => c.length)
       )}, avg=${Math.floor(
         filteredChunks.reduce((sum, c) => sum + c.length, 0) /
-          filteredChunks.length,
-      )}`,
+          filteredChunks.length
+      )}`
     );
     console.log(
       `First chunk preview (${
         filteredChunks[0].length
-      } chars): ${filteredChunks[0].substring(0, 100)}...`,
+      } chars): ${filteredChunks[0].substring(0, 100)}...`
     );
   }
 
@@ -115,22 +116,21 @@ export async function generateEmbedding(value: string): Promise<number[]> {
     {
       text: [input],
     },
-    aiOptions,
+    aiOptions
   );
-
   const embedding = (response as { data: number[][] }).data[0];
 
   if (!Array.isArray(embedding) || embedding.length === 0) {
     throw new Error(
       `Invalid embedding response: expected array with 1024 dimensions, got ${
         Array.isArray(embedding) ? embedding.length : "non-array"
-      }`,
+      }`
     );
   }
 
   if (embedding.length !== 1024) {
     throw new Error(
-      `Invalid embedding dimensions: expected 1024, got ${embedding.length}`,
+      `Invalid embedding dimensions: expected 1024, got ${embedding.length}`
     );
   }
 
@@ -148,7 +148,7 @@ export async function searchDocumentChunksFTS(
   agentId: string,
   options?: {
     limit?: number;
-  },
+  }
 ): Promise<Array<{ id: string; text: string; rank: number }>> {
   const { limit = 5 } = options || {};
 
@@ -187,13 +187,13 @@ export async function searchDocumentChunksFTS(
           text: string;
           rank: number;
         }>;
-      }),
+      })
     );
 
     // Flatten and deduplicate results
     const allResults = results.flat();
     const uniqueResults = Array.from(
-      new Map(allResults.map((r) => [r.id, r])).values(),
+      new Map(allResults.map((r) => [r.id, r])).values()
     );
 
     // Sort by rank and limit
@@ -201,7 +201,7 @@ export async function searchDocumentChunksFTS(
   } catch (error) {
     console.error("[FTS] Error searching document chunks:", error);
     console.warn(
-      "[FTS] Full-text search failed. This may indicate FTS index corruption.",
+      "[FTS] Full-text search failed. This may indicate FTS index corruption."
     );
     console.warn("[FTS] To rebuild the FTS index, run: pnpm db:rebuild-fts");
     console.warn("[FTS] Continuing with vector search only...");
@@ -223,7 +223,7 @@ export async function findRelevantContent(
     indexVersion?: number;
     keywords?: string[]; // Optional keywords for hybrid search
     useHybridSearch?: boolean; // Enable query rewriting + hybrid search
-  },
+  }
 ) {
   const {
     topK = 6,
@@ -245,18 +245,18 @@ export async function findRelevantContent(
     console.log(
       `[RAG] Searching for: "${cleanedQuery.substring(
         0,
-        100,
-      )}..." in namespace: ${agentId}`,
+        100
+      )}..." in namespace: ${agentId}`
     );
     console.log(
-      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}, hybridSearch=${useHybridSearch}`,
+      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}, hybridSearch=${useHybridSearch}`
     );
 
     // Generate embedding for the query with consistent dimensions
     const queryEmbedding = await generateEmbedding(cleanedQuery);
 
     console.log(
-      `[RAG] Query embedding generated: ${queryEmbedding.length} dimensions`,
+      `[RAG] Query embedding generated: ${queryEmbedding.length} dimensions`
     );
 
     // Query Vectorize with agent namespace
@@ -273,12 +273,12 @@ export async function findRelevantContent(
     });
 
     console.log(
-      `[RAG] Vectorize returned ${results.matches?.length || 0} raw results`,
+      `[RAG] Vectorize returned ${results.matches?.length || 0} raw results`
     );
 
     if (!results.matches || results.matches.length === 0) {
       console.warn(
-        `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`,
+        `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`
       );
       console.warn(`[RAG] Query was: "${cleanedQuery.substring(0, 100)}..."`);
       return {
@@ -324,8 +324,8 @@ export async function findRelevantContent(
             `[RAG] Match ${
               match.id
             } missing text field in metadata. Available fields: ${Object.keys(
-              match.metadata,
-            ).join(", ")}`,
+              match.metadata
+            ).join(", ")}`
           );
           return false;
         }
@@ -335,8 +335,8 @@ export async function findRelevantContent(
         if (!meetsThreshold) {
           console.debug(
             `[RAG] Match ${match.id} score ${match.score.toFixed(
-              3,
-            )} below threshold ${minSimilarity}`,
+              3
+            )} below threshold ${minSimilarity}`
           );
           return false;
         }
@@ -363,23 +363,60 @@ export async function findRelevantContent(
       // Take only topK after filtering
       .slice(0, topK);
 
+    // Fetch full text from database to avoid Vectorize metadata truncation
+    if (matches.length > 0) {
+      try {
+        const chunkIds = matches.map((m) => m.id);
+        const dbChunks = await db
+          .select({
+            id: documentChunks.id,
+            text: documentChunks.text,
+          })
+          .from(documentChunks)
+          .where(inArray(documentChunks.id, chunkIds));
+
+        const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c.text]));
+
+        let replacedCount = 0;
+        matches.forEach((match) => {
+          const fullText = dbChunkMap.get(match.id);
+          if (fullText && fullText.length > match.content.length) {
+            match.content = fullText;
+            match.metadata.contentLength = fullText.length;
+            replacedCount++;
+          }
+        });
+
+        if (replacedCount > 0) {
+          console.log(
+            `[RAG] Replaced ${replacedCount} chunks with full text from DB`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          "[RAG] Failed to fetch full text from DB, using Vectorize metadata:",
+          error
+        );
+      }
+    }
+
     if (matches.length === 0) {
       console.warn(
-        `[RAG] All ${results.matches.length} results filtered out. Check metadata structure and similarity threshold.`,
+        `[RAG] All ${results.matches.length} results filtered out. Check metadata structure and similarity threshold.`
       );
     } else {
       console.log(
-        `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`,
+        `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`
       );
       console.log(
         `[RAG] Score range: ${matches[0].score.toFixed(3)} to ${matches[
           matches.length - 1
-        ].score.toFixed(3)}`,
+        ].score.toFixed(3)}`
       );
       console.log(
         `[RAG] Content lengths: ${matches
           .map((m) => m.metadata.contentLength)
-          .join(", ")}`,
+          .join(", ")}`
       );
     }
 
@@ -401,6 +438,93 @@ export async function findRelevantContent(
       query: userQuery,
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+/**
+ * Rerank documents using BAAI BGE Reranker
+ * Uses @cf/baai/bge-reranker-large
+ */
+export async function rerank(
+  query: string,
+  documents: Array<{
+    id: string;
+    content: string;
+    metadata?: Record<string, unknown>;
+  }>,
+  topK: number = 5
+): Promise<
+  Array<{
+    id: string;
+    content: string;
+    score: number;
+    metadata?: Record<string, unknown>;
+  }>
+> {
+  if (documents.length === 0) return [];
+
+  try {
+    console.log(
+      `[Rerank] Reranking ${documents.length} documents for query: "${query.substring(0, 50)}..."`
+    );
+
+    const sourceDocuments = documents.map((d) => d.content);
+
+    // Use AI Gateway if configured
+    const aiOptions = env.AI_GATEWAY_ID
+      ? { gateway: { id: env.AI_GATEWAY_ID } }
+      : {};
+
+    const response = await env.AI.run(
+      "@cf/baai/bge-reranker-base",
+      {
+        query,
+        contexts: sourceDocuments.map(text => ({ text })),
+      },
+      aiOptions
+    );
+
+    // Response is array of { index: number, score: number }
+    // Handle potential differences in response structure between models
+    type RerankItem = { index?: number; id?: number; score: number };
+    type RerankResponse = { result?: RerankItem[]; response?: RerankItem[] } | RerankItem[];
+
+    const typedResponse = response as unknown as RerankResponse;
+    const results = "result" in typedResponse && typedResponse.result ? typedResponse.result :
+                    "response" in typedResponse && typedResponse.response ? typedResponse.response :
+                    Array.isArray(typedResponse) ? typedResponse : [];
+
+    if (!Array.isArray(results)) {
+      console.warn("[Rerank] Unexpected response format:", response);
+      // Fallback: return original documents sliced
+      return documents.slice(0, topK).map((d) => ({ ...d, score: 0 }));
+    }
+
+    // Map scores back to documents
+    const reranked = results.map((res) => {
+      const docIndex = res.index ?? res.id;
+      if (docIndex === undefined) throw new Error("Invalid rerank result: missing index/id");
+      const doc = documents[docIndex];
+      return {
+        ...doc,
+        score: res.score,
+      };
+    });
+
+    // Sort by score descending
+    reranked.sort((a, b) => b.score - a.score);
+
+    const finalResults = reranked.slice(0, topK);
+
+    if (finalResults.length > 0) {
+      console.log(`[Rerank] Top score: ${finalResults[0].score.toFixed(4)}`);
+    }
+
+    return finalResults;
+  } catch (error) {
+    console.error("[Rerank] Error reranking documents:", error);
+    // Fallback to original order
+    return documents.slice(0, topK).map((d) => ({ ...d, score: 0 }));
   }
 }
 

@@ -534,4 +534,69 @@ export const knowledgeRouter = createTRPCRouter({
 
       return { success: true };
     }),
+
+  /**
+   * Get presigned download URL for a knowledge source
+   */
+  getDownloadUrl: protectedProcedure
+    .input(z.object({ sourceId: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const [source] = await db
+        .select()
+        .from(knowledgeSource)
+        .where(eq(knowledgeSource.id, input.sourceId))
+        .limit(1);
+
+      if (!source) {
+        throw new Error("Source not found");
+      }
+
+      // Verify user has access to the agent
+      const [agentData] = await db
+        .select()
+        .from(agent)
+        .where(eq(agent.id, source.agentId))
+        .limit(1);
+
+      if (!agentData) {
+        throw new Error("Agent not found");
+      }
+
+      if (!source.r2Key) {
+        throw new Error("No R2 file found for this source");
+      }
+
+      // Generate R2 presigned URL for download
+      const { env } = await import("cloudflare:workers");
+
+      // Create AWS4 client for R2 with credentials from environment
+      const aws = new AwsClient({
+        accessKeyId: env.R2_ACCESS_KEY_ID,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      });
+
+      // Build the R2 URL following Cloudflare's format: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
+      const url = new URL(
+        `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${source.r2Key}`,
+      );
+
+      // Set expiry in search params (24 hours for viewing)
+      url.searchParams.set("X-Amz-Expires", "86400");
+
+      // Create the request to sign
+      const request = new Request(url, {
+        method: "GET",
+      });
+
+      // Sign the request with query parameters (generates presigned URL)
+      const signedRequest = await aws.sign(request, {
+        aws: { signQuery: true },
+      });
+
+      return {
+        downloadUrl: signedRequest.url,
+        fileName: source.fileName,
+        mime: source.mime,
+      };
+    }),
 });

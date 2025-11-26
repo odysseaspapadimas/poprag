@@ -1,10 +1,3 @@
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
-import { z } from "zod";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,15 +36,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Agent } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { z } from "zod";
 
 const editAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().optional(),
   status: z.enum(["draft", "active", "archived"]),
   visibility: z.enum(["private", "workspace", "public"]),
+  ragEnabled: z.boolean(),
+  rewriteQuery: z.boolean(),
+  rewriteModel: z.string().optional(),
+  rerank: z.boolean(),
+  rerankModel: z.string().optional(),
 });
 
 type EditAgentForm = z.infer<typeof editAgentSchema>;
@@ -69,6 +79,10 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  const { data: modelAliases } = useSuspenseQuery(
+    trpc.model.list.queryOptions(),
+  );
+
   // Form setup
   const form = useForm<EditAgentForm>({
     resolver: zodResolver(editAgentSchema),
@@ -77,6 +91,11 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
       description: agent.description || "",
       status: agent.status,
       visibility: agent.visibility,
+      ragEnabled: agent.ragEnabled ?? true,
+      rewriteQuery: agent.rewriteQuery ?? false,
+      rewriteModel: agent.rewriteModel || undefined,
+      rerank: agent.rerank ?? false,
+      rerankModel: agent.rerank ? "@cf/baai/bge-reranker-base" : undefined,
     },
   });
 
@@ -137,9 +156,13 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
   );
 
   const onSubmit = (data: EditAgentForm) => {
+    const submitData = { ...data };
+    if (data.rerank) {
+      submitData.rerankModel = "@cf/baai/bge-reranker-base";
+    }
     updateAgent.mutate({
       id: agent.id,
-      ...data,
+      ...submitData,
     });
   };
 
@@ -157,7 +180,7 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
         <DialogTrigger asChild>
           <div onClick={() => setOpen(true)}>{trigger}</div>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[525px]">
+        <DialogContent className="sm:max-w-[525px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Agent Settings</DialogTitle>
             <DialogDescription>
@@ -253,6 +276,132 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                   </FormItem>
                 )}
               />
+
+              <div className="space-y-4 border rounded-lg p-4">
+                <h3 className="font-medium">RAG Settings</h3>
+                <FormField
+                  control={form.control}
+                  name="ragEnabled"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                      <div className="space-y-0.5">
+                        <FormLabel>Enable RAG</FormLabel>
+                        <FormDescription>
+                          Allow the agent to search knowledge base
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                {form.watch("ragEnabled") && (
+                  <>
+                    <FormField
+                      control={form.control}
+                      name="rewriteQuery"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                          <div className="space-y-0.5">
+                            <FormLabel>Rewrite Queries</FormLabel>
+                            <FormDescription>
+                              Improve search results by rewriting queries
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    {form.watch("rewriteQuery") && (
+                      <FormField
+                        control={form.control}
+                        name="rewriteModel"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Rewrite Model</FormLabel>
+                            <Select
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select a model" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {modelAliases.map((model) => (
+                                  <SelectItem
+                                    key={model.alias}
+                                    value={model.alias}
+                                  >
+                                    {model.alias}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+
+                    <FormField
+                      control={form.control}
+                      name="rerank"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                          <div className="space-y-0.5">
+                            <FormLabel>Rerank Results</FormLabel>
+                            <FormDescription>
+                              Re-order search results for better relevance
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    {form.watch("rerank") && (
+                      <FormField
+                        control={form.control}
+                        name="rerankModel"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Rerank Model</FormLabel>
+                            <FormControl>
+                              <Input
+                                value="@cf/baai/bge-reranker-base"
+                                disabled
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Fixed reranker model used for reordering results.
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+
               <DialogFooter className="flex-col gap-2 sm:flex-row">
                 <div className="flex gap-2">
                   {agent.status !== "archived" && (

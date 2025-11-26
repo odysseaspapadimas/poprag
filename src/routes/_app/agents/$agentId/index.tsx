@@ -4,12 +4,14 @@ import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
 import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
+import { KnowledgeSourceViewer } from "@/components/knowledge-source-viewer";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
 import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useState } from "react";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,
@@ -64,6 +66,11 @@ function AgentDetailPage() {
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [viewingSource, setViewingSource] = useState<{
+    id: string;
+    fileName: string;
+    mime: string | null;
+  } | null>(null);
 
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
@@ -346,9 +353,19 @@ function AgentDetailPage() {
                         className="flex justify-between items-center p-3 bg-muted rounded"
                       >
                         <div>
-                          <p className="text-sm font-medium">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewingSource({
+                                id: source.id,
+                                fileName: source.fileName || "Unknown",
+                                mime: source.mime,
+                              })
+                            }
+                            className="text-sm font-medium hover:text-primary transition-colors text-left"
+                          >
                             {source.fileName}
-                          </p>
+                          </button>
                           <p className="text-xs text-muted-foreground">
                             {source.mime} •{" "}
                             {((source.bytes ?? 0) / 1024).toFixed(2)} KB
@@ -446,7 +463,19 @@ function AgentDetailPage() {
                     className="flex justify-between items-center p-4 border rounded"
                   >
                     <div>
-                      <p className="font-medium">{source.fileName}</p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingSource({
+                            id: source.id,
+                            fileName: source.fileName || "Unknown",
+                            mime: source.mime,
+                          })
+                        }
+                        className="font-medium hover:text-primary transition-colors text-left"
+                      >
+                        {source.fileName}
+                      </button>
                       <p className="text-sm text-muted-foreground">
                         {source.mime} •{" "}
                         {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
@@ -551,6 +580,21 @@ function AgentDetailPage() {
           <Chat agentId={agentId} onMessageComplete={handleMessageComplete} />
         </div>
       </div>
+
+      {/* Knowledge Source Viewer Modal */}
+      {viewingSource && (
+        <KnowledgeSourceViewer
+          sourceId={viewingSource.id}
+          fileName={viewingSource.fileName}
+          mime={viewingSource.mime}
+          open={!!viewingSource}
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewingSource(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

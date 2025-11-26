@@ -1,8 +1,16 @@
+import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
-import { ImageIcon, Send, Trash2, X } from "lucide-react";
+import {
+  ImageIcon,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -10,8 +18,6 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -50,7 +56,31 @@ function ChattingLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Messages({ messages }: { messages: Array<UIMessage> }) {
+interface RAGDebugInfo {
+  enabled: boolean;
+  originalQuery?: string;
+  rewrittenQueries?: string[];
+  keywords?: string[];
+  vectorResultsCount?: number;
+  ftsResultsCount?: number;
+  rerankEnabled?: boolean;
+  rerankModel?: string;
+  chunks?: Array<{
+    id: string;
+    content: string;
+    score: number;
+    sourceId?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+function Messages({ 
+  messages, 
+  ragDebugInfo 
+}: { 
+  messages: Array<UIMessage>;
+  ragDebugInfo: Map<string, RAGDebugInfo | null>;
+}) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,27 +100,29 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
       className="flex-1 overflow-y-auto pb-4 min-h-0"
     >
       <div className="max-w-3xl mx-auto w-full px-4">
-        {messages.map(({ id, role, parts }) => (
-          <div
-            key={id}
-            className={`p-4 ${
-              role === "assistant"
-                ? "bg-linear-to-r from-primary/5 to-accent/5"
-                : "bg-transparent"
-            }`}
-          >
-            <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
-              {role === "assistant" ? (
-                <div className="w-8 h-8 rounded-lg bg-linear-to-r from-primary to-accent mt-2 flex items-center justify-center text-sm font-medium text-white shrink-0">
-                  AI
-                </div>
-              ) : (
-                <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-sm font-medium text-white shrink-0">
-                  Y
-                </div>
-              )}
-              <div className="flex-1">
-                {parts.map((part, index) => {
+        {messages.map(({ id, role, parts }) => {
+          const debugInfo = ragDebugInfo.get(id) || null;
+          return (
+            <div
+              key={id}
+              className={`p-4 ${
+                role === "assistant"
+                  ? "bg-linear-to-r from-primary/5 to-accent/5"
+                  : "bg-transparent"
+              }`}
+            >
+              <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
+                {role === "assistant" ? (
+                  <div className="w-8 h-8 rounded-lg bg-linear-to-r from-primary to-accent mt-2 flex items-center justify-center text-sm font-medium text-white shrink-0">
+                    AI
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-sm font-medium text-white shrink-0">
+                    Y
+                  </div>
+                )}
+                <div className="flex-1">
+                  {parts.map((part, index) => {
                   if (part.type === "text") {
                     return (
                       <div
@@ -175,10 +207,16 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
                   }
                   return null;
                 })}
+                </div>
               </div>
+              {role === "assistant" && debugInfo && (
+                <div className="mt-2 ml-12">
+                  <RAGDebugPanel debugInfo={debugInfo} />
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -186,6 +224,7 @@ function Messages({ messages }: { messages: Array<UIMessage> }) {
 
 export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { data: agent } = useSuspenseQuery(
     trpc.agent.get.queryOptions({ id: agentId }),
   );
@@ -207,20 +246,55 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     trpc.chat.confirmImageUpload.mutationOptions(),
   );
 
+  const [ragDebugInfo, setRagDebugInfo] = useState<Map<string, RAGDebugInfo | null>>(new Map());
+  const [conversationId] = useState(() => nanoid());
+  const lastMessageIdRef = useRef<string | null>(null);
+
   const { messages, sendMessage, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: `/api/chat/${agent?.slug}`,
       body: {
-        // Always enable RAG for better results
         rag: {
           topK: 6,
         },
+        requestTags: [conversationId], // Include conversationId in request
       },
     }),
-    onFinish: () => {
+    onFinish: async ({ message }) => {
+      // Store the message ID for later use
+      if (message && typeof message === "object" && "id" in message) {
+        lastMessageIdRef.current = message.id as string;
+      }
+      
+      // Fetch RAG debug info for the latest message in this conversation
+      try {
+        const debugInfo = await queryClient.fetchQuery(
+          trpc.chat.getRAGDebugInfo.queryOptions({ conversationId }),
+        );
+        if (debugInfo && lastMessageIdRef.current) {
+          setRagDebugInfo((prev) => {
+            const next = new Map(prev);
+            next.set(lastMessageIdRef.current!, debugInfo);
+            return next;
+          });
+        }
+      } catch (error) {
+        console.warn("Failed to fetch RAG debug info:", error);
+      }
       onMessageComplete?.();
     },
   });
+  
+  // Sync debug info with messages when they update
+  useEffect(() => {
+    if (lastMessageIdRef.current) {
+      const messageExists = messages.some((msg) => msg.id === lastMessageIdRef.current);
+      if (!messageExists) {
+        // Message was cleared, reset ref
+        lastMessageIdRef.current = null;
+      }
+    }
+  }, [messages]);
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -304,7 +378,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   return (
     <div className="relative flex flex-col h-full">
       {/* Chat Header */}
-      <div className="flex justify-end p-2.5 border-b border-border/50">
+      <div className="flex justify-end p-2.5 border-b border-border/50 gap-2">
         <button
           type="button"
           onClick={() => {
@@ -320,7 +394,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       </div>
 
       <div className="flex-1 flex flex-col min-h-0">
-        <Messages messages={messages} />
+        <Messages messages={messages} ragDebugInfo={ragDebugInfo} />
 
         <Layout>
           {isFullySetUp ? (

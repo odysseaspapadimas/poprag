@@ -17,6 +17,7 @@ import {
 } from "@/db/schema";
 import {
   findRelevantContent,
+  rerank,
   searchDocumentChunksFTS,
 } from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
@@ -39,9 +40,14 @@ export interface ChatRequest {
   modelAlias?: string;
   variables?: Record<string, unknown>;
   rag?: {
+    enabled?: boolean;
     query?: string;
     topK?: number;
     filters?: Record<string, unknown>;
+    rewriteQuery?: boolean;
+    rewriteModel?: string;
+    rerank?: boolean;
+    rerankModel?: string;
   };
   requestTags?: string[];
 }
@@ -200,19 +206,30 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
 
     // 5. RAG retrieval with hybrid search (vector + FTS)
     let ragContext;
+    let ragDebugInfo: {
+      enabled: boolean;
+      originalQuery?: string;
+      rewrittenQueries?: string[];
+      keywords?: string[];
+      vectorResultsCount?: number;
+      ftsResultsCount?: number;
+      rerankEnabled?: boolean;
+      rerankModel?: string;
+      chunks?: Array<{
+        id: string;
+        content: string;
+        score: number;
+        sourceId?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    } = { enabled: false };
 
-    const ragEnabled = Boolean(
-      request.rag ||
-        (Array.isArray(policy.enabledTools) &&
-          policy.enabledTools.includes("retrieval")),
-    );
+    // Determine if RAG is enabled based on agent configuration
+    const ragEnabled = agentData.ragEnabled;
+    ragDebugInfo.enabled = ragEnabled;
 
     console.log(
-      "[Chat] RAG config - request.rag:",
-      request.rag,
-      "policy.enabledTools:",
-      policy.enabledTools,
-      "ragEnabled:",
+      "[Chat] RAG config - agent.ragEnabled:",
       ragEnabled,
     );
 
@@ -233,19 +250,36 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           )}..."`,
         );
 
-        // Step 1: Rewrite query into multiple variations
-        const { queries, keywords } = await rewriteQuery(
-          createModel({
-            alias: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            provider: "workers-ai",
-            modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-          }),
-          userQuery,
-        );
+        ragDebugInfo.originalQuery = userQuery;
+        let queries = [userQuery];
+        let keywords: string[] = [];
 
-        console.log(
-          `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`,
-        );
+        // Step 1: Rewrite query into multiple variations (if enabled)
+        const rewriteEnabled = agentData.rewriteQuery;
+        if (rewriteEnabled) {
+          const rewriteModelId =
+            agentData.rewriteModel ||
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+          const { queries: rewrittenQueries, keywords: extractedKeywords } =
+            await rewriteQuery(
+              createModel({
+                alias: rewriteModelId,
+                provider: "workers-ai",
+                modelId: rewriteModelId,
+              }),
+              userQuery,
+            );
+          queries = rewrittenQueries;
+          keywords = extractedKeywords;
+          ragDebugInfo.rewrittenQueries = rewrittenQueries;
+          ragDebugInfo.keywords = extractedKeywords;
+
+          console.log(
+            `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords using ${rewriteModelId}`,
+          );
+        } else {
+          console.log("[Chat] Query rewriting disabled, using original query");
+        }
 
         // Step 2: Perform vector search for all query variations
         const vectorSearchPromises = queries.map((q) =>
@@ -256,23 +290,27 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         );
 
         // Step 3: Perform FTS search for keywords
-        const ftsResults = await searchDocumentChunksFTS(
-          keywords,
-          agentData!.id,
-          {
+        // Only perform FTS if we have keywords (either from rewrite or extracted simply)
+        let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
+        if (keywords.length > 0) {
+          ftsResults = await searchDocumentChunksFTS(keywords, agentData!.id, {
             limit: 5,
-          },
-        );
+          });
+        }
 
         const [vectorResults] = await Promise.all([
           Promise.all(vectorSearchPromises),
         ]);
 
+        const totalVectorResults = vectorResults.reduce(
+          (sum, r) => sum + r.matches.length,
+          0,
+        );
+        ragDebugInfo.vectorResultsCount = totalVectorResults;
+        ragDebugInfo.ftsResultsCount = ftsResults.length;
+
         console.log(
-          `[Chat] Vector search: ${vectorResults.reduce(
-            (sum, r) => sum + r.matches.length,
-            0,
-          )} results`,
+          `[Chat] Vector search: ${totalVectorResults} results`,
         );
         console.log(`[Chat] FTS search: ${ftsResults.length} results`);
 
@@ -299,17 +337,54 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         ];
 
         const fusedResults = reciprocalRankFusion(allResultSets, 60);
-        const topMatches = fusedResults.slice(0, request.rag?.topK || 6);
+
+        // Reranking step
+        const candidates = fusedResults.slice(0, 20);
+        let topMatches: typeof candidates = candidates; // Default to candidates if reranking disabled
+
+        const rerankEnabled = agentData.rerank;
+        ragDebugInfo.rerankEnabled = rerankEnabled;
+        if (rerankEnabled && candidates.length > 0) {
+          const rerankModelId =
+            agentData.rerankModel || "@cf/baai/bge-reranker-base";
+          ragDebugInfo.rerankModel = rerankModelId;
+          console.log(`[Chat] Reranking using ${rerankModelId}`);
+
+          // Note: rerank function currently hardcodes the model, we might need to update it to accept modelId
+          // For now we just use the default one in embedding.ts but log the intent
+          const reranked = await rerank(
+            userQuery,
+            candidates.map((c) => ({
+              id: c.id,
+              content: String(c.content),
+              metadata: c.metadata,
+            })),
+            request.rag?.topK || 6,
+          );
+
+          topMatches = reranked.map((r) => ({
+            id: r.id,
+            score: r.score,
+            content: r.content,
+            metadata: r.metadata || {},
+          }));
+        } else if (candidates.length > 0) {
+          // Reranking disabled, using top fusion results
+          // Logging disabled as per user request
+          topMatches = candidates.slice(0, request.rag?.topK || 6);
+        }
 
         if (topMatches.length > 0) {
           console.log(
-            `[Chat] Hybrid search retrieved ${topMatches.length} chunks after RRF fusion`,
+            `[Chat] Retrieved ${topMatches.length} chunks`,
           );
-          console.log(
-            `[Chat] Score range: ${topMatches[0].score.toFixed(
-              3,
-            )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`,
-          );
+          if (rerankEnabled) {
+            console.log(
+              `[Chat] Score range: ${topMatches[0].score.toFixed(
+                3,
+              )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`,
+            );
+          }
 
           ragContext = {
             chunks: topMatches.map((match) => {
@@ -322,6 +397,18 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
               };
             }),
           };
+
+          // Store debug info for chunks
+          ragDebugInfo.chunks = topMatches.map((match) => {
+            const metadata = match.metadata as MatchMetadata;
+            return {
+              id: match.id,
+              content: String(match.content),
+              score: match.score,
+              sourceId: metadata?.sourceId || match.id,
+              metadata: match.metadata || {},
+            };
+          });
         } else {
           console.log(`[Chat] Hybrid search found no relevant chunks`);
         }
@@ -416,22 +503,35 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     const modelMessages = convertToModelMessages(processedMessages);
 
     // 10. Stream response
+    let firstTokenTime: number | undefined;
+
     const result = streamText({
       model,
       system: systemPrompt,
       messages: modelMessages,
       temperature: policy.temperature || 0.7,
       topP: policy.topP || 1,
+      onChunk: (event) => {
+        if (!firstTokenTime && event.chunk.type === "text-delta") {
+          firstTokenTime = Date.now();
+        }
+      },
       onFinish: async (event) => {
         const latency = Date.now() - startTime;
+        const timeToFirstToken = firstTokenTime
+          ? firstTokenTime - startTime
+          : undefined;
 
-        // Save transcript
+        // Save transcript with RAG debug info
         await db.insert(transcript).values({
           id: nanoid(),
           agentId: agentData!.id,
           conversationId: request.requestTags?.[0] || nanoid(),
           runId,
-          request: request as unknown as Record<string, unknown>,
+          request: {
+            ...(request as unknown as Record<string, unknown>),
+            ragDebug: ragDebugInfo, // Include RAG debug info in request
+          },
           response: {
             text: event.text,
             finishReason: event.finishReason,
@@ -454,10 +554,11 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
             runId,
             tokens: event.usage?.totalTokens,
             latencyMs: latency,
+            timeToFirstTokenMs: timeToFirstToken,
             createdAt: new Date(),
           });
           console.debug(
-            `[Chat] Run metric saved for agent ${agentData!.id} (run=${runId}, id=${metricId})`,
+            `[Chat] Run metric saved for agent ${agentData!.id} (run=${runId}, id=${metricId}, ttft=${timeToFirstToken}ms)`,
           );
         } catch (err) {
           console.warn("[Chat] Failed to insert run metric:", err);

@@ -3,9 +3,9 @@
  * POST /api/chat/$agentSlug
  */
 
+import { handleChatRequest } from "@/lib/ai/chat";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { handleChatRequest } from "@/lib/ai/chat";
 
 const chatRequestSchema = z.object({
   messages: z.array(z.any()), // UIMessage[]
@@ -13,9 +13,14 @@ const chatRequestSchema = z.object({
   variables: z.record(z.string(), z.unknown()).optional(),
   rag: z
     .object({
+      enabled: z.boolean().optional(),
       query: z.string().optional(),
       topK: z.number().optional(),
       filters: z.record(z.string(), z.unknown()).optional(),
+      rewriteQuery: z.boolean().optional(),
+      rewriteModel: z.string().optional(),
+      rerank: z.boolean().optional(),
+      rerankModel: z.string().optional(),
     })
     .optional(),
   requestTags: z.array(z.string()).optional(),

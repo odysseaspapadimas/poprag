@@ -140,6 +140,15 @@ export const agent = sqliteTable(
       .$onUpdate(() => new Date())
       .notNull(),
     lastDeployedAt: integer("last_deployed_at", { mode: "timestamp_ms" }),
+    ragEnabled: integer("rag_enabled", { mode: "boolean" })
+      .default(true)
+      .notNull(),
+    rewriteQuery: integer("rewrite_query", { mode: "boolean" })
+      .default(true)
+      .notNull(),
+    rewriteModel: text("rewrite_model"),
+    rerank: integer("rerank", { mode: "boolean" }).default(true).notNull(),
+    rerankModel: text("rerank_model"),
   },
   (table) => [
     index("agent_slug_idx").on(table.slug),
@@ -399,6 +408,7 @@ export const runMetric = sqliteTable(
     tokens: integer("tokens"),
     costMicrocents: integer("cost_microcents"),
     latencyMs: integer("latency_ms"),
+    timeToFirstTokenMs: integer("time_to_first_token_ms"),
     errorType: text("error_type"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
