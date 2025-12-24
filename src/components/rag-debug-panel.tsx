@@ -1,3 +1,10 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   BarChart3,
   ChevronDown,
@@ -7,16 +14,11 @@ import {
   Search,
 } from "lucide-react";
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 
 interface RAGDebugInfo {
   enabled: boolean;
+  skippedByIntent?: boolean;
+  intentReason?: string;
   originalQuery?: string;
   rewrittenQueries?: string[];
   keywords?: string[];
@@ -43,6 +45,55 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
 
   if (!debugInfo || !debugInfo.enabled) {
     return null;
+  }
+
+  // Show skipped message if intent classification skipped RAG
+  if (debugInfo.skippedByIntent) {
+    return (
+      <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full justify-between text-sm"
+            size="sm"
+          >
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span>RAG Debug Info</span>
+              <Badge variant="secondary" className="ml-2 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400">
+                Skipped
+              </Badge>
+            </div>
+            {isOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2">
+          <div className="bg-muted/50 border rounded-lg p-4 space-y-2 text-sm">
+            <div className="flex items-center gap-2 font-semibold">
+              <Search className="h-4 w-4" />
+              <span>RAG Skipped by Intent Classification</span>
+            </div>
+            {debugInfo.originalQuery && (
+              <div className="pl-6">
+                <span className="text-muted-foreground">Query: </span>
+                <span className="font-mono text-xs">{debugInfo.originalQuery}</span>
+              </div>
+            )}
+            <div className="pl-6">
+              <span className="text-muted-foreground">Reason: </span>
+              <span>{debugInfo.intentReason}</span>
+            </div>
+            <div className="pl-6 text-xs text-muted-foreground">
+              The query was classified as not requiring knowledge base retrieval (e.g., greeting, acknowledgment, small talk).
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    );
   }
 
   const toggleChunk = (index: number) => {

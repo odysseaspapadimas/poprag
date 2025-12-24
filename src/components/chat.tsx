@@ -1,3 +1,6 @@
+import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import {
   useMutation,
@@ -14,9 +17,6 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { RAGDebugPanel } from "@/components/rag-debug-panel";
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -57,6 +57,8 @@ function ChattingLayout({ children }: { children: React.ReactNode }) {
 
 interface RAGDebugInfo {
   enabled: boolean;
+  skippedByIntent?: boolean;
+  intentReason?: string;
   originalQuery?: string;
   rewrittenQueries?: string[];
   keywords?: string[];
@@ -76,9 +78,11 @@ interface RAGDebugInfo {
 function Messages({
   messages,
   ragDebugInfo,
+  isLoading,
 }: {
   messages: Array<UIMessage>;
   ragDebugInfo: Map<string, RAGDebugInfo | null>;
+  isLoading?: boolean;
 }) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -104,11 +108,10 @@ function Messages({
           return (
             <div
               key={id}
-              className={`p-4 ${
-                role === "assistant"
-                  ? "bg-linear-to-r from-primary/5 to-accent/5"
-                  : "bg-transparent"
-              }`}
+              className={`p-4 ${role === "assistant"
+                ? "bg-linear-to-r from-primary/5 to-accent/5"
+                : "bg-transparent"
+                }`}
             >
               <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
                 {role === "assistant" ? (
@@ -218,6 +221,27 @@ function Messages({
             </div>
           );
         })}
+        {isLoading && (
+          <div className="p-4 bg-linear-to-r from-primary/5 to-accent/5">
+            <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
+              <div className="w-8 h-8 rounded-lg bg-linear-to-r from-primary to-accent mt-2 flex items-center justify-center text-sm font-medium text-white shrink-0">
+                AI
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
+                    <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
+                    <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    Thinking...
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -253,7 +277,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const [conversationId] = useState(() => nanoid());
   const lastMessageIdRef = useRef<string | null>(null);
 
-  const { messages, sendMessage, setMessages } = useChat({
+  const { messages, sendMessage, setMessages, status } = useChat({
     transport: new DefaultChatTransport({
       api: `/api/chat/${agent?.slug}`,
       body: {
@@ -270,10 +294,12 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       }
 
       // Fetch RAG debug info for the latest message in this conversation
+      // Force fresh fetch with staleTime: 0 to bypass any cached data
       try {
-        const debugInfo = await queryClient.fetchQuery(
-          trpc.chat.getRAGDebugInfo.queryOptions({ conversationId }),
-        );
+        const debugInfo = await queryClient.fetchQuery({
+          ...trpc.chat.getRAGDebugInfo.queryOptions({ conversationId }),
+          staleTime: 0, // Always fetch fresh data, never use cache
+        });
         if (debugInfo && lastMessageIdRef.current) {
           setRagDebugInfo((prev) => {
             const next = new Map(prev);
@@ -287,6 +313,9 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       onMessageComplete?.();
     },
   });
+
+  const isLoading = status === "submitted";
+  console.log("Chat loading status:", status);
 
   // Sync debug info with messages when they update
   useEffect(() => {
@@ -399,7 +428,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       </div>
 
       <div className="flex-1 flex flex-col min-h-0">
-        <Messages messages={messages} ragDebugInfo={ragDebugInfo} />
+        <Messages messages={messages} ragDebugInfo={ragDebugInfo} isLoading={isLoading} />
 
         <Layout>
           {isFullySetUp ? (

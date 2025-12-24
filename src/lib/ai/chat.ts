@@ -5,29 +5,29 @@
 
 import { db } from "@/db";
 import {
-    type Agent,
-    agent,
-    agentModelPolicy,
-    chatImage,
-    modelAlias,
-    prompt,
-    promptVersion,
-    runMetric,
-    transcript,
+  type Agent,
+  agent,
+  agentModelPolicy,
+  chatImage,
+  modelAlias,
+  prompt,
+  promptVersion,
+  runMetric,
+  transcript,
 } from "@/db/schema";
 import {
-    findRelevantContent,
-    rerank,
-    searchDocumentChunksFTS,
+  findRelevantContent,
+  rerank,
+  searchDocumentChunksFTS,
 } from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 import type { UIMessage } from "ai";
 import {
-    convertToModelMessages,
-    generateObject,
-    type LanguageModel,
-    streamText,
+  convertToModelMessages,
+  generateObject,
+  type LanguageModel,
+  streamText,
 } from "ai";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -128,6 +128,62 @@ User message: ${query}`;
 }
 
 /**
+ * Classify if a query requires knowledge base retrieval
+ * Skips RAG for trivial greetings, social messages, and non-informational queries
+ */
+export async function classifyQueryIntent(
+  model: LanguageModel,
+  query: string,
+): Promise<{ requiresRAG: boolean; reason: string }> {
+  try {
+    const result = await generateObject({
+      model,
+      prompt: `Classify if this user message requires searching a knowledge base for factual information.
+
+Return requiresRAG=true if:
+- The user is asking a question that needs factual information
+- The user wants to learn something specific
+- The query references documents, data, or knowledge
+
+Return requiresRAG=false if:
+- It's a greeting (hi, hello, hey, etc.)
+- It's a social message (how are you, thanks, bye, etc.)
+- It's a simple acknowledgment (ok, sure, yes, no, etc.)
+- It's meta-conversation (about the chat itself, not knowledge)
+- It's small talk without informational intent
+
+User message: "${query}"`,
+      schema: z.object({
+        requiresRAG: z
+          .boolean()
+          .describe(
+            "True if the query asks for information that might be in a knowledge base",
+          ),
+        reason: z
+          .string()
+          .describe("Brief explanation of the classification"),
+      }),
+    });
+
+    console.log(
+      `[Intent Classification] Query: "${query.substring(0, 50)}..." -> requiresRAG: ${result.object.requiresRAG} (${result.object.reason})`,
+    );
+
+    return result.object;
+  } catch (error) {
+    console.warn(
+      "[Intent Classification] Failed, defaulting to RAG enabled:",
+      error,
+    );
+    // Fallback to performing RAG if classification fails
+    return {
+      requiresRAG: true,
+      reason: "Classification failed, defaulting to RAG",
+    };
+  }
+}
+
+/**
  * Handle chat request with RAG
  */
 export async function handleChatRequest(request: ChatRequest, env: Env) {
@@ -208,6 +264,8 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     let ragContext;
     const ragDebugInfo: {
       enabled: boolean;
+      skippedByIntent?: boolean;
+      intentReason?: string;
       originalQuery?: string;
       rewrittenQueries?: string[];
       keywords?: string[];
@@ -240,14 +298,46 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         "";
 
       if (userQuery && userQuery.trim().length > 0) {
-        console.log(
-          `[Chat] Performing hybrid RAG search for: "${userQuery.substring(
-            0,
-            100,
-          )}..."`,
+        ragDebugInfo.originalQuery = userQuery;
+
+        // Step 0: Classify intent to skip RAG for trivial messages
+        // Use the rewrite model for intent classification (fast, lightweight)
+        const intentModelId =
+          agentData.rewriteModel || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+        const [intentModelAlias] = await db
+          .select()
+          .from(modelAlias)
+          .where(eq(modelAlias.alias, intentModelId))
+          .limit(1);
+
+        const intentModelProvider = intentModelAlias?.provider || "workers-ai";
+        const intentModelIdToUse = intentModelAlias?.modelId || intentModelId;
+
+        const intentClassification = await classifyQueryIntent(
+          createModel({
+            alias: intentModelId,
+            provider: intentModelProvider as ProviderType,
+            modelId: intentModelIdToUse,
+          }),
+          userQuery,
         );
 
-        ragDebugInfo.originalQuery = userQuery;
+        if (!intentClassification.requiresRAG) {
+          console.log(
+            `[Chat] Skipping RAG - query classified as not requiring knowledge: ${intentClassification.reason}`,
+          );
+          ragDebugInfo.skippedByIntent = true;
+          ragDebugInfo.intentReason = intentClassification.reason;
+        } else {
+          // Continue with RAG search
+          console.log(
+            `[Chat] Performing hybrid RAG search for: "${userQuery.substring(
+              0,
+              100,
+            )}..."`
+          );
+
         let queries = [userQuery];
         let keywords: string[] = [];
 
@@ -417,6 +507,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         } else {
           console.log(`[Chat] Hybrid search found no relevant chunks`);
         }
+        } // End of requiresRAG else block
       }
     }
 
@@ -505,7 +596,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     );
 
     // 9. Convert to model messages
-    const modelMessages = convertToModelMessages(processedMessages);
+    const modelMessages = await convertToModelMessages(processedMessages);
 
     // 10. Stream response
     let firstTokenTime: number | undefined;
