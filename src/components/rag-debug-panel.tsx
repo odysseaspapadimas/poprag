@@ -1,10 +1,3 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   BarChart3,
   ChevronDown,
@@ -14,6 +7,13 @@ import {
   Search,
 } from "lucide-react";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface RAGDebugInfo {
   enabled: boolean;
@@ -60,7 +60,10 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             <div className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span>RAG Debug Info</span>
-              <Badge variant="secondary" className="ml-2 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400">
+              <Badge
+                variant="secondary"
+                className="ml-2 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400"
+              >
                 Skipped
               </Badge>
             </div>
@@ -80,7 +83,9 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             {debugInfo.originalQuery && (
               <div className="pl-6">
                 <span className="text-muted-foreground">Query: </span>
-                <span className="font-mono text-xs">{debugInfo.originalQuery}</span>
+                <span className="font-mono text-xs">
+                  {debugInfo.originalQuery}
+                </span>
               </div>
             )}
             <div className="pl-6">
@@ -88,7 +93,8 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <span>{debugInfo.intentReason}</span>
             </div>
             <div className="pl-6 text-xs text-muted-foreground">
-              The query was classified as not requiring knowledge base retrieval (e.g., greeting, acknowledgment, small talk).
+              The query was classified as not requiring knowledge base retrieval
+              (e.g., greeting, acknowledgment, small talk).
             </div>
           </div>
         </CollapsibleContent>

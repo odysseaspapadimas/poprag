@@ -12,8 +12,9 @@ import {
     runMetric,
     user,
 } from "@/db/schema";
+import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -194,15 +195,15 @@ export const agentRouter = createTRPCRouter({
       });
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.created",
-        targetType: "agent",
-        targetId: agentId,
-        diff: { name: input.name, slug: input.slug },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.created",
+        { type: "agent", id: agentId },
+        {
+          name: input.name,
+          slug: input.slug,
+        },
+      );
 
       return { id: agentId, slug: input.slug };
     }),
@@ -226,15 +227,7 @@ export const agentRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const [existing] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.id))
-        .limit(1);
-
-      if (!existing) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(input.id);
 
       const updates: Partial<InsertAgent> = {
         updatedAt: new Date(),
@@ -257,15 +250,12 @@ export const agentRouter = createTRPCRouter({
       await db.update(agent).set(updates).where(eq(agent.id, input.id));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.updated",
-        targetType: "agent",
-        targetId: input.id,
-        diff: updates,
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.updated",
+        { type: "agent", id: input.id },
+        updates,
+      );
 
       return { success: true };
     }),
@@ -276,30 +266,21 @@ export const agentRouter = createTRPCRouter({
   archive: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const [existing] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.id))
-        .limit(1);
-
-      if (!existing) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(input.id);
 
       await db
         .update(agent)
         .set({ status: "archived", updatedAt: new Date() })
         .where(eq(agent.id, input.id));
 
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.archived",
-        targetType: "agent",
-        targetId: input.id,
-        diff: { status: "archived" },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.archived",
+        { type: "agent", id: input.id },
+        {
+          status: "archived",
+        },
+      );
 
       return { success: true };
     }),
@@ -310,15 +291,7 @@ export const agentRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const [existing] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.id))
-        .limit(1);
-
-      if (!existing) {
-        throw new Error("Agent not found");
-      }
+      const existing = await requireAgent(input.id);
 
       // Only allow deletion of archived agents
       if (existing.status !== "archived") {
@@ -328,15 +301,14 @@ export const agentRouter = createTRPCRouter({
       await db.delete(agent).where(eq(agent.id, input.id));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.deleted",
-        targetType: "agent",
-        targetId: input.id,
-        diff: { deleted: true },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.deleted",
+        { type: "agent", id: input.id },
+        {
+          deleted: true,
+        },
+      );
 
       return { success: true };
     }),
@@ -409,15 +381,14 @@ export const agentRouter = createTRPCRouter({
       }
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.index_pinned",
-        targetType: "agent",
-        targetId: input.agentId,
-        diff: { indexVersion: input.indexVersion },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.index_pinned",
+        { type: "agent", id: input.agentId },
+        {
+          indexVersion: input.indexVersion,
+        },
+      );
 
       return { success: true };
     }),
@@ -524,7 +495,7 @@ export const agentRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      const conditions: any[] = [eq(runMetric.agentId, input.agentId)];
+      const conditions: SQL[] = [eq(runMetric.agentId, input.agentId)];
       if (input.sinceMs) {
         conditions.push(sql`${runMetric.createdAt} >= ${input.sinceMs}`);
       }
@@ -550,15 +521,7 @@ export const agentRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(input.agentId);
 
       // Get current policy
       const [currentPolicy] = await db
@@ -596,15 +559,12 @@ export const agentRouter = createTRPCRouter({
         .where(eq(agentModelPolicy.id, currentPolicy.id));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "agent.policy_updated",
-        targetType: "agent",
-        targetId: input.agentId,
-        diff: updates,
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "agent.policy_updated",
+        { type: "agent", id: input.agentId },
+        updates,
+      );
 
       return { success: true };
     }),
@@ -670,9 +630,9 @@ export const agentRouter = createTRPCRouter({
 
       const hasProdPrompt = !!prodPromptVersion;
 
-      return { 
-        hasModelAlias, 
-        hasProdPrompt, 
+      return {
+        hasModelAlias,
+        hasProdPrompt,
         isActive,
         modelAlias: policy?.modelAlias || null, // Include the actual alias for capability checks
       };

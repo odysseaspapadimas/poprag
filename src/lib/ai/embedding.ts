@@ -14,7 +14,6 @@ import { documentChunks } from "@/db/schema";
  *
  * NOTE: Vectorize index must be configured with matching dimensions!
  */
-const EMBEDDING_DIMENSIONS = 1024; // BGE Large EN v1.5 uses 1024 dimensions
 
 /**
  * Cloudflare Vectorize metadata size limit (bytes)
@@ -220,18 +219,9 @@ export async function findRelevantContent(
   options?: {
     topK?: number;
     minSimilarity?: number;
-    indexVersion?: number;
-    keywords?: string[]; // Optional keywords for hybrid search
-    useHybridSearch?: boolean; // Enable query rewriting + hybrid search
   },
 ) {
-  const {
-    topK = 6,
-    minSimilarity = 0.3,
-    indexVersion,
-    keywords = [],
-    useHybridSearch = false,
-  } = options || {};
+  const { topK = 6, minSimilarity = 0.3 } = options || {};
 
   try {
     // Preprocess query - remove noise and normalize
@@ -249,7 +239,7 @@ export async function findRelevantContent(
       )}..." in namespace: ${agentId}`,
     );
     console.log(
-      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}, hybridSearch=${useHybridSearch}`,
+      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}`,
     );
 
     // Generate embedding for the query with consistent dimensions

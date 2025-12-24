@@ -1,10 +1,11 @@
+import { db } from "@/db";
+import { chatImage, transcript } from "@/db/schema";
+import { audit, requireAgent } from "@/integrations/trpc/helpers";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { AwsClient } from "aws4fetch";
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { db } from "@/db";
-import { agent, auditLog, chatImage, transcript } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
  * Chat management router
@@ -26,16 +27,8 @@ export const chatRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        // Verify agent exists and user has access
-        const [agentData] = await db
-          .select()
-          .from(agent)
-          .where(eq(agent.id, input.agentId))
-          .limit(1);
-
-        if (!agentData) {
-          throw new Error("Agent not found");
-        }
+        // Verify agent exists
+        await requireAgent(input.agentId);
 
         // Validate file type and size
         const allowedMimes = [
@@ -153,15 +146,7 @@ export const chatRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, image.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(image.agentId);
 
       // Update checksum if provided
       if (input.checksum) {
@@ -175,15 +160,14 @@ export const chatRouter = createTRPCRouter({
       }
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "chat.image_uploaded",
-        targetType: "chat_image",
-        targetId: input.imageId,
-        diff: { fileName: image.fileName },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "chat.image_uploaded",
+        { type: "chat_image", id: input.imageId },
+        {
+          fileName: image.fileName,
+        },
+      );
 
       return { success: true };
     }),
@@ -205,15 +189,7 @@ export const chatRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, image.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(image.agentId);
 
       // Delete from R2
       const { env } = await import("cloudflare:workers");
@@ -225,15 +201,14 @@ export const chatRouter = createTRPCRouter({
       await db.delete(chatImage).where(eq(chatImage.id, input.imageId));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "chat.image_deleted",
-        targetType: "chat_image",
-        targetId: input.imageId,
-        diff: { fileName: image.fileName },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "chat.image_deleted",
+        { type: "chat_image", id: input.imageId },
+        {
+          fileName: image.fileName,
+        },
+      );
 
       return { success: true };
     }),

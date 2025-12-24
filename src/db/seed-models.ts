@@ -176,20 +176,20 @@ function generateSeedSQL() {
   const statements = [];
 
   // Delete dependent records first (foreign key constraints)
-  statements.push('DELETE FROM agent_model_policy;');
-  
+  statements.push("DELETE FROM agent_model_policy;");
+
   // Now safe to delete all existing model aliases
-  statements.push('DELETE FROM model_alias;');
+  statements.push("DELETE FROM model_alias;");
 
   for (const model of defaultModels) {
     const capsJson = model.capabilities
       ? JSON.stringify(model.capabilities).replace(/'/g, "''")
       : null;
-    
+
     const sql = capsJson
       ? `INSERT OR REPLACE INTO model_alias (alias, provider, model_id, capabilities, updated_at) VALUES ('${model.alias}', '${model.provider}', '${model.modelId}', '${capsJson}', datetime('now'));`
       : `INSERT OR REPLACE INTO model_alias (alias, provider, model_id, updated_at) VALUES ('${model.alias}', '${model.provider}', '${model.modelId}', datetime('now'));`;
-    
+
     statements.push(sql);
   }
 
@@ -202,4 +202,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 }
 
 export { defaultModels, generateSeedSQL };
-

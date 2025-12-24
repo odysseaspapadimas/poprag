@@ -1,10 +1,10 @@
 import { getFirebaseAdmin } from "./admin";
 import type {
-    FirebaseChat,
-    FirebaseExperience,
-    FirebaseMessage,
-    FirebaseUser,
-    UserQueryOptions,
+  FirebaseChat,
+  FirebaseExperience,
+  FirebaseMessage,
+  FirebaseUser,
+  UserQueryOptions,
 } from "./types";
 
 /**

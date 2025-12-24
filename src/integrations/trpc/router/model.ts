@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/db";
 import { agentModelPolicy, modelAlias } from "@/db/schema";
 import {
@@ -10,15 +12,15 @@ import {
   getModel,
   getModelsByProvider,
   getProviders,
+  type ModelCapabilities,
   searchModels,
-  type ModelCapabilities
 } from "@/lib/ai/models-dev";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
 
 // Zod schema for model capabilities
 const modelCapabilitiesSchema = z.object({
-  inputModalities: z.array(z.enum(["text", "image", "audio", "video", "pdf"])).optional(),
+  inputModalities: z
+    .array(z.enum(["text", "image", "audio", "video", "pdf"]))
+    .optional(),
   outputModalities: z.array(z.enum(["text", "image", "audio"])).optional(),
   toolCall: z.boolean().optional(),
   reasoning: z.boolean().optional(),
@@ -33,7 +35,7 @@ const modelCapabilitiesSchema = z.object({
 // Supported providers - models from these providers will be shown by default
 const SUPPORTED_PROVIDERS = [
   "openai",
-  "openrouter", 
+  "openrouter",
   "cloudflare-workers-ai",
   "huggingface",
 ];
@@ -105,7 +107,6 @@ export const modelRouter = createTRPCRouter({
         models = models.filter((m) => SUPPORTED_PROVIDERS.includes(m.provider));
       }
 
-
       // Return with formatted data for UI
       return models.slice(0, limit).map((model) => ({
         id: model.id,
@@ -174,7 +175,12 @@ export const modelRouter = createTRPCRouter({
     .input(
       z.object({
         alias: z.string().min(1).max(100),
-        provider: z.enum(["openai", "openrouter", "huggingface", "cloudflare-workers-ai"]),
+        provider: z.enum([
+          "openai",
+          "openrouter",
+          "huggingface",
+          "cloudflare-workers-ai",
+        ]),
         modelId: z.string(),
         // Optional: auto-fetch capabilities from models.dev
         modelsDevId: z.string().optional(),
@@ -229,7 +235,12 @@ export const modelRouter = createTRPCRouter({
         alias: z.string().min(1).max(100),
         newAlias: z.string().min(1).max(100).optional(),
         provider: z
-          .enum(["openai", "openrouter", "huggingface", "cloudflare-workers-ai"])
+          .enum([
+            "openai",
+            "openrouter",
+            "huggingface",
+            "cloudflare-workers-ai",
+          ])
           .optional(),
         modelId: z.string().optional(),
         // Optional: refresh capabilities from models.dev
@@ -240,7 +251,8 @@ export const modelRouter = createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       try {
-        const { alias, newAlias, modelsDevId, capabilities, ...updates } = input;
+        const { alias, newAlias, modelsDevId, capabilities, ...updates } =
+          input;
 
         // If changing alias, check if new alias exists
         if (newAlias && newAlias !== alias) {
@@ -305,20 +317,25 @@ export const modelRouter = createTRPCRouter({
             updateData.capabilities = capabilitiesToUpdate;
           }
 
-          if (Object.keys(updateData).length > 1) { // More than just updatedAt
+          if (Object.keys(updateData).length > 1) {
+            // More than just updatedAt
             await db
               .update(modelAlias)
               .set(updateData)
               .where(eq(modelAlias.alias, alias));
           } else {
-            console.warn('[Model Update] No changes to apply for alias:', alias);
+            console.warn(
+              "[Model Update] No changes to apply for alias:",
+              alias,
+            );
           }
         }
 
         return { success: true };
       } catch (error) {
         throw new Error(
-          `Failed to update model alias: ${error instanceof Error ? error.message : String(error)
+          `Failed to update model alias: ${
+            error instanceof Error ? error.message : String(error)
           }`,
         );
       }

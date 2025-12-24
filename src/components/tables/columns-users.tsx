@@ -1,8 +1,8 @@
+import type { ColumnDef } from "@tanstack/react-table";
+import { Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { FirebaseUser } from "@/lib/firebase/types";
 import { formatFirebaseTimestamp } from "@/lib/firebase/types";
-import type { ColumnDef } from "@tanstack/react-table";
-import { Eye } from "lucide-react";
 
 /**
  * User table columns for Firebase users

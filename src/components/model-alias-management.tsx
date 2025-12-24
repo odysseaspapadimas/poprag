@@ -1,28 +1,28 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
+    useMutation,
+    useQuery,
+    useQueryClient,
+    useSuspenseQuery,
 } from "@tanstack/react-query";
 import { AudioLines, FileText, Image, Video } from "lucide-react";
 import { useState } from "react";
@@ -121,7 +121,11 @@ export function ModelAliasManagement() {
             : undefined,
         provider:
           editModalState.form.provider !== editModalState.selected!.provider
-            ? (editModalState.form.provider as "openai" | "openrouter" | "huggingface" | "cloudflare-workers-ai")
+            ? (editModalState.form.provider as
+                | "openai"
+                | "openrouter"
+                | "huggingface"
+                | "cloudflare-workers-ai")
             : undefined,
         modelId:
           editModalState.form.modelId !== editModalState.selected!.modelId
@@ -138,10 +142,19 @@ export function ModelAliasManagement() {
     model: NonNullable<typeof modelsDevModels>[number],
   ) => {
     const mappedProvider = PROVIDER_MAPPING[model.provider] || "openrouter";
-    const modelIdToUse =
-      mappedProvider === "openrouter"
-        ? model.id
-        : model.id.split("/").pop() || model.id;
+    
+    // Determine the model ID to use based on provider:
+    // - OpenRouter: use the full model ID (e.g., "anthropic/claude-3-5-sonnet")
+    // - Cloudflare Workers AI: use the model name which contains the full path (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    // - Others: use just the model part
+    let modelIdToUse: string;
+    if (mappedProvider === "openrouter") {
+      modelIdToUse = model.id;
+    } else if (mappedProvider === "cloudflare-workers-ai") {
+      modelIdToUse = model.name;
+    } else {
+      modelIdToUse = model.id.split("/").pop() || model.id;
+    }
 
     setEditModalState((prev) => ({
       ...prev,
@@ -239,7 +252,8 @@ export function ModelAliasManagement() {
                       editModalState.selected.capabilities.contextLength / 1000
                     ).toFixed(1)}
                     k tokens
-                    {!!editModalState.selected.capabilities.costInputPerMillion && (
+                    {!!editModalState.selected.capabilities
+                      .costInputPerMillion && (
                       <>
                         {" "}
                         • Cost: $
@@ -264,7 +278,10 @@ export function ModelAliasManagement() {
                   placeholder="Search models..."
                   className="flex-1"
                 />
-                <Select value={providerFilter} onValueChange={setProviderFilter}>
+                <Select
+                  value={providerFilter}
+                  onValueChange={setProviderFilter}
+                >
                   <SelectTrigger className="w-40">
                     <SelectValue placeholder="Provider" />
                   </SelectTrigger>
@@ -280,7 +297,9 @@ export function ModelAliasManagement() {
               </div>
 
               {isLoadingModels && (
-                <div className="text-sm text-muted-foreground">Loading models...</div>
+                <div className="text-sm text-muted-foreground">
+                  Loading models...
+                </div>
               )}
 
               {modelsDevModels && modelsDevModels.length > 0 && (
@@ -361,7 +380,9 @@ export function ModelAliasManagement() {
                   <SelectItem value="openai">openai</SelectItem>
                   <SelectItem value="openrouter">openrouter</SelectItem>
                   <SelectItem value="huggingface">huggingface</SelectItem>
-                  <SelectItem value="cloudflare-workers-ai">cloudflare-workers-ai</SelectItem>
+                  <SelectItem value="cloudflare-workers-ai">
+                    cloudflare-workers-ai
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </Field>

@@ -38,7 +38,10 @@ interface CreateModelAliasFormProps {
 }
 
 // Map models.dev provider to our internal provider type
-const PROVIDER_MAPPING: Record<string, "openai" | "openrouter" | "huggingface" | "cloudflare-workers-ai"> = {
+const PROVIDER_MAPPING: Record<
+  string,
+  "openai" | "openrouter" | "huggingface" | "cloudflare-workers-ai"
+> = {
   openai: "openai",
   anthropic: "openrouter",
   google: "openrouter",
@@ -61,21 +64,32 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
 
   const [form, setForm] = useState({
     alias: "",
-    provider: "openai" as "openai" | "openrouter" | "huggingface" | "cloudflare-workers-ai",
+    provider: "openai" as
+      | "openai"
+      | "openrouter"
+      | "huggingface"
+      | "cloudflare-workers-ai",
     modelId: "",
     modelsDevId: "", // Full models.dev ID (e.g., "openai/gpt-4o")
   });
   const [modelSearch, setModelSearch] = useState("");
   const debouncedModelSearch = useDebounce(modelSearch, 300); // 300ms debounce
   const [providerFilter, setProviderFilter] = useState("all");
-  const [modalityFilter, setModalityFilter] = useState<"all" | "image" | "audio" | "video" | "pdf">("all");
+  const [modalityFilter, setModalityFilter] = useState<
+    "all" | "image" | "audio" | "video" | "pdf"
+  >("all");
 
   const createMutation = useMutation(
     trpc.model.create.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: trpc.model.list.queryKey() });
         toast.success("Model alias created");
-        setForm({ alias: "", provider: "openai", modelId: "", modelsDevId: "" });
+        setForm({
+          alias: "",
+          provider: "openai",
+          modelId: "",
+          modelsDevId: "",
+        });
         setModelSearch("");
         setProviderFilter("all");
         setModalityFilter("all");
@@ -115,14 +129,21 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
     });
   };
 
-  const handleModelSelect = (model: NonNullable<typeof modelsDevModels>[number]) => {
+  const handleModelSelect = (
+    model: NonNullable<typeof modelsDevModels>[number],
+  ) => {
     // Map the provider to our internal type
-    const mappedProvider = PROVIDER_MAPPING[model.provider] || "openrouter";
+    const mappedProvider = PROVIDER_MAPPING[model.provider]
 
-    // For OpenRouter, use the full model ID; for others, use just the model part
-    const modelIdToUse = mappedProvider === "openrouter"
-      ? model.id  // Full ID like "anthropic/claude-3-5-sonnet"
-      : model.id.split("/").pop() || model.id;  // Just the model name
+    // Determine the model ID to use based on provider:
+    // - Cloudflare Workers AI: use the model name which contains the full path (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    // - Others: use just the model part
+    let modelIdToUse: string;
+    if (mappedProvider === "cloudflare-workers-ai") {
+      modelIdToUse = model.name; // Full name like "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    } else {
+      modelIdToUse = model.id; // Just the model id
+    }
 
     setForm({
       alias: model.name.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
@@ -157,7 +178,10 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
               ))}
             </SelectContent>
           </Select>
-          <Select value={modalityFilter} onValueChange={(v) => setModalityFilter(v as typeof modalityFilter)}>
+          <Select
+            value={modalityFilter}
+            onValueChange={(v) => setModalityFilter(v as typeof modalityFilter)}
+          >
             <SelectTrigger className="w-36">
               <SelectValue placeholder="Modality" />
             </SelectTrigger>
@@ -171,11 +195,14 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
           </Select>
         </div>
 
-        {(isLoadingModels || (modelSearch !== debouncedModelSearch && modelSearch.length > 0)) && (
-          <div className="text-sm text-muted-foreground">
-            {modelSearch !== debouncedModelSearch ? "Typing..." : "Loading models..."}
-          </div>
-        )}
+        {(isLoadingModels ||
+          (modelSearch !== debouncedModelSearch && modelSearch.length > 0)) && (
+            <div className="text-sm text-muted-foreground">
+              {modelSearch !== debouncedModelSearch
+                ? "Typing..."
+                : "Loading models..."}
+            </div>
+          )}
 
         {modelsDevModels && modelsDevModels.length > 0 && (
           <div className="max-h-64 overflow-y-auto space-y-1 border rounded p-2 bg-background">
@@ -188,7 +215,10 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1.5 py-0 font-normal"
+                    >
                       {model.provider}
                     </Badge>
                     <span className="font-medium text-sm">{model.name}</span>
@@ -207,28 +237,41 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
                       <FileText className="w-3 h-3 text-orange-500" />
                     )}
                     {model.toolCall && (
-                      <Badge variant="secondary" className="text-[10px] px-1">tools</Badge>
+                      <Badge variant="secondary" className="text-[10px] px-1">
+                        tools
+                      </Badge>
                     )}
                     {model.reasoning && (
-                      <Badge variant="secondary" className="text-[10px] px-1">reasoning</Badge>
+                      <Badge variant="secondary" className="text-[10px] px-1">
+                        reasoning
+                      </Badge>
                     )}
                   </div>
                 </div>
                 <div className="flex gap-2 mt-1 text-[10px] text-muted-foreground ml-12">
                   <span>{model.id}</span>
                   <span>•</span>
-                  <span>Context: {(model.contextLength / 1000).toFixed(0)}k</span>
+                  <span>
+                    Context: {(model.contextLength / 1000).toFixed(0)}k
+                  </span>
                   <span>•</span>
-                  <span>${model.costInput.toFixed(2)}/${model.costOutput.toFixed(2)} per M</span>
+                  <span>
+                    ${model.costInput.toFixed(2)}/${model.costOutput.toFixed(2)}{" "}
+                    per M
+                  </span>
                 </div>
               </button>
             ))}
           </div>
         )}
 
-        {modelsDevModels && modelsDevModels.length === 0 && debouncedModelSearch && (
-          <div className="text-sm text-muted-foreground">No models found matching "{debouncedModelSearch}"</div>
-        )}
+        {modelsDevModels &&
+          modelsDevModels.length === 0 &&
+          debouncedModelSearch && (
+            <div className="text-sm text-muted-foreground">
+              No models found matching "{debouncedModelSearch}"
+            </div>
+          )}
       </div>
 
       {/* Manual configuration fields */}
@@ -247,7 +290,12 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
       <Field>
         <Label>Provider</Label>
         <Select
-          onValueChange={(v) => setForm((prev) => ({ ...prev, provider: v as typeof form.provider }))}
+          onValueChange={(v) =>
+            setForm((prev) => ({
+              ...prev,
+              provider: v as typeof form.provider,
+            }))
+          }
           value={form.provider}
         >
           <SelectTrigger className="w-56">
@@ -257,7 +305,9 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
             <SelectItem value="openai">openai</SelectItem>
             <SelectItem value="openrouter">openrouter</SelectItem>
             <SelectItem value="huggingface">huggingface</SelectItem>
-            <SelectItem value="cloudflare-workers-ai">cloudflare-workers-ai</SelectItem>
+            <SelectItem value="cloudflare-workers-ai">
+              cloudflare-workers-ai
+            </SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -279,7 +329,9 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
 
       {form.modelsDevId && (
         <div className="text-xs p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded">
-          <span className="text-green-600 dark:text-green-400">✓ Model capabilities will be automatically configured</span>
+          <span className="text-green-600 dark:text-green-400">
+            ✓ Model capabilities will be automatically configured
+          </span>
         </div>
       )}
 

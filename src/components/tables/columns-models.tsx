@@ -1,6 +1,6 @@
-import { Badge } from "@/components/ui/badge";
 import type { ColumnDef } from "@tanstack/react-table";
 import { AudioLines, FileText, Image, Video } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 // Type for model alias from database
 export interface ModelAliasRow {
@@ -40,7 +40,8 @@ export const columns: ColumnDef<ModelAliasRow>[] = [
     header: "Capabilities",
     cell: ({ row }) => {
       const caps = row.original.capabilities;
-      if (!caps) return <span className="text-muted-foreground text-xs">—</span>;
+      if (!caps)
+        return <span className="text-muted-foreground text-xs">—</span>;
 
       return (
         <div className="flex items-center gap-1 flex-wrap">

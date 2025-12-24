@@ -83,7 +83,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             },
           ]}
           config={{
-            position: "bottom-left"
+            position: "bottom-left",
           }}
         />
         <Scripts />

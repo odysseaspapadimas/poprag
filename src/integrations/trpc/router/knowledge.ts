@@ -1,16 +1,17 @@
+import { db } from "@/db";
+import { knowledgeSource } from "@/db/schema";
+import { audit, requireAgent } from "@/integrations/trpc/helpers";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
+import { generateEmbedding } from "@/lib/ai/embedding";
+import {
+    createKnowledgeSource,
+    deleteKnowledgeSource,
+    processKnowledgeSource,
+} from "@/lib/ai/ingestion";
 import { AwsClient } from "aws4fetch";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { db } from "@/db";
-import { agent, auditLog, knowledgeSource } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
-import { generateEmbedding } from "@/lib/ai/embedding";
-import {
-  createKnowledgeSource,
-  deleteKnowledgeSource,
-  processKnowledgeSource,
-} from "@/lib/ai/ingestion";
 
 /**
  * Knowledge management router
@@ -30,16 +31,8 @@ export const knowledgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify agent exists and user has access
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      // Verify agent exists
+      await requireAgent(input.agentId);
 
       // Create knowledge source record with agent-scoped R2 key
       const sourceId = nanoid();
@@ -127,15 +120,14 @@ export const knowledgeRouter = createTRPCRouter({
         .where(eq(knowledgeSource.id, input.sourceId));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "knowledge.uploaded",
-        targetType: "knowledge_source",
-        targetId: input.sourceId,
-        diff: { fileName: source.fileName },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "knowledge.uploaded",
+        { type: "knowledge_source", id: input.sourceId },
+        {
+          fileName: source.fileName,
+        },
+      );
 
       return { success: true };
     }),
@@ -172,15 +164,14 @@ export const knowledgeRouter = createTRPCRouter({
         .where(eq(knowledgeSource.id, input.sourceId));
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "knowledge.failed",
-        targetType: "knowledge_source",
-        targetId: input.sourceId,
-        diff: { error: input.error },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "knowledge.failed",
+        { type: "knowledge_source", id: input.sourceId },
+        {
+          error: input.error,
+        },
+      );
 
       return { success: true };
     }),
@@ -211,15 +202,7 @@ export const knowledgeRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, source.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(source.agentId);
 
       // Get content - either from input or from R2
       let content: string | Buffer | Uint8Array;
@@ -260,18 +243,15 @@ export const knowledgeRouter = createTRPCRouter({
           .where(eq(knowledgeSource.id, input.sourceId));
 
         // Audit log
-        await db.insert(auditLog).values({
-          id: nanoid(),
-          actorId: ctx.session.user.id,
-          eventType: "knowledge.indexed",
-          targetType: "knowledge_source",
-          targetId: input.sourceId,
-          diff: {
+        await audit(
+          ctx,
+          "knowledge.indexed",
+          { type: "knowledge_source", id: input.sourceId },
+          {
             vectorsInserted: result.vectorsInserted,
             reindex: input.reindex,
           },
-          createdAt: new Date(),
-        });
+        );
 
         return result;
       } catch (error) {
@@ -323,16 +303,8 @@ export const knowledgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify agent exists and user has access
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      // Verify agent exists
+      await requireAgent(input.agentId);
 
       // Generate embedding for the query
       const queryEmbedding = await generateEmbedding(input.query);
@@ -367,16 +339,8 @@ export const knowledgeRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
-      // Verify agent exists and user has access
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, input.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      // Verify agent exists
+      await requireAgent(input.agentId);
 
       // Build query with optional status filter
       const whereConditions = input.status
@@ -411,15 +375,7 @@ export const knowledgeRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, source.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(source.agentId);
 
       // Check if source has R2 file
       if (!source.r2Key) {
@@ -471,15 +427,14 @@ export const knowledgeRouter = createTRPCRouter({
         await processKnowledgeSource(input.sourceId, content);
 
         // Audit log
-        await db.insert(auditLog).values({
-          id: nanoid(),
-          actorId: ctx.session.user.id,
-          eventType: "knowledge.reindexed",
-          targetType: "knowledge_source",
-          targetId: input.sourceId,
-          diff: { fileName: source.fileName },
-          createdAt: new Date(),
-        });
+        await audit(
+          ctx,
+          "knowledge.reindexed",
+          { type: "knowledge_source", id: input.sourceId },
+          {
+            fileName: source.fileName,
+          },
+        );
 
         return { success: true };
       } catch (error) {
@@ -509,28 +464,19 @@ export const knowledgeRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, source.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(source.agentId);
 
       await deleteKnowledgeSource(input.sourceId);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "knowledge.deleted",
-        targetType: "knowledge_source",
-        targetId: input.sourceId,
-        diff: { fileName: source.fileName },
-        createdAt: new Date(),
-      });
+      await audit(
+        ctx,
+        "knowledge.deleted",
+        { type: "knowledge_source", id: input.sourceId },
+        {
+          fileName: source.fileName,
+        },
+      );
 
       return { success: true };
     }),
@@ -552,15 +498,7 @@ export const knowledgeRouter = createTRPCRouter({
       }
 
       // Verify user has access to the agent
-      const [agentData] = await db
-        .select()
-        .from(agent)
-        .where(eq(agent.id, source.agentId))
-        .limit(1);
-
-      if (!agentData) {
-        throw new Error("Agent not found");
-      }
+      await requireAgent(source.agentId);
 
       if (!source.r2Key) {
         throw new Error("No R2 file found for this source");

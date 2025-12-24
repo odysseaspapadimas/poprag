@@ -1,6 +1,12 @@
 /**
  * Runtime chat API endpoint
  * Implements the RAG-powered chat flow following AI SDK cookbook pattern
+ *
+ * This module has been refactored to use extracted helpers:
+ * - constants.ts: Default model IDs and configuration
+ * - helpers.ts: Model resolution and capability checking
+ * - rag-pipeline.ts: RAG retrieval flow (intent, rewrite, search, rerank)
+ * - image-service.ts: Image fetching and processing
  */
 
 import { db } from "@/db";
@@ -8,31 +14,30 @@ import {
   type Agent,
   agent,
   agentModelPolicy,
-  chatImage,
   modelAlias,
   prompt,
   promptVersion,
   runMetric,
   transcript,
 } from "@/db/schema";
-import {
-  findRelevantContent,
-  rerank,
-  searchDocumentChunksFTS,
-} from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
-import type { UIMessage } from "ai";
-import {
-  convertToModelMessages,
-  generateObject,
-  type LanguageModel,
-  streamText,
-} from "ai";
+import type { StepResult, ToolSet, UIMessage } from "ai";
+import { convertToModelMessages, streamText } from "ai";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import z from "zod";
-import { reciprocalRankFusion } from "../utils";
+
+// Import refactored modules
+import { type ModelCapabilities } from "./helpers";
+import { processMessageParts } from "./image-service";
+import {
+  performRAGRetrieval,
+  type RAGConfig,
+  type RAGDebugInfo
+} from "./rag-pipeline";
+
+// Re-export functions for backwards compatibility
+export { classifyQueryIntent, rewriteQuery } from "./rag-pipeline";
 
 export interface ChatRequest {
   agentSlug: string;
@@ -52,601 +57,72 @@ export interface ChatRequest {
   requestTags?: string[];
 }
 
-export interface ChatOptions {
-  env?: {
-    OPENAI_API_KEY?: string;
-    OPENROUTER_API_KEY?: string;
-    CLOUDFLARE_ACCOUNT_ID?: string;
-  };
-}
-
-interface ImagePart {
-  type: "image";
-  image: {
-    id: string;
-    url: string;
-    fileName: string;
-    mime: string;
-    bytes: number;
-  };
-}
-
-interface MatchMetadata {
-  sourceId?: string;
-  [key: string]: unknown;
-}
-
-// Type for model capabilities stored in DB
-interface ModelCapabilities {
-  inputModalities?: ("text" | "image" | "audio" | "video" | "pdf")[];
-  outputModalities?: ("text" | "image" | "audio")[];
-  toolCall?: boolean;
-  reasoning?: boolean;
-  structuredOutput?: boolean;
-  attachment?: boolean;
-  contextLength?: number;
-  maxOutputTokens?: number;
-  costInputPerMillion?: number;
-  costOutputPerMillion?: number;
-}
-
-/**
- * Check if a model supports a specific input modality
- */
-function supportsModality(
-  capabilities: ModelCapabilities | null | undefined,
-  modality: "text" | "image" | "audio" | "video" | "pdf",
-): boolean {
-  if (!capabilities?.inputModalities) {
-    // If no capabilities are stored, default to text only for safety
-    return modality === "text";
-  }
-  return capabilities.inputModalities.includes(modality);
-}
-
-/**
- * Query rewriting for improved RAG retrieval
- * Expands user queries into multiple variations to improve search coverage
- * Based on contextual RAG best practices
- */
-export async function rewriteQuery(
-  model: LanguageModel,
-  query: string,
-): Promise<{ queries: string[]; keywords: string[] }> {
-  const promptText = `Given the following user message, rewrite it into 3-5 distinct queries that could be used to search for relevant information, and provide additional keywords related to the query.
-
-Each query should focus on different aspects or potential interpretations of the original message.
-Each keyword should be derived from an interpretation of the provided user message.
-
-User message: ${query}`;
-
-  try {
-    const result = await generateObject({
-      model,
-      prompt: promptText,
-      schema: z.object({
-        queries: z
-          .array(z.string())
-          .describe(
-            "Similar queries to the user's query. Be concise but comprehensive.",
-          ),
-        keywords: z
-          .array(z.string())
-          .describe("Keywords from the query to use for full-text search"),
-      }),
-    });
-
-    console.log(`[Query Rewriting] Original: "${query.substring(0, 50)}..."`);
-    console.log(
-      `[Query Rewriting] Generated ${result.object.queries.length} query variations`,
-    );
-    console.log(
-      `[Query Rewriting] Extracted ${result.object.keywords.length} keywords`,
-    );
-
-    return result.object;
-  } catch (error) {
-    console.warn("[Query Rewriting] Failed, using original query:", error);
-    // Fallback to original query
-    return {
-      queries: [query],
-      keywords: [],
-    };
-  }
-}
-
-/**
- * Classify if a query requires knowledge base retrieval
- * Skips RAG for trivial greetings, social messages, and non-informational queries
- */
-export async function classifyQueryIntent(
-  model: LanguageModel,
-  query: string,
-): Promise<{ requiresRAG: boolean; reason: string }> {
-  try {
-    const result = await generateObject({
-      model,
-      prompt: `Classify if this user message requires searching a knowledge base for factual information.
-
-Return requiresRAG=true if:
-- The user is asking a question that needs factual information
-- The user wants to learn something specific
-- The query references documents, data, or knowledge
-
-Return requiresRAG=false if:
-- It's a greeting (hi, hello, hey, etc.)
-- It's a social message (how are you, thanks, bye, etc.)
-- It's a simple acknowledgment (ok, sure, yes, no, etc.)
-- It's meta-conversation (about the chat itself, not knowledge)
-- It's small talk without informational intent
-
-User message: "${query}"`,
-      schema: z.object({
-        requiresRAG: z
-          .boolean()
-          .describe(
-            "True if the query asks for information that might be in a knowledge base",
-          ),
-        reason: z
-          .string()
-          .describe("Brief explanation of the classification"),
-      }),
-    });
-
-    console.log(
-      `[Intent Classification] Query: "${query.substring(0, 50)}..." -> requiresRAG: ${result.object.requiresRAG} (${result.object.reason})`,
-    );
-
-    return result.object;
-  } catch (error) {
-    console.warn(
-      "[Intent Classification] Failed, defaulting to RAG enabled:",
-      error,
-    );
-    // Fallback to performing RAG if classification fails
-    return {
-      requiresRAG: true,
-      reason: "Classification failed, defaulting to RAG",
-    };
-  }
-}
-
 /**
  * Handle chat request with RAG
+ * Refactored to use extracted helper modules for better maintainability
  */
 export async function handleChatRequest(request: ChatRequest, env: Env) {
   const runId = nanoid();
   const startTime = Date.now();
 
-  // Keep these in outer scope so we can record error metrics even when an
-  // exception happens during agent/model resolution.
+  // Keep in outer scope for error metrics
   let agentData: Agent | undefined;
 
   try {
     // 1. Resolve agent
-    const [resolvedAgent] = await db
-      .select()
-      .from(agent)
-      .where(eq(agent.slug, request.agentSlug))
-      .limit(1);
+    agentData = await resolveAgent(request.agentSlug);
 
-    if (!resolvedAgent) {
-      throw new Error(`Agent '${request.agentSlug}' not found`);
-    }
-
-    if (resolvedAgent.status !== "active") {
-      throw new Error(`Agent '${request.agentSlug}' is not active`);
-    }
-
-    agentData = resolvedAgent;
-
-    // 2. Load active prompt version (label=prod)
-    const [systemPromptData] = await db
-      .select()
-      .from(prompt)
-      .where(and(eq(prompt.agentId, agentData.id), eq(prompt.key, "system")))
-      .limit(1);
-
-    if (!systemPromptData) {
-      throw new Error("System prompt not found");
-    }
-
-    const [activePromptVersion] = await db
-      .select()
-      .from(promptVersion)
-      .where(
-        and(
-          eq(promptVersion.promptId, systemPromptData.id),
-          eq(promptVersion.label, "prod"),
-        ),
-      )
-      .limit(1);
-
-    if (!activePromptVersion) {
-      throw new Error("No production prompt version found");
-    }
-
-    // 3. Load agent model policy
-    const [policy] = await db
-      .select()
-      .from(agentModelPolicy)
-      .where(eq(agentModelPolicy.agentId, agentData.id))
-      .orderBy(desc(agentModelPolicy.effectiveFrom))
-      .limit(1);
-
-    if (!policy) {
-      throw new Error("No model policy found");
-    }
-
-    // 4. Render prompt with variables
-    const mergedVariables = {
-      ...activePromptVersion.variables,
-      ...request.variables,
-    };
-    const basePrompt = renderPrompt(
-      activePromptVersion.content,
-      mergedVariables,
+    // 2. Load prompt configuration
+    const { basePrompt, mergedVariables } = await loadPromptConfig(
+      agentData.id,
+      request.variables,
     );
 
-    // 5. RAG retrieval with hybrid search (vector + FTS)
-    let ragContext;
-    const ragDebugInfo: {
-      enabled: boolean;
-      skippedByIntent?: boolean;
-      intentReason?: string;
-      originalQuery?: string;
-      rewrittenQueries?: string[];
-      keywords?: string[];
-      vectorResultsCount?: number;
-      ftsResultsCount?: number;
-      rerankEnabled?: boolean;
-      rerankModel?: string;
-      chunks?: Array<{
-        id: string;
-        content: string;
-        score: number;
-        sourceId?: string;
-        metadata?: Record<string, unknown>;
-      }>;
-    } = { enabled: false };
+    // 3. Load model policy
+    const policy = await loadModelPolicy(agentData.id);
 
-    // Determine if RAG is enabled based on agent configuration
-    const ragEnabled = agentData.ragEnabled;
-    ragDebugInfo.enabled = ragEnabled;
+    // 4. RAG retrieval (using extracted pipeline)
+    const userQuery = extractUserQuery(request);
+    const ragConfig: RAGConfig = {
+      enabled: agentData.ragEnabled,
+      rewriteQuery: agentData.rewriteQuery,
+      rewriteModel: agentData.rewriteModel || undefined,
+      rerank: agentData.rerank,
+      rerankModel: agentData.rerankModel || undefined,
+      topK: request.rag?.topK,
+    };
 
-    console.log("[Chat] RAG config - agent.ragEnabled:", ragEnabled);
+    const { context: ragContext, debugInfo: ragDebugInfo } =
+      await performRAGRetrieval(userQuery, agentData.id, ragConfig);
 
-    if (ragEnabled) {
-      // Extract query from request or use last user message
-      const lastUserMessage = request.messages[request.messages.length - 1];
-      const userQuery =
-        request.rag?.query ||
-        (lastUserMessage?.parts.find((p) => p.type === "text")
-          ?.text as string) ||
-        "";
-
-      if (userQuery && userQuery.trim().length > 0) {
-        ragDebugInfo.originalQuery = userQuery;
-
-        // Step 0: Classify intent to skip RAG for trivial messages
-        // Use the rewrite model for intent classification (fast, lightweight)
-        const intentModelId =
-          agentData.rewriteModel || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-
-        const [intentModelAlias] = await db
-          .select()
-          .from(modelAlias)
-          .where(eq(modelAlias.alias, intentModelId))
-          .limit(1);
-
-        const intentModelProvider = intentModelAlias?.provider || "cloudflare-workers-ai";
-        const intentModelIdToUse = intentModelAlias?.modelId || intentModelId;
-
-        const intentClassification = await classifyQueryIntent(
-          createModel({
-            alias: intentModelId,
-            provider: intentModelProvider as ProviderType,
-            modelId: intentModelIdToUse,
-          }),
-          userQuery,
-        );
-
-        if (!intentClassification.requiresRAG) {
-          console.log(
-            `[Chat] Skipping RAG - query classified as not requiring knowledge: ${intentClassification.reason}`,
-          );
-          ragDebugInfo.skippedByIntent = true;
-          ragDebugInfo.intentReason = intentClassification.reason;
-        } else {
-          // Continue with RAG search
-          console.log(
-            `[Chat] Performing hybrid RAG search for: "${userQuery.substring(
-              0,
-              100,
-            )}..."`
-          );
-
-        let queries = [userQuery];
-        let keywords: string[] = [];
-
-        // Step 1: Rewrite query into multiple variations (if enabled)
-        const rewriteEnabled = agentData.rewriteQuery;
-        if (rewriteEnabled) {
-          const rewriteModelId =
-            agentData.rewriteModel ||
-            "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-          
-          // Look up the model alias from DB to get the correct provider
-          const [rewriteModelAlias] = await db
-            .select()
-            .from(modelAlias)
-            .where(eq(modelAlias.alias, rewriteModelId))
-            .limit(1);
-          
-          // If model alias not found, try to use it directly as a Workers AI model
-          const modelProvider = rewriteModelAlias?.provider || "cloudflare-workers-ai";
-          const modelIdToUse = rewriteModelAlias?.modelId || rewriteModelId;
-          
-          const { queries: rewrittenQueries, keywords: extractedKeywords } =
-            await rewriteQuery(
-              createModel({
-                alias: rewriteModelId,
-                provider: modelProvider as ProviderType,
-                modelId: modelIdToUse,
-              }),
-              userQuery,
-            );
-          queries = rewrittenQueries;
-          keywords = extractedKeywords;
-          ragDebugInfo.rewrittenQueries = rewrittenQueries;
-          ragDebugInfo.keywords = extractedKeywords;
-
-          console.log(
-            `[Chat] Query rewritten into ${queries.length} variations with ${keywords.length} keywords using ${rewriteModelId}`,
-          );
-        } else {
-          console.log("[Chat] Query rewriting disabled, using original query");
-        }
-
-        // Step 2: Perform vector search for all query variations
-        const vectorSearchPromises = queries.map((q) =>
-          findRelevantContent(q, agentData!.id, {
-            topK: 5,
-            minSimilarity: 0.3,
-          }),
-        );
-
-        // Step 3: Perform FTS search for keywords
-        // Only perform FTS if we have keywords (either from rewrite or extracted simply)
-        let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
-        if (keywords.length > 0) {
-          ftsResults = await searchDocumentChunksFTS(keywords, agentData!.id, {
-            limit: 5,
-          });
-        }
-
-        const [vectorResults] = await Promise.all([
-          Promise.all(vectorSearchPromises),
-        ]);
-
-        const totalVectorResults = vectorResults.reduce(
-          (sum, r) => sum + r.matches.length,
-          0,
-        );
-        ragDebugInfo.vectorResultsCount = totalVectorResults;
-        ragDebugInfo.ftsResultsCount = ftsResults.length;
-
-        console.log(`[Chat] Vector search: ${totalVectorResults} results`);
-        console.log(`[Chat] FTS search: ${ftsResults.length} results`);
-
-        if (keywords.length > 0 && ftsResults.length === 0) {
-          console.warn(
-            "[Chat] FTS search returned no results despite having keywords. FTS index may need rebuilding.",
-          );
-        }
-
-        // Step 4: Apply reciprocal rank fusion to merge vector and FTS results
-
-        // Convert FTS results to match format
-        const ftsMatches = ftsResults.map((r, idx) => ({
-          id: r.id,
-          content: r.text,
-          score: -r.rank, // FTS rank is negative, convert to positive score
-          metadata: {},
-        }));
-
-        // Merge all result sets
-        const allResultSets = [
-          ...vectorResults.map((r) => r.matches),
-          ftsMatches,
-        ];
-
-        const fusedResults = reciprocalRankFusion(allResultSets, 60);
-
-        // Reranking step
-        const candidates = fusedResults.slice(0, 20);
-        let topMatches: typeof candidates = candidates; // Default to candidates if reranking disabled
-
-        const rerankEnabled = agentData.rerank;
-        ragDebugInfo.rerankEnabled = rerankEnabled;
-        if (rerankEnabled && candidates.length > 0) {
-          const rerankModelId =
-            agentData.rerankModel || "@cf/baai/bge-reranker-base";
-          ragDebugInfo.rerankModel = rerankModelId;
-          console.log(`[Chat] Reranking using ${rerankModelId}`);
-
-          // Note: rerank function currently hardcodes the model, we might need to update it to accept modelId
-          // For now we just use the default one in embedding.ts but log the intent
-          const reranked = await rerank(
-            userQuery,
-            candidates.map((c) => ({
-              id: c.id,
-              content: String(c.content),
-              metadata: c.metadata,
-            })),
-            request.rag?.topK || 6,
-          );
-
-          topMatches = reranked.map((r) => ({
-            id: r.id,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata || {},
-          }));
-        } else if (candidates.length > 0) {
-          // Reranking disabled, using top fusion results
-          // Logging disabled as per user request
-          topMatches = candidates.slice(0, request.rag?.topK || 6);
-        }
-
-        if (topMatches.length > 0) {
-          console.log(`[Chat] Retrieved ${topMatches.length} chunks`);
-          if (rerankEnabled) {
-            console.log(
-              `[Chat] Score range: ${topMatches[0].score.toFixed(
-                3,
-              )} to ${topMatches[topMatches.length - 1].score.toFixed(3)}`,
-            );
-          }
-
-          ragContext = {
-            chunks: topMatches.map((match) => {
-              const metadata = match.metadata as MatchMetadata;
-              return {
-                content: String(match.content),
-                sourceId: metadata?.sourceId || match.id,
-                score: match.score,
-                metadata: match.metadata,
-              };
-            }),
-          };
-
-          // Store debug info for chunks
-          ragDebugInfo.chunks = topMatches.map((match) => {
-            const metadata = match.metadata as MatchMetadata;
-            return {
-              id: match.id,
-              content: String(match.content),
-              score: match.score,
-              sourceId: metadata?.sourceId || match.id,
-              metadata: match.metadata || {},
-            };
-          });
-        } else {
-          console.log(`[Chat] Hybrid search found no relevant chunks`);
-        }
-        } // End of requiresRAG else block
-      }
-    }
-
-    // 6. Build final system prompt with RAG context
+    // 5. Build final system prompt with RAG context
     let systemPrompt = basePrompt;
-
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
     }
 
-    // 7. Create model instance
-    // Resolve model alias into provider/modelId/gatewayRoute from the model_alias table
-    const selectedAlias = request.modelAlias || policy.modelAlias;
-    let modelConfig;
-    let modelCapabilities: ModelCapabilities | null = null;
-    
-    if (selectedAlias) {
-      const [aliasRecord] = await db
-        .select()
-        .from(modelAlias)
-        .where(eq(modelAlias.alias, selectedAlias))
-        .limit(1);
+    // 6. Resolve model and capabilities
+    const { model, capabilities, selectedAlias } = await resolveModelForChat(
+      request.modelAlias || policy.modelAlias,
+    );
 
-      if (!aliasRecord) {
-        throw new Error(`Model alias '${selectedAlias}' not found`);
-      }
-
-      modelConfig = {
-        alias: aliasRecord.alias,
-        provider: aliasRecord.provider as ProviderType,
-        modelId: aliasRecord.modelId,
-      };
-      
-      // Store capabilities for modality checks
-      modelCapabilities = aliasRecord.capabilities as ModelCapabilities | null;
-    } else {
-      // Fallback - use policy.modelAlias if present
-      modelConfig = {
-        alias: policy.modelAlias,
-        provider: "openai" as const,
-        modelId: "gpt-5-mini",
-      };
-    }
-
-    const model = createModel(modelConfig);
-    
-    // Check if the model supports image input
-    const modelSupportsImage = supportsModality(modelCapabilities, "image");
-
-    // 8. Preprocess messages for model compatibility
-    // Filter out images if the model doesn't support them
+    // 7. Process messages (handle images based on model capabilities)
     const processedMessages = await Promise.all(
       request.messages.map(async (msg) => ({
         ...msg,
-        parts: (await Promise.all(
-          msg.parts.map(async (part) => {
-            // Type guard to check if this is an image part
-            if ("type" in part && (part as { type: string }).type === "image") {
-              // Skip images if model doesn't support them
-              if (!modelSupportsImage) {
-                console.log(
-                  `[Chat] Skipping image - model '${selectedAlias}' does not support image input`,
-                );
-                // Return a text part explaining the image was skipped
-                return {
-                  type: "text" as const,
-                  text: "[Image attachment skipped - selected model does not support image input]",
-                };
-              }
-              
-              const imagePart = part as unknown as ImagePart;
-              const imageData = imagePart.image;
-
-              // Fetch image metadata from database
-              const [imageRecord] = await db
-                .select()
-                .from(chatImage)
-                .where(eq(chatImage.id, imageData.id))
-                .limit(1);
-
-              if (!imageRecord || !imageRecord.r2Key) {
-                throw new Error(`Image not found: ${imageData.id}`);
-              }
-
-              // Fetch image from R2
-              const r2Object = await env.R2.get(imageRecord.r2Key);
-
-              if (!r2Object) {
-                throw new Error(`Image not found in R2: ${imageRecord.r2Key}`);
-              }
-
-              // Convert to base64
-              const arrayBuffer = await r2Object.arrayBuffer();
-              const base64 = Buffer.from(arrayBuffer).toString("base64");
-
-              return {
-                type: "file" as const,
-                mediaType: imageData.mime,
-                url: `data:${imageData.mime};base64,${base64}`,
-              };
-            }
-            return part;
-          }),
-        )).filter(Boolean),
+        parts: await processMessageParts(
+          msg.parts,
+          capabilities,
+          selectedAlias,
+          env,
+        ),
       })),
-    );
+    ) as UIMessage[];
 
-    // 9. Convert to model messages
+    // 8. Convert to model messages
     const modelMessages = await convertToModelMessages(processedMessages);
 
-    // 10. Stream response
+    // 9. Stream response
     let firstTokenTime: number | undefined;
 
     const result = streamText({
@@ -661,79 +137,236 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         }
       },
       onFinish: async (event) => {
-        const latency = Date.now() - startTime;
-        const timeToFirstToken = firstTokenTime
-          ? firstTokenTime - startTime
-          : undefined;
-
-        // Save transcript with RAG debug info
-        await db.insert(transcript).values({
-          id: nanoid(),
-          agentId: agentData!.id,
-          conversationId: request.requestTags?.[0] || nanoid(),
+        await saveTranscriptAndMetrics(
+          agentData!,
           runId,
-          request: {
-            ...(request as unknown as Record<string, unknown>),
-            ragDebug: ragDebugInfo, // Include RAG debug info in request
-          },
-          response: {
-            text: event.text,
-            finishReason: event.finishReason,
-          },
-          usage: {
-            promptTokens: event.usage.inputTokens,
-            completionTokens: event.usage.totalTokens,
-            totalTokens: event.usage.totalTokens,
-          },
-          latencyMs: latency,
-          createdAt: new Date(),
-        });
-
-        // Save metrics (tokens, latency and optional cost estimate)
-        try {
-          const metricId = nanoid();
-          await db.insert(runMetric).values({
-            id: metricId,
-            agentId: agentData!.id,
-            runId,
-            tokens: event.usage?.totalTokens,
-            latencyMs: latency,
-            timeToFirstTokenMs: timeToFirstToken,
-            createdAt: new Date(),
-          });
-          console.debug(
-            `[Chat] Run metric saved for agent ${agentData!.id} (run=${runId}, id=${metricId}, ttft=${timeToFirstToken}ms)`,
-          );
-        } catch (err) {
-          console.warn("[Chat] Failed to insert run metric:", err);
-        }
+          request,
+          ragDebugInfo,
+          event,
+          startTime,
+          firstTokenTime,
+        );
       },
     });
 
     return result;
   } catch (error) {
-    const latency = Date.now() - startTime;
-
-    // Log error metric if we have an agent id
-    try {
-      if (agentData?.id) {
-        const metricId = nanoid();
-        await db.insert(runMetric).values({
-          id: metricId,
-          agentId: agentData.id,
-          runId,
-          latencyMs: latency,
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          createdAt: new Date(),
-        });
-        console.debug(
-          `[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`,
-        );
-      }
-    } catch (err) {
-      console.warn("[Chat] Failed to insert error run metric:", err);
-    }
-
+    await saveErrorMetric(agentData, runId, startTime, error);
     throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Helper Functions (extracted from handleChatRequest)
+// ─────────────────────────────────────────────────────
+
+/**
+ * Resolve agent by slug and validate it's active
+ */
+async function resolveAgent(slug: string): Promise<Agent> {
+  const [resolvedAgent] = await db
+    .select()
+    .from(agent)
+    .where(eq(agent.slug, slug))
+    .limit(1);
+
+  if (!resolvedAgent) {
+    throw new Error(`Agent '${slug}' not found`);
+  }
+
+  if (resolvedAgent.status !== "active") {
+    throw new Error(`Agent '${slug}' is not active`);
+  }
+
+  return resolvedAgent;
+}
+
+/**
+ * Load prompt configuration for an agent
+ */
+async function loadPromptConfig(
+  agentId: string,
+  requestVariables?: Record<string, unknown>,
+): Promise<{ basePrompt: string; mergedVariables: Record<string, unknown> }> {
+  const [systemPromptData] = await db
+    .select()
+    .from(prompt)
+    .where(and(eq(prompt.agentId, agentId), eq(prompt.key, "system")))
+    .limit(1);
+
+  if (!systemPromptData) {
+    throw new Error("System prompt not found");
+  }
+
+  const [activePromptVersion] = await db
+    .select()
+    .from(promptVersion)
+    .where(
+      and(
+        eq(promptVersion.promptId, systemPromptData.id),
+        eq(promptVersion.label, "prod"),
+      ),
+    )
+    .limit(1);
+
+  if (!activePromptVersion) {
+    throw new Error("No production prompt version found");
+  }
+
+  const mergedVariables = {
+    ...activePromptVersion.variables,
+    ...requestVariables,
+  };
+
+  const basePrompt = renderPrompt(activePromptVersion.content, mergedVariables);
+
+  return { basePrompt, mergedVariables };
+}
+
+/**
+ * Load model policy for an agent
+ */
+async function loadModelPolicy(agentId: string) {
+  const [policy] = await db
+    .select()
+    .from(agentModelPolicy)
+    .where(eq(agentModelPolicy.agentId, agentId))
+    .orderBy(desc(agentModelPolicy.effectiveFrom))
+    .limit(1);
+
+  if (!policy) {
+    throw new Error("No model policy found");
+  }
+
+  return policy;
+}
+
+/**
+ * Extract user query from request
+ */
+function extractUserQuery(request: ChatRequest): string {
+  if (request.rag?.query) {
+    return request.rag.query;
+  }
+
+  const lastUserMessage = request.messages[request.messages.length - 1];
+  const textPart = lastUserMessage?.parts.find((p) => p.type === "text");
+  return (textPart?.text as string) || "";
+}
+
+/**
+ * Resolve model and get capabilities
+ */
+async function resolveModelForChat(selectedAlias: string) {
+  const [aliasRecord] = await db
+    .select()
+    .from(modelAlias)
+    .where(eq(modelAlias.alias, selectedAlias))
+    .limit(1);
+
+  if (!aliasRecord) {
+    throw new Error(`Model alias '${selectedAlias}' not found`);
+  }
+
+  const modelConfig = {
+    alias: aliasRecord.alias,
+    provider: aliasRecord.provider as ProviderType,
+    modelId: aliasRecord.modelId,
+  };
+
+  const model = createModel(modelConfig);
+  const capabilities = aliasRecord.capabilities as ModelCapabilities | null;
+
+  return { model, capabilities, selectedAlias };
+}
+
+/**
+ * Save transcript and metrics after successful completion
+ */
+async function saveTranscriptAndMetrics(
+  agentData: Agent,
+  runId: string,
+  request: ChatRequest,
+  ragDebugInfo: RAGDebugInfo,
+  event: StepResult<ToolSet>,
+  startTime: number,
+  firstTokenTime?: number,
+) {
+  const latency = Date.now() - startTime;
+  const timeToFirstToken = firstTokenTime
+    ? firstTokenTime - startTime
+    : undefined;
+
+  // Save transcript with RAG debug info
+  await db.insert(transcript).values({
+    id: nanoid(),
+    agentId: agentData.id,
+    conversationId: request.requestTags?.[0] || nanoid(),
+    runId,
+    request: {
+      ...(request as unknown as Record<string, unknown>),
+      ragDebug: ragDebugInfo,
+    },
+    response: {
+      text: event.text,
+      finishReason: event.finishReason,
+    },
+    usage: {
+      promptTokens: event.usage.inputTokens,
+      completionTokens: event.usage.totalTokens,
+      totalTokens: event.usage.totalTokens,
+    },
+    latencyMs: latency,
+    createdAt: new Date(),
+  });
+
+  // Save metrics
+  try {
+    const metricId = nanoid();
+    await db.insert(runMetric).values({
+      id: metricId,
+      agentId: agentData.id,
+      runId,
+      tokens: event.usage?.totalTokens,
+      latencyMs: latency,
+      timeToFirstTokenMs: timeToFirstToken,
+      createdAt: new Date(),
+    });
+    console.debug(
+      `[Chat] Run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId}, ttft=${timeToFirstToken}ms)`,
+    );
+  } catch (err) {
+    console.warn("[Chat] Failed to insert run metric:", err);
+  }
+}
+
+/**
+ * Save error metric when chat request fails
+ */
+async function saveErrorMetric(
+  agentData: Agent | undefined,
+  runId: string,
+  startTime: number,
+  error: unknown,
+) {
+  const latency = Date.now() - startTime;
+
+  if (!agentData?.id) return;
+
+  try {
+    const metricId = nanoid();
+    await db.insert(runMetric).values({
+      id: metricId,
+      agentId: agentData.id,
+      runId,
+      latencyMs: latency,
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      createdAt: new Date(),
+    });
+    console.debug(
+      `[Chat] Error run metric saved for agent ${agentData.id} (run=${runId}, id=${metricId})`,
+    );
+  } catch (err) {
+    console.warn("[Chat] Failed to insert error run metric:", err);
   }
 }

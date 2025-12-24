@@ -1,28 +1,28 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { KnowledgeSource } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
 interface KnowledgeSourceActionsProps {
   source: KnowledgeSource;
@@ -41,14 +41,26 @@ export function KnowledgeSourceActions({
   // Mutations
   const reindexMutation = useMutation(
     trpc.knowledge.reindex.mutationOptions({
+      onMutate: () => {
+        // Show persistent toast during re-indexing
+        toast.loading(`Re-indexing ${source.fileName}...`, {
+          id: `reindex-${source.id}`,
+          description: "This may take a moment depending on file size.",
+        });
+      },
       onSuccess: () => {
-        toast.success("Knowledge source re-indexed successfully");
+        toast.success(`Re-indexed ${source.fileName} successfully`, {
+          id: `reindex-${source.id}`,
+          description: "Knowledge source is now up to date.",
+        });
         queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
         });
       },
       onError: (error) => {
-        toast.error(`Re-indexing failed: ${error.message}`);
+        toast.error(`Re-indexing failed: ${error.message}`, {
+          id: `reindex-${source.id}`,
+        });
       },
     }),
   );
@@ -80,33 +92,41 @@ export function KnowledgeSourceActions({
     });
   };
 
+  const isReindexing = reindexMutation.isPending;
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-          <DropdownMenuItem
-            onClick={handleReindex}
-            disabled={reindexMutation.isPending}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            {reindexMutation.isPending ? "Re-indexing..." : "Re-index"}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => setDeleteDialogOpen(true)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {isReindexing ? (
+        <Button variant="outline" size="sm" disabled>
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={handleReindex}
+              disabled={reindexMutation.isPending}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Re-index
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setDeleteDialogOpen(true)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

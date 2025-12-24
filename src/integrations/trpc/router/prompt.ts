@@ -1,9 +1,10 @@
+import { db } from "@/db";
+import { prompt, promptVersion } from "@/db/schema";
+import { audit } from "@/integrations/trpc/helpers";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { db } from "@/db";
-import { auditLog, prompt, promptVersion } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
  * Prompt management router
@@ -118,19 +119,16 @@ export const promptRouter = createTRPCRouter({
         .limit(1);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "prompt.version_created",
-        targetType: "prompt",
-        targetId: input.promptId,
-        diff: {
+      await audit(
+        ctx,
+        "prompt.version_created",
+        { type: "prompt", id: input.promptId },
+        {
           version: nextVersion,
           label: input.label,
           agentId: promptData?.agentId,
         },
-        createdAt: new Date(),
-      });
+      );
 
       return { id: versionId, version: nextVersion };
     }),
@@ -177,19 +175,16 @@ export const promptRouter = createTRPCRouter({
         .limit(1);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "prompt.label_assigned",
-        targetType: "prompt",
-        targetId: input.promptId,
-        diff: {
+      await audit(
+        ctx,
+        "prompt.label_assigned",
+        { type: "prompt", id: input.promptId },
+        {
           version: input.version,
           label: input.label,
           agentId: promptData?.agentId,
         },
-        createdAt: new Date(),
-      });
+      );
 
       return { success: true };
     }),
@@ -252,20 +247,17 @@ export const promptRouter = createTRPCRouter({
         .limit(1);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "prompt.label_rollback",
-        targetType: "prompt",
-        targetId: input.promptId,
-        diff: {
+      await audit(
+        ctx,
+        "prompt.label_rollback",
+        { type: "prompt", id: input.promptId },
+        {
           label: input.label,
           fromVersion: version.version,
           toVersion: input.toVersion,
           agentId: promptData?.agentId,
         },
-        createdAt: new Date(),
-      });
+      );
 
       return { success: true };
     }),
@@ -327,19 +319,16 @@ export const promptRouter = createTRPCRouter({
         .limit(1);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "prompt.version_updated",
-        targetType: "prompt",
-        targetId: input.promptId,
-        diff: {
+      await audit(
+        ctx,
+        "prompt.version_updated",
+        { type: "prompt", id: input.promptId },
+        {
           version: input.version,
           updates,
           agentId: promptData?.agentId,
         },
-        createdAt: new Date(),
-      });
+      );
 
       return { success: true };
     }),
@@ -403,18 +392,15 @@ export const promptRouter = createTRPCRouter({
         .limit(1);
 
       // Audit log
-      await db.insert(auditLog).values({
-        id: nanoid(),
-        actorId: ctx.session.user.id,
-        eventType: "prompt.version_deleted",
-        targetType: "prompt",
-        targetId: input.promptId,
-        diff: {
+      await audit(
+        ctx,
+        "prompt.version_deleted",
+        { type: "prompt", id: input.promptId },
+        {
           version: input.version,
           agentId: promptData?.agentId,
         },
-        createdAt: new Date(),
-      });
+      );
 
       return { success: true };
     }),

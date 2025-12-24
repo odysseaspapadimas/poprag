@@ -18,6 +18,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
 
 interface ChatProps {
   agentId: string;
@@ -109,10 +110,11 @@ function Messages({
           return (
             <div
               key={id}
-              className={`p-4 ${role === "assistant"
-                ? "bg-linear-to-r from-primary/5 to-accent/5"
-                : "bg-transparent"
-                }`}
+              className={`p-4 ${
+                role === "assistant"
+                  ? "bg-linear-to-r from-primary/5 to-accent/5"
+                  : "bg-transparent"
+              }`}
             >
               <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
                 {role === "assistant" ? (
@@ -388,7 +390,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       setAttachedImages((prev) => [...prev, newImage]);
     } catch (error) {
       console.error("Image upload failed:", error);
-      // TODO: Show error toast
+      toast.error("Image upload failed");
     }
   };
 
@@ -440,7 +442,11 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       </div>
 
       <div className="flex-1 flex flex-col min-h-0">
-        <Messages messages={messages} ragDebugInfo={ragDebugInfo} isLoading={isLoading} />
+        <Messages
+          messages={messages}
+          ragDebugInfo={ragDebugInfo}
+          isLoading={isLoading}
+        />
 
         <Layout>
           {isFullySetUp ? (
@@ -546,12 +552,16 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className={`absolute inset-y-0 left-2 flex items-center p-2 transition-colors ${
-                    supportsImageUpload 
-                      ? "text-muted-foreground hover:text-primary" 
+                    supportsImageUpload
+                      ? "text-muted-foreground hover:text-primary"
                       : "text-muted-foreground/30 cursor-not-allowed"
                   }`}
                   disabled={uploadImageStart.isPending || !supportsImageUpload}
-                  title={supportsImageUpload ? "Attach image" : "Image upload not supported by this model"}
+                  title={
+                    supportsImageUpload
+                      ? "Attach image"
+                      : "Image upload not supported by this model"
+                  }
                 >
                   <ImageIcon className="w-4 h-4" />
                 </button>
