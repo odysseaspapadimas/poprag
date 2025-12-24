@@ -1,6 +1,11 @@
 import { TRPCProvider } from "@/integrations/trpc/react";
 import type { AppRouter } from "@/integrations/trpc/router";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import {
+  getRequestHeaders,
+  getRequestUrl,
+} from "@tanstack/react-start/server";
 import {
   createTRPCClient,
   httpBatchLink,
@@ -12,32 +17,18 @@ import {
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import superjson from "superjson";
 
-// Get URL
-function getUrl(): string {
-  if (typeof window !== "undefined") {
-    // Client-side: always use relative URL
-    return "/api/trpc";
-  }
+// Get URL - uses createIsomorphicFn for proper server/client code splitting
+const getUrl = createIsomorphicFn()
+  .client(() => "/api/trpc")
+  .server(() => {
+    const requestUrl = getRequestUrl();
+    return `${requestUrl.origin}/api/trpc`;
+  });
 
-  // Server-side: get the full URL from request context
-  // Dynamic import to avoid bundling server code in client
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getRequestUrl } = require("@tanstack/react-start/server") as typeof import("@tanstack/react-start/server");
-  const requestUrl = getRequestUrl();
-  return `${requestUrl.origin}/api/trpc`;
-}
-
-// Get headers
-function getHeaders(): Record<string, string> {
-  if (typeof window !== "undefined") {
-    return {};
-  }
-
-  // Server-side: forward request headers
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getRequestHeaders } = require("@tanstack/react-start/server") as typeof import("@tanstack/react-start/server");
-  return getRequestHeaders() as unknown as Record<string, string>;
-}
+// Get headers - uses createIsomorphicFn for proper server/client code splitting
+const getHeaders = createIsomorphicFn()
+  .client(() => ({}) as Record<string, string>)
+  .server(() => getRequestHeaders() as unknown as Record<string, string>);
 
 // Factory function to create tRPC client - called during request time
 function createTrpcClient() {
