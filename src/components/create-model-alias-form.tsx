@@ -1,6 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -13,6 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 
 interface CreateModelAliasFormProps {
   onSuccess?: () => void;
@@ -132,26 +132,34 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
         <div className="p-3 border rounded max-h-48 overflow-y-auto">
           <div className="text-sm font-medium mb-2">OpenAI Models</div>
           <div className="space-y-1">
-            {openaiModels
-              .filter((model) =>
-                model.name.toLowerCase().includes(modelSearch.toLowerCase()),
-              )
-              .map((model: any) => (
-                <button
-                  key={model.id}
-                  type="button"
-                  className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
-                  onClick={() => {
-                    setForm((prev) => ({ ...prev, modelId: model.id }));
-                    setShowModelList(false);
-                  }}
-                >
-                  {model.name}{" "}
-                  <span className="text-muted-foreground">
-                    ({model.ownedBy})
-                  </span>
-                </button>
-              ))}
+            {(() => {
+              const filtered = openaiModels.filter((model) =>
+                model.name.toLowerCase().includes(modelSearch.trim().toLowerCase()),
+              );
+              if (filtered.length === 0) {
+                return <div className="text-sm text-muted-foreground px-2 py-1">No models found</div>;
+              }
+              return (
+                <>
+                  {filtered.map((model: any) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, modelId: model.id }));
+                        setShowModelList(false);
+                      }}
+                    >
+                      {model.name}{" "}
+                      <span className="text-muted-foreground">
+                        ({model.ownedBy})
+                      </span>
+                    </button>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -161,20 +169,32 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
             Cloudflare Workers AI Models
           </div>
           <div className="space-y-1">
-            {cloudflareModels.map((model: any) => (
-              <button
-                key={model.id}
-                type="button"
-                className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
-                onClick={() => {
-                  setForm((prev) => ({ ...prev, modelId: model.id }));
-                  setShowModelList(false);
-                }}
-              >
-                {model.name}{" "}
-                <span className="text-muted-foreground">({model.task})</span>
-              </button>
-            ))}
+            {(() => {
+              const filtered = cloudflareModels.filter((model) =>
+                model.name.toLowerCase().includes(modelSearch.trim().toLowerCase()),
+              );
+              if (filtered.length === 0) {
+                return <div className="text-sm text-muted-foreground px-2 py-1">No models found. Try a different search term.</div>;
+              }
+              return (
+                <>
+                  {filtered.map((model: any) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      className="text-sm hover:bg-accent w-full text-left px-2 py-1 rounded"
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, modelId: model.id }));
+                        setShowModelList(false);
+                      }}
+                    >
+                      {model.name}{" "}
+                      <span className="text-muted-foreground">({model.task})</span>
+                    </button>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

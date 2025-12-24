@@ -1,5 +1,3 @@
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -11,6 +9,8 @@ import { PromptManagement } from "@/components/prompt-management";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
@@ -38,12 +38,14 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
         context.trpc.agent.getModelPolicy.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
-      context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
       context.queryClient.prefetchQuery(
         context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
       ),
       context.queryClient.prefetchQuery(
         context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 }),
+      ),
+      context.queryClient.prefetchQuery(
+        context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
       ),
     ]);
   },

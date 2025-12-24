@@ -5,29 +5,29 @@
 
 import { db } from "@/db";
 import {
-  type Agent,
-  agent,
-  agentModelPolicy,
-  chatImage,
-  modelAlias,
-  prompt,
-  promptVersion,
-  runMetric,
-  transcript,
+    type Agent,
+    agent,
+    agentModelPolicy,
+    chatImage,
+    modelAlias,
+    prompt,
+    promptVersion,
+    runMetric,
+    transcript,
 } from "@/db/schema";
 import {
-  findRelevantContent,
-  rerank,
-  searchDocumentChunksFTS,
+    findRelevantContent,
+    rerank,
+    searchDocumentChunksFTS,
 } from "@/lib/ai/embedding";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 import type { UIMessage } from "ai";
 import {
-  convertToModelMessages,
-  generateObject,
-  type LanguageModel,
-  streamText,
+    convertToModelMessages,
+    generateObject,
+    type LanguageModel,
+    streamText,
 } from "ai";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -206,7 +206,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
 
     // 5. RAG retrieval with hybrid search (vector + FTS)
     let ragContext;
-    let ragDebugInfo: {
+    const ragDebugInfo: {
       enabled: boolean;
       originalQuery?: string;
       rewrittenQueries?: string[];
@@ -228,10 +228,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     const ragEnabled = agentData.ragEnabled;
     ragDebugInfo.enabled = ragEnabled;
 
-    console.log(
-      "[Chat] RAG config - agent.ragEnabled:",
-      ragEnabled,
-    );
+    console.log("[Chat] RAG config - agent.ragEnabled:", ragEnabled);
 
     if (ragEnabled) {
       // Extract query from request or use last user message
@@ -260,12 +257,24 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           const rewriteModelId =
             agentData.rewriteModel ||
             "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+          
+          // Look up the model alias from DB to get the correct provider
+          const [rewriteModelAlias] = await db
+            .select()
+            .from(modelAlias)
+            .where(eq(modelAlias.alias, rewriteModelId))
+            .limit(1);
+          
+          // If model alias not found, try to use it directly as a Workers AI model
+          const modelProvider = rewriteModelAlias?.provider || "workers-ai";
+          const modelIdToUse = rewriteModelAlias?.modelId || rewriteModelId;
+          
           const { queries: rewrittenQueries, keywords: extractedKeywords } =
             await rewriteQuery(
               createModel({
                 alias: rewriteModelId,
-                provider: "workers-ai",
-                modelId: rewriteModelId,
+                provider: modelProvider as ProviderType,
+                modelId: modelIdToUse,
               }),
               userQuery,
             );
@@ -309,9 +318,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         ragDebugInfo.vectorResultsCount = totalVectorResults;
         ragDebugInfo.ftsResultsCount = ftsResults.length;
 
-        console.log(
-          `[Chat] Vector search: ${totalVectorResults} results`,
-        );
+        console.log(`[Chat] Vector search: ${totalVectorResults} results`);
         console.log(`[Chat] FTS search: ${ftsResults.length} results`);
 
         if (keywords.length > 0 && ftsResults.length === 0) {
@@ -375,9 +382,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         }
 
         if (topMatches.length > 0) {
-          console.log(
-            `[Chat] Retrieved ${topMatches.length} chunks`,
-          );
+          console.log(`[Chat] Retrieved ${topMatches.length} chunks`);
           if (rerankEnabled) {
             console.log(
               `[Chat] Score range: ${topMatches[0].score.toFixed(

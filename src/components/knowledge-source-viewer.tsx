@@ -1,20 +1,20 @@
-import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useQuery } from "@tanstack/react-query";
 import {
-    Download,
-    FileSpreadsheet,
-    FileText,
-    Image as ImageIcon,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Image as ImageIcon,
 } from "lucide-react";
 import * as React from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface KnowledgeSourceViewerProps {
   sourceId: string;
@@ -28,7 +28,7 @@ interface KnowledgeSourceViewerProps {
  * Determines the file type category based on MIME type
  */
 function getFileTypeCategory(
-  mime: string | null
+  mime: string | null,
 ): "image" | "pdf" | "document" | "spreadsheet" | "other" {
   if (!mime) return "other";
 

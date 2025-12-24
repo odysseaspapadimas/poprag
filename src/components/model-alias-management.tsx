@@ -1,30 +1,30 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
+import {
+    useMutation,
+    useQuery,
+    useQueryClient,
+    useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 import ModelAliasActions from "./model-alias-actions";
 import { columns } from "./tables/columns-models";
 import { DataTable } from "./tables/data-table";
@@ -219,13 +219,16 @@ export function ModelAliasManagement() {
                 <div className="p-3 border rounded max-h-48 overflow-y-auto">
                   <div className="text-sm font-medium mb-2">OpenAI Models</div>
                   <div className="space-y-1">
-                    {openaiModels
-                      .filter((model) =>
+                    {(() => {
+                      const filtered = openaiModels.filter((model) =>
                         model.name
                           .toLowerCase()
-                          .includes(modelSearch.toLowerCase()),
-                      )
-                      .map((model: any) => (
+                          .includes(modelSearch.trim().toLowerCase()),
+                      );
+                      if (filtered.length === 0) {
+                        return <div className="text-sm text-muted-foreground px-2 py-1">No models found</div>;
+                      }
+                      return filtered.map((model: any) => (
                         <button
                           key={model.id}
                           type="button"
@@ -243,7 +246,8 @@ export function ModelAliasManagement() {
                             ({model.ownedBy})
                           </span>
                         </button>
-                      ))}
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
@@ -255,7 +259,14 @@ export function ModelAliasManagement() {
                     Cloudflare Workers AI Models
                   </div>
                   <div className="space-y-1">
-                    {cloudflareModels.map((model: any) => (
+                    {(() => {
+                      const filtered = cloudflareModels.filter((model) =>
+                        model.name.toLowerCase().includes(modelSearch.trim().toLowerCase()),
+                      );
+                      if (filtered.length === 0) {
+                        return <div className="text-sm text-muted-foreground px-2 py-1">No models found. Try a different search term.</div>;
+                      }
+                      return filtered.map((model: any) => (
                       <button
                         key={model.id}
                         type="button"
@@ -273,7 +284,8 @@ export function ModelAliasManagement() {
                           ({model.task})
                         </span>
                       </button>
-                    ))}
+                      ));
+                    })()}
                   </div>
                 </div>
               )}

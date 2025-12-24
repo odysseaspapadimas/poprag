@@ -1,16 +1,12 @@
-import { RAGDebugPanel } from "@/components/rag-debug-panel";
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
-import {
-  ImageIcon,
-  Send,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ImageIcon, Send, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -18,6 +14,9 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -74,10 +73,10 @@ interface RAGDebugInfo {
   }>;
 }
 
-function Messages({ 
-  messages, 
-  ragDebugInfo 
-}: { 
+function Messages({
+  messages,
+  ragDebugInfo,
+}: {
   messages: Array<UIMessage>;
   ragDebugInfo: Map<string, RAGDebugInfo | null>;
 }) {
@@ -123,90 +122,92 @@ function Messages({
                 )}
                 <div className="flex-1">
                   {parts.map((part, index) => {
-                  if (part.type === "text") {
-                    return (
-                      <div
-                        className="flex-1 min-w-0 prose dark:prose-invert max-w-none prose-sm"
-                        key={index}
-                      >
-                        <ReactMarkdown
-                          rehypePlugins={[
-                            rehypeRaw,
-                            rehypeSanitize,
-                            rehypeHighlight,
-                            remarkGfm,
-                          ]}
+                    if (part.type === "text") {
+                      return (
+                        <div
+                          className="flex-1 min-w-0 prose dark:prose-invert max-w-none prose-sm"
+                          key={index}
                         >
-                          {part.text}
-                        </ReactMarkdown>
-                      </div>
-                    );
-                  }
-                  if ((part as any).type === "image") {
-                    const image = (part as any).image;
-                    return (
-                      <div key={index} className="mb-4">
-                        <img
-                          src={image.url}
-                          alt={image.alt || image.fileName || "Uploaded image"}
-                          className="max-w-full h-auto rounded-lg border border-border"
-                          style={{ maxHeight: "400px" }}
-                        />
-                        {image.fileName && (
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {image.fileName}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  if (part.type === "tool-getInformation") {
-                    const input = part.input as { question?: string };
-                    const output = part.output as { matches?: any[] };
-                    const state = (part as any).state;
-                    return (
-                      <div key={index} className="mb-4">
-                        <div className="bg-muted/50 rounded-lg p-3 mb-2">
-                          <div className="text-xs text-muted-foreground mb-1">
-                            Tool Call: getInformation {state && `(${state})`}
-                          </div>
-                          <div className="text-sm">
-                            <strong>Question:</strong> {input?.question}
-                          </div>
+                          <ReactMarkdown
+                            rehypePlugins={[
+                              rehypeRaw,
+                              rehypeSanitize,
+                              rehypeHighlight,
+                              remarkGfm,
+                            ]}
+                          >
+                            {part.text}
+                          </ReactMarkdown>
                         </div>
-                        {output && (
-                          <div className="bg-muted/30 rounded-lg p-3">
-                            <div className="text-xs text-muted-foreground mb-1">
-                              Tool Response
+                      );
+                    }
+                    if ((part as any).type === "image") {
+                      const image = (part as any).image;
+                      return (
+                        <div key={index} className="mb-4">
+                          <img
+                            src={image.url}
+                            alt={
+                              image.alt || image.fileName || "Uploaded image"
+                            }
+                            className="max-w-full h-auto rounded-lg border border-border"
+                            style={{ maxHeight: "400px" }}
+                          />
+                          {image.fileName && (
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {image.fileName}
                             </div>
-                            {output.matches && output.matches.length > 0 ? (
-                              <div className="space-y-2">
-                                {output.matches.map(
-                                  (match: any, matchIndex: number) => (
-                                    <div key={matchIndex} className="text-sm">
-                                      <div className="font-medium text-xs text-muted-foreground">
-                                        Match {matchIndex + 1} (Score:{" "}
-                                        {match.score?.toFixed(3)})
-                                      </div>
-                                      <div className="mt-1">
-                                        {match.content}
-                                      </div>
-                                    </div>
-                                  ),
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-sm text-muted-foreground">
-                                No matches found
-                              </div>
-                            )}
+                          )}
+                        </div>
+                      );
+                    }
+                    if (part.type === "tool-getInformation") {
+                      const input = part.input as { question?: string };
+                      const output = part.output as { matches?: any[] };
+                      const state = (part as any).state;
+                      return (
+                        <div key={index} className="mb-4">
+                          <div className="bg-muted/50 rounded-lg p-3 mb-2">
+                            <div className="text-xs text-muted-foreground mb-1">
+                              Tool Call: getInformation {state && `(${state})`}
+                            </div>
+                            <div className="text-sm">
+                              <strong>Question:</strong> {input?.question}
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
+                          {output && (
+                            <div className="bg-muted/30 rounded-lg p-3">
+                              <div className="text-xs text-muted-foreground mb-1">
+                                Tool Response
+                              </div>
+                              {output.matches && output.matches.length > 0 ? (
+                                <div className="space-y-2">
+                                  {output.matches.map(
+                                    (match: any, matchIndex: number) => (
+                                      <div key={matchIndex} className="text-sm">
+                                        <div className="font-medium text-xs text-muted-foreground">
+                                          Match {matchIndex + 1} (Score:{" "}
+                                          {match.score?.toFixed(3)})
+                                        </div>
+                                        <div className="mt-1">
+                                          {match.content}
+                                        </div>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-muted-foreground">
+                                  No matches found
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
                 </div>
               </div>
               {role === "assistant" && debugInfo && (
@@ -246,7 +247,9 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     trpc.chat.confirmImageUpload.mutationOptions(),
   );
 
-  const [ragDebugInfo, setRagDebugInfo] = useState<Map<string, RAGDebugInfo | null>>(new Map());
+  const [ragDebugInfo, setRagDebugInfo] = useState<
+    Map<string, RAGDebugInfo | null>
+  >(new Map());
   const [conversationId] = useState(() => nanoid());
   const lastMessageIdRef = useRef<string | null>(null);
 
@@ -265,7 +268,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       if (message && typeof message === "object" && "id" in message) {
         lastMessageIdRef.current = message.id as string;
       }
-      
+
       // Fetch RAG debug info for the latest message in this conversation
       try {
         const debugInfo = await queryClient.fetchQuery(
@@ -284,11 +287,13 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       onMessageComplete?.();
     },
   });
-  
+
   // Sync debug info with messages when they update
   useEffect(() => {
     if (lastMessageIdRef.current) {
-      const messageExists = messages.some((msg) => msg.id === lastMessageIdRef.current);
+      const messageExists = messages.some(
+        (msg) => msg.id === lastMessageIdRef.current,
+      );
       if (!messageExists) {
         // Message was cleared, reset ref
         lastMessageIdRef.current = null;

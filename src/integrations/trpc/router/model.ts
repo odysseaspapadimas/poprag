@@ -1,13 +1,13 @@
-import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
 import { db } from "@/db";
 import { agentModelPolicy, modelAlias } from "@/db/schema";
 import {
-  adminProcedure,
-  createTRPCRouter,
-  publicProcedure,
+    adminProcedure,
+    createTRPCRouter,
+    publicProcedure,
 } from "@/integrations/trpc/init";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 // Types for external API responses
 interface CloudflareModel {
@@ -245,10 +245,16 @@ export const modelRouter = createTRPCRouter({
           await db.delete(modelAlias).where(eq(modelAlias.alias, alias));
         } else {
           // Simple update without alias change
-          await db
-            .update(modelAlias)
-            .set(updates)
-            .where(eq(modelAlias.alias, alias));
+          // Only update if there are actual values to set
+          if (Object.keys(updates).length > 0) {
+            await db
+              .update(modelAlias)
+              .set({ ...updates, updatedAt: new Date() })
+              .where(eq(modelAlias.alias, alias));
+          } else {
+            // No changes requested, this is effectively a no-op but still valid
+            console.warn('[Model Update] No changes to apply for alias:', alias);
+          }
         }
 
         return { success: true };

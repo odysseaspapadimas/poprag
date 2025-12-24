@@ -1,5 +1,5 @@
-import { useTRPC } from "@/integrations/trpc/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface Props {
   agentId: string;

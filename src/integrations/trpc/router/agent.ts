@@ -1,21 +1,21 @@
-import { db } from "@/db";
-import {
-    agent,
-    agentIndexPin,
-    agentModelPolicy,
-    auditLog,
-    type InsertAgent,
-    knowledgeSource,
-    modelAlias,
-    prompt,
-    promptVersion,
-    runMetric,
-    user,
-} from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { db } from "@/db";
+import {
+  agent,
+  agentIndexPin,
+  agentModelPolicy,
+  auditLog,
+  type InsertAgent,
+  knowledgeSource,
+  modelAlias,
+  prompt,
+  promptVersion,
+  runMetric,
+  user,
+} from "@/db/schema";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
  * Agent management router

@@ -3,9 +3,9 @@
  * POST /api/chat/$agentSlug
  */
 
-import { handleChatRequest } from "@/lib/ai/chat";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { handleChatRequest } from "@/lib/ai/chat";
 
 const chatRequestSchema = z.object({
   messages: z.array(z.any()), // UIMessage[]

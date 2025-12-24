@@ -1,8 +1,19 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  FileText,
+  Search,
+} from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp, Copy, Search, FileText, BarChart3 } from "lucide-react";
-import { useState } from "react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface RAGDebugInfo {
   enabled: boolean;
@@ -53,8 +64,10 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 0.7) return "bg-green-500/20 text-green-700 dark:text-green-400";
-    if (score >= 0.5) return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400";
+    if (score >= 0.7)
+      return "bg-green-500/20 text-green-700 dark:text-green-400";
+    if (score >= 0.5)
+      return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400";
     return "bg-red-500/20 text-red-700 dark:text-red-400";
   };
 
@@ -108,21 +121,24 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             )}
-            {debugInfo.rewrittenQueries && debugInfo.rewrittenQueries.length > 0 && (
-              <div className="pl-6 space-y-1">
-                <div className="text-muted-foreground">Rewritten Queries:</div>
-                <div className="space-y-1">
-                  {debugInfo.rewrittenQueries.map((query, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-background border rounded p-2 font-mono text-xs break-words"
-                    >
-                      {query}
-                    </div>
-                  ))}
+            {debugInfo.rewrittenQueries &&
+              debugInfo.rewrittenQueries.length > 0 && (
+                <div className="pl-6 space-y-1">
+                  <div className="text-muted-foreground">
+                    Rewritten Queries:
+                  </div>
+                  <div className="space-y-1">
+                    {debugInfo.rewrittenQueries.map((query, idx) => (
+                      <div
+                        key={idx}
+                        className="bg-background border rounded p-2 font-mono text-xs break-words"
+                      >
+                        {query}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
             {debugInfo.keywords && debugInfo.keywords.length > 0 && (
               <div className="pl-6 space-y-1">
                 <div className="text-muted-foreground">Extracted Keywords:</div>
@@ -145,7 +161,9 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             </div>
             <div className="pl-6 grid grid-cols-2 gap-2">
               <div className="bg-background border rounded p-2">
-                <div className="text-xs text-muted-foreground">Vector Results</div>
+                <div className="text-xs text-muted-foreground">
+                  Vector Results
+                </div>
                 <div className="text-lg font-semibold">
                   {debugInfo.vectorResultsCount ?? 0}
                 </div>
@@ -268,4 +286,3 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
     </Collapsible>
   );
 }
-
