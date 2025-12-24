@@ -4,6 +4,12 @@
   "author": "Jelle Kuipers <info@jellekuipers.com> (https://jellekuipers.com)",
   "version": "0.7.1",
   "type": "module",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "protobufjs"
+    ]
+  },
   "keywords": [
     "better-auth",
     "biome",
