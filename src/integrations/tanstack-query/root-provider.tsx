@@ -1,6 +1,8 @@
+import { TRPCProvider } from "@/integrations/trpc/react";
+import type { AppRouter } from "@/integrations/trpc/router";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { createIsomorphicFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
+import { getRequestHeaders, getRequestUrl } from "@tanstack/react-start/server";
 import {
   createTRPCClient,
   httpBatchLink,
@@ -11,28 +13,18 @@ import {
 } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import superjson from "superjson";
-import { TRPCProvider } from "@/integrations/trpc/react";
-import type { AppRouter } from "@/integrations/trpc/router";
 
-function getUrl() {
-  if (typeof window !== "undefined") {
+const getUrl = createIsomorphicFn()
+  .client(() => {
     // Client-side: always use relative URL
     return "/api/trpc";
-  }
-
-  // Server-side: use relative URL in production/Workers, absolute in local dev
-  // In Cloudflare Workers, relative URLs work for internal fetch
-  // In local dev with Vite, we need absolute localhost URL
-  const isDev = process.env.NODE_ENV === "development";
-
-  if (isDev) {
-    // Local development: Vite dev server on port 3000
-    return "http://localhost:3000/api/trpc";
-  }
-
-  // Production/Cloudflare Workers: use relative URL for same-worker routing
-  return "/api/trpc";
-}
+  })
+  .server(() => {
+    // Server-side: get the full URL from the incoming request
+    // This works in both local dev and Cloudflare Workers production
+    const requestUrl = getRequestUrl();
+    return `${requestUrl.origin}/api/trpc`;
+  });
 
 const headers = createIsomorphicFn()
   .client(() => ({}))
