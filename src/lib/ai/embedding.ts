@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks } from "@/db/schema";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { env } from "cloudflare:workers";
+import { inArray, sql } from "drizzle-orm";
 
 /**
  * Default embedding model configuration
@@ -16,12 +16,6 @@ import { documentChunks } from "@/db/schema";
  */
 
 /**
- * Cloudflare Vectorize metadata size limit (bytes)
- * Leave buffer for JSON overhead and other fields
- */
-const VECTORIZE_METADATA_LIMIT = 2800; // 3KB limit with buffer
-
-/**
  * Chunking strategy using LangChain's RecursiveCharacterTextSplitter
  * Based on contextual RAG best practices:
  * - Intelligently splits on content boundaries (paragraphs, sentences)
@@ -30,6 +24,7 @@ const VECTORIZE_METADATA_LIMIT = 2800; // 3KB limit with buffer
  * - Filters out very small chunks
  * - Respects Vectorize 3KB metadata limit
  */
+
 export async function generateChunks(
   input: string,
   options?: {
@@ -221,7 +216,10 @@ export async function findRelevantContent(
     minSimilarity?: number;
   },
 ) {
-  const { topK = 6, minSimilarity = 0.3 } = options || {};
+  const {
+    topK = 6,
+    minSimilarity = 0.3,
+  } = options || {};
 
   try {
     // Preprocess query - remove noise and normalize
