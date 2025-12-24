@@ -82,6 +82,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
               render: <TanStackRouterDevtoolsPanel />,
             },
           ]}
+          config={{
+            position: "bottom-left"
+          }}
         />
         <Scripts />
       </body>

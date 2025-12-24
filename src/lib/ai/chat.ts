@@ -76,6 +76,34 @@ interface MatchMetadata {
   [key: string]: unknown;
 }
 
+// Type for model capabilities stored in DB
+interface ModelCapabilities {
+  inputModalities?: ("text" | "image" | "audio" | "video" | "pdf")[];
+  outputModalities?: ("text" | "image" | "audio")[];
+  toolCall?: boolean;
+  reasoning?: boolean;
+  structuredOutput?: boolean;
+  attachment?: boolean;
+  contextLength?: number;
+  maxOutputTokens?: number;
+  costInputPerMillion?: number;
+  costOutputPerMillion?: number;
+}
+
+/**
+ * Check if a model supports a specific input modality
+ */
+function supportsModality(
+  capabilities: ModelCapabilities | null | undefined,
+  modality: "text" | "image" | "audio" | "video" | "pdf",
+): boolean {
+  if (!capabilities?.inputModalities) {
+    // If no capabilities are stored, default to text only for safety
+    return modality === "text";
+  }
+  return capabilities.inputModalities.includes(modality);
+}
+
 /**
  * Query rewriting for improved RAG retrieval
  * Expands user queries into multiple variations to improve search coverage
@@ -311,7 +339,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           .where(eq(modelAlias.alias, intentModelId))
           .limit(1);
 
-        const intentModelProvider = intentModelAlias?.provider || "workers-ai";
+        const intentModelProvider = intentModelAlias?.provider || "cloudflare-workers-ai";
         const intentModelIdToUse = intentModelAlias?.modelId || intentModelId;
 
         const intentClassification = await classifyQueryIntent(
@@ -356,7 +384,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
             .limit(1);
           
           // If model alias not found, try to use it directly as a Workers AI model
-          const modelProvider = rewriteModelAlias?.provider || "workers-ai";
+          const modelProvider = rewriteModelAlias?.provider || "cloudflare-workers-ai";
           const modelIdToUse = rewriteModelAlias?.modelId || rewriteModelId;
           
           const { queries: rewrittenQueries, keywords: extractedKeywords } =
@@ -522,6 +550,8 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     // Resolve model alias into provider/modelId/gatewayRoute from the model_alias table
     const selectedAlias = request.modelAlias || policy.modelAlias;
     let modelConfig;
+    let modelCapabilities: ModelCapabilities | null = null;
+    
     if (selectedAlias) {
       const [aliasRecord] = await db
         .select()
@@ -538,6 +568,9 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         provider: aliasRecord.provider as ProviderType,
         modelId: aliasRecord.modelId,
       };
+      
+      // Store capabilities for modality checks
+      modelCapabilities = aliasRecord.capabilities as ModelCapabilities | null;
     } else {
       // Fallback - use policy.modelAlias if present
       modelConfig = {
@@ -548,16 +581,31 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     }
 
     const model = createModel(modelConfig);
+    
+    // Check if the model supports image input
+    const modelSupportsImage = supportsModality(modelCapabilities, "image");
 
     // 8. Preprocess messages for model compatibility
-    // Always include image data - let the model handle unsupported formats
+    // Filter out images if the model doesn't support them
     const processedMessages = await Promise.all(
       request.messages.map(async (msg) => ({
         ...msg,
-        parts: await Promise.all(
+        parts: (await Promise.all(
           msg.parts.map(async (part) => {
             // Type guard to check if this is an image part
             if ("type" in part && (part as { type: string }).type === "image") {
+              // Skip images if model doesn't support them
+              if (!modelSupportsImage) {
+                console.log(
+                  `[Chat] Skipping image - model '${selectedAlias}' does not support image input`,
+                );
+                // Return a text part explaining the image was skipped
+                return {
+                  type: "text" as const,
+                  text: "[Image attachment skipped - selected model does not support image input]",
+                };
+              }
+              
               const imagePart = part as unknown as ImagePart;
               const imageData = imagePart.image;
 
@@ -591,7 +639,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
             }
             return part;
           }),
-        ),
+        )).filter(Boolean),
       })),
     );
 

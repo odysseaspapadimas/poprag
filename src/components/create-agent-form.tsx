@@ -1,31 +1,31 @@
+import {
+    Form,
+    FormControl,
+    FormDescription,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
+    useMutation,
+    useQueryClient,
+    useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { useTRPC } from "@/integrations/trpc/react";
 
 const createAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -41,10 +41,6 @@ const createAgentSchema = z.object({
   modelAlias: z.string(),
   visibility: z.enum(["private", "workspace", "public"]),
   ragEnabled: z.boolean(),
-  rewriteQuery: z.boolean(),
-  rewriteModel: z.string().optional(),
-  rerank: z.boolean(),
-  rerankModel: z.string().optional(),
 });
 
 type CreateAgentForm = z.infer<typeof createAgentSchema>;
@@ -72,8 +68,6 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
       modelAlias: "gpt-4o-mini",
       visibility: "private",
       ragEnabled: true,
-      rewriteQuery: false,
-      rerank: false,
     },
   });
 
@@ -216,112 +210,6 @@ export function CreateAgentForm({ onSuccess }: CreateAgentFormProps) {
               </FormItem>
             )}
           />
-
-          {form.watch("ragEnabled") && (
-            <>
-              <FormField
-                control={form.control}
-                name="rewriteQuery"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel>Rewrite Queries</FormLabel>
-                      <FormDescription>
-                        Improve search results by rewriting queries
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("rewriteQuery") && (
-                <FormField
-                  control={form.control}
-                  name="rewriteModel"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Rewrite Model</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a model" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {modelAliases.map((model) => (
-                            <SelectItem key={model.alias} value={model.alias}>
-                              {model.alias}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name="rerank"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel>Rerank Results</FormLabel>
-                      <FormDescription>
-                        Re-order search results for better relevance
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("rerank") && (
-                <FormField
-                  control={form.control}
-                  name="rerankModel"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Rerank Model</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a model" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {modelAliases.map((model) => (
-                            <SelectItem key={model.alias} value={model.alias}>
-                              {model.alias}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-            </>
-          )}
         </div>
 
         <div className="flex justify-end gap-2">

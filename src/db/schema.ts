@@ -162,9 +162,22 @@ export const modelAlias = sqliteTable(
   {
     alias: text("alias").primaryKey(),
     provider: text("provider", {
-      enum: ["openai", "openrouter", "huggingface", "workers-ai"],
+      enum: ["openai", "openrouter", "huggingface", "cloudflare-workers-ai"],
     }).notNull(),
     modelId: text("model_id").notNull(),
+    // Model capabilities from models.dev
+    capabilities: text("capabilities", { mode: "json" }).$type<{
+      inputModalities?: ("text" | "image" | "audio" | "video" | "pdf")[];
+      outputModalities?: ("text" | "image" | "audio")[];
+      toolCall?: boolean;
+      reasoning?: boolean;
+      structuredOutput?: boolean;
+      attachment?: boolean;
+      contextLength?: number;
+      maxOutputTokens?: number;
+      costInputPerMillion?: number;
+      costOutputPerMillion?: number;
+    }>(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .$onUpdate(() => new Date())
@@ -187,12 +200,10 @@ export const agentModelPolicy = sqliteTable(
     topP: integer("top_p"),
     presencePenalty: integer("presence_penalty"),
     frequencyPenalty: integer("frequency_penalty"),
-    maxTokens: integer("max_tokens"),
     responseFormat: text("response_format", { mode: "json" }).$type<{
       type?: string;
       schema?: unknown;
     }>(),
-    enabledTools: text("enabled_tools", { mode: "json" }).$type<string[]>(),
     effectiveFrom: integer("effective_from", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

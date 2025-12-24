@@ -1,21 +1,21 @@
+import { db } from "@/db";
+import {
+    agent,
+    agentIndexPin,
+    agentModelPolicy,
+    auditLog,
+    type InsertAgent,
+    knowledgeSource,
+    modelAlias,
+    prompt,
+    promptVersion,
+    runMetric,
+    user,
+} from "@/db/schema";
+import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { db } from "@/db";
-import {
-  agent,
-  agentIndexPin,
-  agentModelPolicy,
-  auditLog,
-  type InsertAgent,
-  knowledgeSource,
-  modelAlias,
-  prompt,
-  promptVersion,
-  runMetric,
-  user,
-} from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
 /**
  * Agent management router
@@ -183,15 +183,13 @@ export const agentRouter = createTRPCRouter({
         createdAt: new Date(),
       });
 
-      // Create model policy with RAG enabled by default
+      // Create model policy
       await db.insert(agentModelPolicy).values({
         id: policyId,
         agentId: agentId,
         modelAlias: input.modelAlias,
         temperature: 0.7,
         topP: 1,
-        maxTokens: 2048,
-        enabledTools: ["retrieval"], // Enable RAG by default
         effectiveFrom: new Date(),
       });
 
@@ -547,10 +545,8 @@ export const agentRouter = createTRPCRouter({
       z.object({
         agentId: z.string(),
         modelAlias: z.string().optional(),
-        enabledTools: z.array(z.string()).optional(),
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),
-        maxTokens: z.number().min(1).max(32000).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -590,12 +586,9 @@ export const agentRouter = createTRPCRouter({
         }
         updates.modelAlias = input.modelAlias;
       }
-      if (input.enabledTools !== undefined)
-        updates.enabledTools = input.enabledTools;
       if (input.temperature !== undefined)
         updates.temperature = input.temperature;
       if (input.topP !== undefined) updates.topP = input.topP;
-      if (input.maxTokens !== undefined) updates.maxTokens = input.maxTokens;
 
       await db
         .update(agentModelPolicy)
@@ -677,6 +670,11 @@ export const agentRouter = createTRPCRouter({
 
       const hasProdPrompt = !!prodPromptVersion;
 
-      return { hasModelAlias, hasProdPrompt, isActive };
+      return { 
+        hasModelAlias, 
+        hasProdPrompt, 
+        isActive,
+        modelAlias: policy?.modelAlias || null, // Include the actual alias for capability checks
+      };
     }),
 });

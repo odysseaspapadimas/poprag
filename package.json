@@ -17,7 +17,7 @@
     "build": "vite build && tsc --noEmit",
     "check": "npx @biomejs/biome check --write .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "wrangler d1 migrations apply poprag --remote",
     "db:push": "drizzle-kit push",
     "db:rebuild-fts": "wrangler d1 execute poprag --remote --file scripts/rebuild-fts.sql",
     "db:seed": "npx tsx src/db/seed.ts",

@@ -4,6 +4,7 @@ import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import {
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
@@ -257,6 +258,17 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const { data: setupStatus } = useSuspenseQuery(
     trpc.agent.getSetupStatus.queryOptions({ agentId }),
   );
+
+  // Query model capabilities to check for image support
+  // Use useQuery instead of useSuspenseQuery since it may not have a model alias
+  const { data: modelCapabilities } = useQuery({
+    ...trpc.model.checkCapabilities.queryOptions({
+      alias: setupStatus?.modelAlias || "",
+    }),
+    enabled: !!setupStatus?.modelAlias,
+  });
+
+  const supportsImageUpload = modelCapabilities?.supportsImage ?? false;
 
   const isFullySetUp =
     setupStatus?.hasModelAlias &&
@@ -533,8 +545,13 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute inset-y-0 left-2 flex items-center p-2 text-muted-foreground hover:text-primary transition-colors"
-                  disabled={uploadImageStart.isPending}
+                  className={`absolute inset-y-0 left-2 flex items-center p-2 transition-colors ${
+                    supportsImageUpload 
+                      ? "text-muted-foreground hover:text-primary" 
+                      : "text-muted-foreground/30 cursor-not-allowed"
+                  }`}
+                  disabled={uploadImageStart.isPending || !supportsImageUpload}
+                  title={supportsImageUpload ? "Attach image" : "Image upload not supported by this model"}
                 >
                   <ImageIcon className="w-4 h-4" />
                 </button>

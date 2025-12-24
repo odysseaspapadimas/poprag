@@ -1,6 +1,28 @@
+import { Badge } from "@/components/ui/badge";
 import type { ColumnDef } from "@tanstack/react-table";
+import { AudioLines, FileText, Image, Video } from "lucide-react";
 
-export const columns: ColumnDef<any>[] = [
+// Type for model alias from database
+export interface ModelAliasRow {
+  alias: string;
+  provider: string;
+  modelId: string;
+  capabilities?: {
+    inputModalities?: string[];
+    outputModalities?: string[];
+    toolCall?: boolean;
+    reasoning?: boolean;
+    structuredOutput?: boolean;
+    attachment?: boolean;
+    contextLength?: number;
+    maxOutputTokens?: number;
+    costInputPerMillion?: number;
+    costOutputPerMillion?: number;
+  } | null;
+  updatedAt: Date;
+}
+
+export const columns: ColumnDef<ModelAliasRow>[] = [
   {
     accessorKey: "alias",
     header: "Alias",
@@ -12,5 +34,40 @@ export const columns: ColumnDef<any>[] = [
   {
     accessorKey: "modelId",
     header: "Model ID",
+  },
+  {
+    id: "capabilities",
+    header: "Capabilities",
+    cell: ({ row }) => {
+      const caps = row.original.capabilities;
+      if (!caps) return <span className="text-muted-foreground text-xs">—</span>;
+
+      return (
+        <div className="flex items-center gap-1 flex-wrap">
+          {caps.inputModalities?.includes("image") && (
+            <Image className="w-3 h-3 text-blue-500" />
+          )}
+          {caps.inputModalities?.includes("audio") && (
+            <AudioLines className="w-3 h-3 text-green-500" />
+          )}
+          {caps.inputModalities?.includes("video") && (
+            <Video className="w-3 h-3 text-purple-500" />
+          )}
+          {caps.inputModalities?.includes("pdf") && (
+            <FileText className="w-3 h-3 text-orange-500" />
+          )}
+          {caps.toolCall && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">
+              tools
+            </Badge>
+          )}
+          {caps.reasoning && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">
+              reason
+            </Badge>
+          )}
+        </div>
+      );
+    },
   },
 ];

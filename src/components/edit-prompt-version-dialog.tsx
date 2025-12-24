@@ -1,22 +1,29 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import type { PromptVersion } from "@/db/schema";
+import { useTRPC } from "@/integrations/trpc/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import type { PromptVersion } from "@/db/schema";
-import { useTRPC } from "@/integrations/trpc/react";
 
 interface EditPromptVersionDialogProps {
   open: boolean;
@@ -36,6 +43,9 @@ export function EditPromptVersionDialog({
   const trpc = useTRPC();
   const [content, setContent] = useState("");
   const [changelog, setChangelog] = useState("");
+  const [label, setLabel] = useState<"dev" | "staging" | "prod" | "none">(
+    "none",
+  );
 
   const queryClient = useQueryClient();
 
@@ -68,9 +78,37 @@ export function EditPromptVersionDialog({
     }),
   );
 
+  const assignLabelMutation = useMutation(
+    trpc.prompt.assignLabel.mutationOptions({
+      onSuccess: () => {
+        toast.success("Label updated successfully");
+        onSuccess();
+        if (version?.promptId) {
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.getVersions.queryKey({
+              promptId: version.promptId,
+            }),
+          });
+        }
+        if (agentId) {
+          queryClient.invalidateQueries({
+            queryKey: trpc.prompt.list.queryKey({ agentId }),
+          });
+          queryClient.invalidateQueries({
+            queryKey: trpc.agent.getSetupStatus.queryKey({ agentId }),
+          });
+        }
+      },
+      onError: (error) => {
+        toast.error(`Failed to update label: ${error.message}`);
+      },
+    }),
+  );
+
   const resetForm = () => {
     setContent("");
     setChangelog("");
+    setLabel("none");
   };
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -88,6 +126,15 @@ export function EditPromptVersionDialog({
       content: content.trim(),
       changelog: changelog.trim() || undefined,
     });
+
+    // If label changed to a non-none value, also assign the new label
+    if (label !== "none" && label !== version.label) {
+      assignLabelMutation.mutate({
+        promptId: version.promptId,
+        version: version.version,
+        label: label,
+      });
+    }
   };
 
   // Update form when version changes
@@ -95,6 +142,7 @@ export function EditPromptVersionDialog({
     if (version) {
       setContent(version.content);
       setChangelog(version.changelog || "");
+      setLabel(version.label as "dev" | "staging" | "prod" | "none");
     }
   }, [version]);
 
@@ -144,6 +192,30 @@ export function EditPromptVersionDialog({
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="label">Label</Label>
+            <Select
+              value={label}
+              onValueChange={(value) =>
+                setLabel(value as "dev" | "staging" | "prod" | "none")
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a label" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="dev">Dev</SelectItem>
+                <SelectItem value="staging">Staging</SelectItem>
+                <SelectItem value="prod">Prod</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Change the label to promote this version to a different
+              environment. Only one version can have each label at a time.
+            </p>
+          </div>
+
           <DialogFooter>
             <Button
               type="button"
@@ -154,9 +226,13 @@ export function EditPromptVersionDialog({
             </Button>
             <Button
               type="submit"
-              disabled={!content.trim() || updateVersionMutation.isPending}
+              disabled={
+                !content.trim() ||
+                updateVersionMutation.isPending ||
+                assignLabelMutation.isPending
+              }
             >
-              {updateVersionMutation.isPending
+              {updateVersionMutation.isPending || assignLabelMutation.isPending
                 ? "Updating..."
                 : "Update Version"}
             </Button>

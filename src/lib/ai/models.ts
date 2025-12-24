@@ -1,14 +1,14 @@
-import { env } from "cloudflare:workers";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { createAiGateway } from "ai-gateway-provider";
+import { env } from "cloudflare:workers";
 import { createWorkersAI } from "workers-ai-provider";
 
 export type ProviderType =
   | "openai"
   | "openrouter"
   | "huggingface"
-  | "workers-ai";
+  | "cloudflare-workers-ai";
 
 export interface ModelConfig {
   alias: string;
@@ -54,7 +54,7 @@ export function createModel(config: ModelConfig): LanguageModel {
     //   return aigateway ? aigateway([model]) : model;
     // }
 
-    case "workers-ai": {
+    case "cloudflare-workers-ai": {
       // Workers AI through AI SDK provider
       if (!env.AI) {
         throw new Error("Workers AI requires AI binding");
@@ -108,7 +108,7 @@ export function createEmbeddingModel(
     case "openai":
       return openai.embedding(config.modelId);
 
-    case "workers-ai":
+    case "cloudflare-workers-ai":
       // Workers AI embedding would use binding
       throw new Error(
         "Workers AI embeddings require Cloudflare AI binding - implement in runtime",

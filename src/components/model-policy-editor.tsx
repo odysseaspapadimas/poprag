@@ -1,22 +1,22 @@
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
+import {
+    useMutation,
+    useQueryClient,
+    useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 interface ModelPolicyEditorProps {
   agentId: string;
@@ -38,10 +38,6 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
     modelAlias: policy?.modelAlias,
     temperature: policy?.temperature,
     topP: policy?.topP,
-    maxTokens: policy?.maxTokens,
-    retrievalEnabled:
-      Array.isArray(policy?.enabledTools) &&
-      policy?.enabledTools.includes("retrieval"),
   }));
 
   useEffect(() => {
@@ -51,10 +47,6 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
         modelAlias: policy.modelAlias ?? s.modelAlias,
         temperature: policy.temperature ?? s.temperature,
         topP: policy.topP ?? s.topP,
-        maxTokens: policy.maxTokens ?? s.maxTokens,
-        retrievalEnabled:
-          Array.isArray(policy.enabledTools) &&
-          policy.enabledTools.includes("retrieval"),
       }));
     }
   }, [policy]);
@@ -89,53 +81,38 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
       modelAlias: formState.modelAlias,
       temperature: Number(formState.temperature),
       topP: Number(formState.topP),
-      maxTokens: Number(formState.maxTokens),
-      enabledTools: formState.retrievalEnabled ? ["retrieval"] : [],
     });
   };
 
   return (
     <div className="space-y-4">
+      <Field>
+        <Label>Model Alias</Label>
+        <Select
+          value={formState.modelAlias}
+          onValueChange={(v) => setFormState({ ...formState, modelAlias: v })}
+          disabled={!(modelAliases && modelAliases.length > 0)}
+          aria-label="Model Alias"
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent>
+            {modelAliasesLoading && (
+              <SelectItem value="" disabled>
+                Loading...
+              </SelectItem>
+            )}
+            {modelAliases?.map((m: any) => (
+              <SelectItem key={m.alias} value={m.alias}>
+                {m.alias} ({m.provider})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
       <div className="grid grid-cols-2 gap-4">
-        <Field>
-          <Label>Model Alias</Label>
-          <Select
-            value={formState.modelAlias}
-            onValueChange={(v) => setFormState({ ...formState, modelAlias: v })}
-            disabled={!(modelAliases && modelAliases.length > 0)}
-            aria-label="Model Alias"
-          >
-            <SelectTrigger className="w-56">
-              <SelectValue placeholder="Select a model" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelAliasesLoading && (
-                <SelectItem value="" disabled>
-                  Loading...
-                </SelectItem>
-              )}
-              {modelAliases?.map((m: any) => (
-                <SelectItem key={m.alias} value={m.alias}>
-                  {m.alias} ({m.provider})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        <Field>
-          <Label>Max Tokens</Label>
-          <Input
-            type="number"
-            value={String(formState.maxTokens)}
-            onChange={(e) =>
-              setFormState({ ...formState, maxTokens: Number(e.target.value) })
-            }
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
         <Field>
           <Label>Temperature</Label>
           <Input
@@ -165,29 +142,6 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
               setFormState({ ...formState, topP: Number(e.target.value) })
             }
           />
-        </Field>
-
-        <Field>
-          <Label>Retrieval Enabled</Label>
-          <div className="flex items-center gap-2">
-            <input
-              id="retrieval-enabled"
-              type="checkbox"
-              checked={formState.retrievalEnabled}
-              onChange={(e) =>
-                setFormState({
-                  ...formState,
-                  retrievalEnabled: e.target.checked,
-                })
-              }
-            />
-            <label
-              htmlFor="retrieval-enabled"
-              className="text-sm text-muted-foreground"
-            >
-              Allow RAG retrieval for this agent
-            </label>
-          </div>
         </Field>
       </div>
 
