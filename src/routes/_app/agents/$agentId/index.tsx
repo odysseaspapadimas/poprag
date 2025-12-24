@@ -6,6 +6,7 @@ import { KnowledgeSourceViewer } from "@/components/knowledge-source-viewer";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
 import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
+import { RAGSettings } from "@/components/rag-settings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
@@ -56,8 +57,7 @@ type Tab =
   | "prompts"
   | "models"
   | "knowledge"
-  | "guardrails"
-  | "sandbox"
+  | "rag"
   | "analytics"
   | "audit";
 
@@ -128,8 +128,7 @@ function AgentDetailPage() {
     { id: "prompts", label: "Prompts" },
     { id: "models", label: "Models & Knobs" },
     { id: "knowledge", label: "Knowledge" },
-    { id: "guardrails", label: "Guardrails" },
-    { id: "sandbox", label: "Sandbox" },
+    { id: "rag", label: "RAG Settings" },
     { id: "analytics", label: "Analytics" },
     { id: "audit", label: "Audit Log" },
   ];
@@ -514,21 +513,14 @@ function AgentDetailPage() {
             </div>
           )}
 
-          {activeTab === "guardrails" && (
+          {activeTab === "rag" && (
             <div className="bg-card border rounded-lg p-6">
-              <h2 className="text-xl font-semibold mb-4">Guardrails</h2>
-              <p className="text-muted-foreground">
-                Guardrail configuration coming soon...
+              <h2 className="text-xl font-semibold mb-4">RAG Settings</h2>
+              <p className="text-muted-foreground mb-6">
+                Configure how your agent retrieves and processes information
+                from knowledge sources.
               </p>
-            </div>
-          )}
-
-          {activeTab === "sandbox" && (
-            <div className="bg-card border rounded-lg p-6">
-              <h2 className="text-xl font-semibold mb-4">Sandbox</h2>
-              <p className="text-muted-foreground">
-                Test your agent in a sandbox environment...
-              </p>
+              <RAGSettings agentId={agentId} />
             </div>
           )}
 
