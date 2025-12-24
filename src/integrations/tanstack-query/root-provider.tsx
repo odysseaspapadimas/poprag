@@ -30,31 +30,52 @@ const headers = createIsomorphicFn()
   .client(() => ({}))
   .server(() => getRequestHeaders());
 
-export const trpcClient = createTRPCClient<AppRouter>({
-  links: [
-    loggerLink({
-      enabled: (op) =>
-        process.env.NODE_ENV === "development" ||
-        (op.direction === "down" && op.result instanceof Error),
-    }),
-    splitLink({
-      condition(op) {
-        // Route auth.* operations to the non-streaming httpBatchLink
-        return op.path.startsWith("auth.");
-      },
-      true: httpBatchLink({
-        transformer: superjson,
-        url: getUrl(),
-        headers,
+// Factory function to create tRPC client - called during request time
+function createTrpcClient() {
+  const url = getUrl();
+
+  return createTRPCClient<AppRouter>({
+    links: [
+      loggerLink({
+        enabled: (op) =>
+          process.env.NODE_ENV === "development" ||
+          (op.direction === "down" && op.result instanceof Error),
       }),
-      false: httpBatchStreamLink({
-        transformer: superjson,
-        url: getUrl(),
-        headers,
+      splitLink({
+        condition(op) {
+          // Route auth.* operations to the non-streaming httpBatchLink
+          return op.path.startsWith("auth.");
+        },
+        true: httpBatchLink({
+          transformer: superjson,
+          url,
+          headers,
+        }),
+        false: httpBatchStreamLink({
+          transformer: superjson,
+          url,
+          headers,
+        }),
       }),
-    }),
-  ],
-});
+    ],
+  });
+}
+
+// Singleton for client-side, recreated for each request server-side
+let clientSideTrpcClient: ReturnType<typeof createTrpcClient> | null = null;
+
+function getTrpcClient() {
+  // On the server, always create a fresh client per request
+  if (typeof window === "undefined") {
+    return createTrpcClient();
+  }
+
+  // On the client, reuse the same client instance
+  if (!clientSideTrpcClient) {
+    clientSideTrpcClient = createTrpcClient();
+  }
+  return clientSideTrpcClient;
+}
 
 const FIVE_MINUTES_CACHE = 5 * 60 * 1000;
 
@@ -91,7 +112,7 @@ export const createServerHelpers = ({
   queryClient: QueryClient;
 }) => {
   const serverHelpers = createTRPCOptionsProxy({
-    client: trpcClient,
+    client: getTrpcClient(),
     queryClient: queryClient,
   });
   return serverHelpers;
@@ -99,6 +120,7 @@ export const createServerHelpers = ({
 
 export function getContext() {
   const queryClient = createQueryClient();
+  const trpcClient = getTrpcClient();
 
   const serverHelpers = createTRPCOptionsProxy({
     client: trpcClient,
@@ -107,15 +129,18 @@ export function getContext() {
   return {
     queryClient,
     trpc: serverHelpers,
+    trpcClient, // Expose for Provider
   };
 }
 
 export function Provider({
   children,
   queryClient,
+  trpcClient,
 }: {
   children: React.ReactNode;
   queryClient: QueryClient;
+  trpcClient: ReturnType<typeof getTrpcClient>;
 }) {
   return (
     <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

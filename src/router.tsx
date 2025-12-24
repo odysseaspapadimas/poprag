@@ -16,7 +16,10 @@ export const getRouter = () => {
     defaultNotFoundComponent: NotFound,
     Wrap: (props: { children: React.ReactNode }) => {
       return (
-        <TanstackQuery.Provider {...rqContext}>
+        <TanstackQuery.Provider
+          queryClient={rqContext.queryClient}
+          trpcClient={rqContext.trpcClient}
+        >
           {props.children}
         </TanstackQuery.Provider>
       );
