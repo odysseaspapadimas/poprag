@@ -1,37 +1,39 @@
+import { Button } from "@/components/ui/button";
+import {
+    Form,
+    FormControl,
+    FormDescription,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
+    useMutation,
+    useQueryClient,
+    useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { useTRPC } from "@/integrations/trpc/react";
 
 const ragSettingsSchema = z.object({
   ragEnabled: z.boolean(),
   rewriteQuery: z.boolean(),
   rewriteModel: z.string().optional(),
+  intentModel: z.string().optional(),
+  queryVariationsCount: z.number().min(1).max(10),
   rerank: z.boolean(),
   rerankModel: z.string().optional(),
 });
@@ -60,6 +62,8 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
       ragEnabled: agent?.ragEnabled ?? true,
       rewriteQuery: agent?.rewriteQuery ?? false,
       rewriteModel: agent?.rewriteModel || undefined,
+      intentModel: agent?.intentModel || undefined,
+      queryVariationsCount: agent?.queryVariationsCount ?? 3,
       rerank: agent?.rerank ?? false,
       rerankModel: agent?.rerank ? "@cf/baai/bge-reranker-base" : undefined,
     },
@@ -124,6 +128,37 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
           <>
             <FormField
               control={form.control}
+              name="intentModel"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Intent Classification Model</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a model for intent classification" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {modelAliases.map((model) => (
+                        <SelectItem key={model.alias} value={model.alias}>
+                          {model.alias}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Model used to determine if a query needs knowledge base search (smaller = faster)
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="rewriteQuery"
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
@@ -145,37 +180,62 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
             />
 
             {form.watch("rewriteQuery") && (
-              <FormField
-                control={form.control}
-                name="rewriteModel"
-                render={({ field }) => (
-                  <FormItem className="ml-4">
-                    <FormLabel>Query Rewrite Model</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
+              <>
+                <FormField
+                  control={form.control}
+                  name="rewriteModel"
+                  render={({ field }) => (
+                    <FormItem className="ml-4">
+                      <FormLabel>Query Rewrite Model</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a model for query rewriting" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {modelAliases.map((model) => (
+                            <SelectItem key={model.alias} value={model.alias}>
+                              {model.alias}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        The model used to generate query variations for better
+                        recall
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="queryVariationsCount"
+                  render={({ field }) => (
+                    <FormItem className="ml-4">
+                      <FormLabel>Query Variations Count</FormLabel>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a model for query rewriting" />
-                        </SelectTrigger>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={10}
+                          {...field}
+                          onChange={(e) => field.onChange(Number(e.target.value))}
+                        />
                       </FormControl>
-                      <SelectContent>
-                        {modelAliases.map((model) => (
-                          <SelectItem key={model.alias} value={model.alias}>
-                            {model.alias}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      The model used to generate query variations for better
-                      recall
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormDescription>
+                        Number of query variations to generate (2-3 for speed, 4-5 for coverage)
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </>
             )}
 
             <FormField

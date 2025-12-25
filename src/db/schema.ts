@@ -147,6 +147,8 @@ export const agent = sqliteTable(
       .default(true)
       .notNull(),
     rewriteModel: text("rewrite_model"),
+    intentModel: text("intent_model"),
+    queryVariationsCount: integer("query_variations_count").default(3),
     rerank: integer("rerank", { mode: "boolean" }).default(true).notNull(),
     rerankModel: text("rerank_model"),
   },

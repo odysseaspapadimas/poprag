@@ -112,6 +112,8 @@ export const agentRouter = createTRPCRouter({
         ragEnabled: z.boolean().default(true),
         rewriteQuery: z.boolean().default(false),
         rewriteModel: z.string().optional(),
+        intentModel: z.string().optional(),
+        queryVariationsCount: z.number().min(1).max(10).optional(),
         rerank: z.boolean().default(false),
         rerankModel: z.string().optional(),
       }),
@@ -155,6 +157,8 @@ export const agentRouter = createTRPCRouter({
         ragEnabled: input.ragEnabled,
         rewriteQuery: input.rewriteQuery,
         rewriteModel: input.rewriteModel,
+        intentModel: input.intentModel,
+        queryVariationsCount: input.queryVariationsCount,
         rerank: input.rerank,
         rerankModel: input.rerankModel,
         createdBy: ctx.session.user.id,
@@ -222,6 +226,8 @@ export const agentRouter = createTRPCRouter({
         ragEnabled: z.boolean().optional(),
         rewriteQuery: z.boolean().optional(),
         rewriteModel: z.string().optional(),
+        intentModel: z.string().optional(),
+        queryVariationsCount: z.number().min(1).max(10).optional(),
         rerank: z.boolean().optional(),
         rerankModel: z.string().optional(),
       }),
@@ -243,6 +249,10 @@ export const agentRouter = createTRPCRouter({
         updates.rewriteQuery = input.rewriteQuery;
       if (input.rewriteModel !== undefined)
         updates.rewriteModel = input.rewriteModel;
+      if (input.intentModel !== undefined)
+        updates.intentModel = input.intentModel;
+      if (input.queryVariationsCount !== undefined)
+        updates.queryVariationsCount = input.queryVariationsCount;
       if (input.rerank !== undefined) updates.rerank = input.rerank;
       if (input.rerankModel !== undefined)
         updates.rerankModel = input.rerankModel;

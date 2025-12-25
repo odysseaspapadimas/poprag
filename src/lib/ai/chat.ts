@@ -11,14 +11,14 @@
 
 import { db } from "@/db";
 import {
-  type Agent,
-  agent,
-  agentModelPolicy,
-  modelAlias,
-  prompt,
-  promptVersion,
-  runMetric,
-  transcript,
+    type Agent,
+    agent,
+    agentModelPolicy,
+    modelAlias,
+    prompt,
+    promptVersion,
+    runMetric,
+    transcript,
 } from "@/db/schema";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
@@ -31,9 +31,9 @@ import { nanoid } from "nanoid";
 import { type ModelCapabilities } from "./helpers";
 import { processMessageParts } from "./image-service";
 import {
-  performRAGRetrieval,
-  type RAGConfig,
-  type RAGDebugInfo
+    performRAGRetrieval,
+    type RAGConfig,
+    type RAGDebugInfo
 } from "./rag-pipeline";
 
 // Re-export functions for backwards compatibility
@@ -69,24 +69,23 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
   let agentData: Agent | undefined;
 
   try {
-    // 1. Resolve agent
+    // 1. Resolve agent first (needed for subsequent parallel queries)
     agentData = await resolveAgent(request.agentSlug);
 
-    // 2. Load prompt configuration
-    const { basePrompt, mergedVariables } = await loadPromptConfig(
-      agentData.id,
-      request.variables,
-    );
+    // 2. Load prompt config and model policy in PARALLEL for speed
+    const [{ basePrompt, mergedVariables }, policy] = await Promise.all([
+      loadPromptConfig(agentData.id, request.variables),
+      loadModelPolicy(agentData.id),
+    ]);
 
-    // 3. Load model policy
-    const policy = await loadModelPolicy(agentData.id);
-
-    // 4. RAG retrieval (using extracted pipeline)
+    // 3. RAG retrieval (using extracted pipeline)
     const userQuery = extractUserQuery(request);
     const ragConfig: RAGConfig = {
       enabled: agentData.ragEnabled,
       rewriteQuery: agentData.rewriteQuery,
       rewriteModel: agentData.rewriteModel || undefined,
+      intentModel: agentData.intentModel || undefined,
+      queryVariationsCount: agentData.queryVariationsCount || 3,
       rerank: agentData.rerank,
       rerankModel: agentData.rerankModel || undefined,
       topK: request.rag?.topK,
@@ -95,18 +94,18 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     const { context: ragContext, debugInfo: ragDebugInfo } =
       await performRAGRetrieval(userQuery, agentData.id, ragConfig);
 
-    // 5. Build final system prompt with RAG context
+    // 4. Build final system prompt with RAG context
     let systemPrompt = basePrompt;
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
     }
 
-    // 6. Resolve model and capabilities
+    // 5. Resolve model and capabilities
     const { model, capabilities, selectedAlias } = await resolveModelForChat(
       request.modelAlias || policy.modelAlias,
     );
 
-    // 7. Process messages (handle images based on model capabilities)
+    // 6. Process messages (handle images based on model capabilities)
     const processedMessages = await Promise.all(
       request.messages.map(async (msg) => ({
         ...msg,
@@ -119,10 +118,10 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
       })),
     ) as UIMessage[];
 
-    // 8. Convert to model messages
+    // 7. Convert to model messages
     const modelMessages = await convertToModelMessages(processedMessages);
 
-    // 9. Stream response
+    // 8. Stream response
     let firstTokenTime: number | undefined;
 
     const result = streamText({

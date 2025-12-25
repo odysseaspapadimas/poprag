@@ -57,6 +57,13 @@
       "when": 1766599898669,
       "tag": "0007_dashing_randall",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1766661436316,
+      "tag": "0008_fantastic_shadow_king",
+      "breakpoints": true
     }
   ]
 }
