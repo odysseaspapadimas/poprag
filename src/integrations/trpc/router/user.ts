@@ -1,4 +1,4 @@
-import { adminProcedure } from "@/integrations/trpc/init";
+import { protectedProcedure } from "@/integrations/trpc/init";
 import { getAllUsers, getUserById } from "@/lib/firebase/queries";
 import type { TRPCRouterRecord } from "@trpc/server";
 import { z } from "zod";
@@ -11,7 +11,7 @@ export const userRouter = {
   /**
    * Get all users
    */
-  getAll: adminProcedure
+  getAll: protectedProcedure
     .input(
       z
         .object({
@@ -33,7 +33,7 @@ export const userRouter = {
   /**
    * Get a single user by UID
    */
-  getById: adminProcedure
+  getById: protectedProcedure
     .input(
       z.object({
         uid: z.string(),
@@ -55,7 +55,7 @@ export const userRouter = {
   /**
    * Get user with specific experience
    */
-  getWithExperience: adminProcedure
+  getWithExperience: protectedProcedure
     .input(
       z.object({
         uid: z.string(),
@@ -82,7 +82,7 @@ export const userRouter = {
   /**
    * Get user with specific experience and chat
    */
-  getWithChat: adminProcedure
+  getWithChat: protectedProcedure
     .input(
       z.object({
         uid: z.string(),
