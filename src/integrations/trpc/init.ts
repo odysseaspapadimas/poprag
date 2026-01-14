@@ -24,11 +24,26 @@ export const createTRPCContext = async ({
   };
 };
 
+// Context for server-side calls (no request/response needed)
+export const createServerSideContext = async (headers?: Headers) => {
+  const session = headers
+    ? await auth.api.getSession({ headers })
+    : null;
+
+  return {
+    request: null as unknown as Request,
+    db,
+    session,
+    responseHeaders: new Headers(),
+  };
+};
+
 export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
 });
 
 export const createTRPCRouter = t.router;
+export const createCallerFactory = t.createCallerFactory;
 
 const enforceUserIsAuthenticated = t.middleware(({ ctx, next }) => {
   if (!ctx.session?.user) {

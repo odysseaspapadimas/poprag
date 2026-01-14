@@ -1,4 +1,4 @@
-import { createTRPCRouter } from "@/integrations/trpc/init";
+import { createCallerFactory, createTRPCRouter } from "@/integrations/trpc/init";
 import { userRouter } from "@/integrations/trpc/router/user";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
@@ -18,3 +18,6 @@ export const appRouter = createTRPCRouter({
 });
 
 export type AppRouter = typeof appRouter;
+
+// Create a server-side caller factory for direct procedure invocation
+export const createCaller = createCallerFactory(appRouter);

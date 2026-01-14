@@ -12,8 +12,11 @@ import {
   httpBatchStreamLink,
   loggerLink,
   splitLink,
+  TRPCClientError,
   type TRPCClientErrorLike,
+  type TRPCLink,
 } from "@trpc/client";
+import { observable } from "@trpc/server/observable";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import superjson from "superjson";
 
@@ -30,42 +33,135 @@ const getHeaders = createIsomorphicFn()
   .client(() => ({}) as Record<string, string>)
   .server(() => getRequestHeaders() as unknown as Record<string, string>);
 
-// Factory function to create tRPC client - called during request time
-function createTrpcClient() {
-  const url = getUrl();
-
-  return createTRPCClient<AppRouter>({
-    links: [
-      loggerLink({
-        enabled: (op) =>
-          process.env.NODE_ENV === "development" ||
-          (op.direction === "down" && op.result instanceof Error),
-      }),
-      splitLink({
-        condition(op) {
-          // Route auth.* operations to the non-streaming httpBatchLink
-          return op.path.startsWith("auth.");
-        },
-        true: httpBatchLink({
-          transformer: superjson,
-          url,
-          headers: getHeaders,
-        }),
-        false: httpBatchStreamLink({
-          transformer: superjson,
-          url,
-          headers: getHeaders,
-        }),
-      }),
-    ],
+// Create a custom link for server-side that calls procedures directly
+// This avoids HTTP loopback which can fail on Cloudflare Workers
+// The entire link function is wrapped in createIsomorphicFn to ensure proper tree-shaking
+const createServerDirectLink = createIsomorphicFn()
+  .server((): TRPCLink<AppRouter> => {
+    // Import server-only modules inside the server branch
+    // These will be tree-shaken from the client bundle
+    return () => {
+      return ({ op }) => {
+        return observable((observer) => {
+          const { path, input } = op;
+          
+          (async () => {
+            try {
+              // Dynamic imports ensure server code stays out of client bundle
+              const [{ createServerSideContext }, { createCaller }] = await Promise.all([
+                import("@/integrations/trpc/init"),
+                import("@/integrations/trpc/router"),
+              ]);
+              
+              const headers = getHeaders();
+              const ctx = await createServerSideContext(new Headers(headers));
+              const caller = createCaller(ctx);
+              
+              // Navigate to the procedure using the path
+              const pathParts = path.split(".");
+              // biome-ignore lint/suspicious/noExplicitAny: Dynamic procedure access
+              let procedure: any = caller;
+              for (const part of pathParts) {
+                procedure = procedure[part];
+              }
+              
+              // Call the procedure with input
+              const result = await procedure(input);
+              
+              observer.next({
+                result: {
+                  data: result,
+                },
+              });
+              observer.complete();
+            } catch (error) {
+              observer.error(TRPCClientError.from(error as Error));
+            }
+          })();
+        });
+      };
+    };
   });
-}
+
+// Factory function to create tRPC client - uses isomorphic function to split server/client code
+const createTrpcClient = createIsomorphicFn()
+  .client(() => {
+    return createTRPCClient<AppRouter>({
+      links: [
+        loggerLink({
+          enabled: (op) =>
+            process.env.NODE_ENV === "development" ||
+            (op.direction === "down" && op.result instanceof Error),
+        }),
+        splitLink({
+          condition(op) {
+            // Route auth.* operations to the non-streaming httpBatchLink
+            return op.path.startsWith("auth.");
+          },
+          true: httpBatchLink({
+            transformer: superjson,
+            url: "/api/trpc",
+            headers: getHeaders,
+          }),
+          false: httpBatchStreamLink({
+            transformer: superjson,
+            url: "/api/trpc",
+            headers: getHeaders,
+          }),
+        }),
+      ],
+    });
+  })
+  .server(() => {
+    const url = getUrl();
+    const serverLink = createServerDirectLink();
+    
+    // If server direct link is available, use it (avoids HTTP loopback on Cloudflare)
+    if (serverLink) {
+      return createTRPCClient<AppRouter>({
+        links: [
+          loggerLink({
+            enabled: (op) =>
+              process.env.NODE_ENV === "development" ||
+              (op.direction === "down" && op.result instanceof Error),
+          }),
+          serverLink,
+        ],
+      });
+    }
+    
+    // Fallback to HTTP if server link not available
+    return createTRPCClient<AppRouter>({
+      links: [
+        loggerLink({
+          enabled: (op) =>
+            process.env.NODE_ENV === "development" ||
+            (op.direction === "down" && op.result instanceof Error),
+        }),
+        splitLink({
+          condition(op) {
+            return op.path.startsWith("auth.");
+          },
+          true: httpBatchLink({
+            transformer: superjson,
+            url,
+            headers: getHeaders,
+          }),
+          false: httpBatchStreamLink({
+            transformer: superjson,
+            url,
+            headers: getHeaders,
+          }),
+        }),
+      ],
+    });
+  });
 
 // Singleton for client-side, recreated for each request server-side
-let clientSideTrpcClient: ReturnType<typeof createTrpcClient> | null = null;
+let clientSideTrpcClient: ReturnType<typeof createTRPCClient<AppRouter>> | null = null;
 
 function getTrpcClient() {
-  // On the server, always create a fresh client per request
+  // On the server, always create a fresh client per request with direct procedure calls
   if (typeof window === "undefined") {
     return createTrpcClient();
   }
