@@ -4,6 +4,10 @@
   "compatibility_date": "2025-10-22",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
+  "assets": {
+    "directory": "./dist/public",
+    "binding": "ASSETS",
+  },
   "d1_databases": [
     {
       "binding": "DB",
