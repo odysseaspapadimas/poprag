@@ -11,14 +11,14 @@
 
 import { db } from "@/db";
 import {
-    type Agent,
-    agent,
-    agentModelPolicy,
-    modelAlias,
-    prompt,
-    promptVersion,
-    runMetric,
-    transcript,
+  type Agent,
+  agent,
+  agentModelPolicy,
+  modelAlias,
+  prompt,
+  promptVersion,
+  runMetric,
+  transcript,
 } from "@/db/schema";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
@@ -31,9 +31,9 @@ import { nanoid } from "nanoid";
 import { type ModelCapabilities } from "./helpers";
 import { processMessageParts } from "./image-service";
 import {
-    performRAGRetrieval,
-    type RAGConfig,
-    type RAGDebugInfo
+  performRAGRetrieval,
+  type RAGConfig,
+  type RAGDebugInfo
 } from "./rag-pipeline";
 
 // Re-export functions for backwards compatibility
@@ -107,9 +107,20 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     }
 
     // 5. Resolve model and capabilities
-    const { model, capabilities, selectedAlias } = await resolveModelForChat(
+    const { model, capabilities, selectedAlias, provider } = await resolveModelForChat(
       request.modelAlias || policy.modelAlias,
     );
+
+    // 5b. Add chat model info to debug info
+    if (ragDebugInfo.models) {
+      ragDebugInfo.models.chatModel = selectedAlias;
+      ragDebugInfo.models.chatProvider = provider;
+    } else {
+      ragDebugInfo.models = {
+        chatModel: selectedAlias,
+        chatProvider: provider,
+      };
+    }
 
     // 6. Process messages (handle images based on model capabilities)
     const processedMessages = await Promise.all(
@@ -282,7 +293,7 @@ async function resolveModelForChat(selectedAlias: string) {
   const model = createModel(modelConfig);
   const capabilities = aliasRecord.capabilities as ModelCapabilities | null;
 
-  return { model, capabilities, selectedAlias };
+  return { model, capabilities, selectedAlias, provider: aliasRecord.provider };
 }
 
 /**

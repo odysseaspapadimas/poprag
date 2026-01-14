@@ -55,6 +55,25 @@ export interface RAGDebugInfo {
         sourceId?: string;
         metadata?: Record<string, unknown>;
     }>;
+    // Timing metrics (in milliseconds)
+    timing?: {
+        intentClassificationMs?: number;
+        queryRewriteMs?: number;
+        vectorSearchMs?: number;
+        ftsSearchMs?: number;
+        hybridSearchMs?: number;
+        rerankMs?: number;
+        enrichmentMs?: number;
+        totalRagMs?: number;
+    };
+    // Model information
+    models?: {
+        intentModel?: string;
+        rewriteModel?: string;
+        rerankModel?: string;
+        chatModel?: string;
+        chatProvider?: string;
+    };
 }
 
 export interface RAGContext {
@@ -221,11 +240,16 @@ export async function hybridSearch(
     results: HybridSearchResult[];
     vectorCount: number;
     ftsCount: number;
+    timing: {
+        vectorSearchMs: number;
+        ftsSearchMs: number;
+    };
 }> {
     // Optimize topK per query variation - fewer results per query, rely on fusion/reranking
     const topKPerQuery = Math.max(3, Math.ceil(topK / queries.length));
 
     // Step 1: Perform vector search for all query variations
+    const vectorSearchStart = Date.now();
     const vectorSearchPromises = queries.map((q) =>
         findRelevantContent(q, agentId, {
             topK: topKPerQuery,
@@ -234,13 +258,14 @@ export async function hybridSearch(
     );
 
     const vectorResults = await Promise.all(vectorSearchPromises);
+    const vectorSearchMs = Date.now() - vectorSearchStart;
 
     const totalVectorResults = vectorResults.reduce(
         (sum, r) => sum + r.matches.length,
         0,
     );
 
-    console.log(`[Hybrid Search] Vector search: ${totalVectorResults} results (${topKPerQuery} per query)`);
+    console.log(`[Hybrid Search] Vector search: ${totalVectorResults} results (${topKPerQuery} per query) in ${vectorSearchMs}ms`);
 
     // Step 2: Check if vector results are high-confidence - skip FTS if so
     const allVectorMatches = vectorResults.flatMap((r) => r.matches);
@@ -252,17 +277,21 @@ export async function hybridSearch(
     const skipFTS = topVectorScore >= HIGH_CONFIDENCE_THRESHOLD;
 
     let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
+    let ftsSearchMs = 0;
 
     if (skipFTS) {
         console.log(`[Hybrid Search] High-confidence vector match (${topVectorScore.toFixed(3)}), skipping FTS`);
     } else if (keywords.length > 0) {
         // Step 3: Perform FTS search for keywords (with graceful degradation)
+        const ftsSearchStart = Date.now();
         try {
             ftsResults = await searchDocumentChunksFTS(keywords, agentId, {
                 limit: topKPerQuery,
             });
-            console.log(`[Hybrid Search] FTS search: ${ftsResults.length} results`);
+            ftsSearchMs = Date.now() - ftsSearchStart;
+            console.log(`[Hybrid Search] FTS search: ${ftsResults.length} results in ${ftsSearchMs}ms`);
         } catch (error) {
+            ftsSearchMs = Date.now() - ftsSearchStart;
             // FTS failure is logged in searchDocumentChunksFTS
             console.warn("[Hybrid Search] FTS unavailable, using vector search only");
         }
@@ -293,6 +322,10 @@ export async function hybridSearch(
         results: fusedResults.slice(0, topK * 2),
         vectorCount: totalVectorResults,
         ftsCount: ftsResults.length,
+        timing: {
+            vectorSearchMs,
+            ftsSearchMs,
+        },
     };
 }
 
@@ -351,7 +384,12 @@ export async function performRAGRetrieval(
     agentId: string,
     config: RAGConfig,
 ): Promise<RAGResult> {
-    const debugInfo: RAGDebugInfo = { enabled: config.enabled };
+    const ragStartTime = Date.now();
+    const debugInfo: RAGDebugInfo = { 
+        enabled: config.enabled,
+        timing: {},
+        models: {},
+    };
 
     // Early return if RAG is disabled
     if (!config.enabled) {
@@ -370,30 +408,47 @@ export async function performRAGRetrieval(
     const rewriteModelId = config.rewriteModel || DEFAULT_MODELS.QUERY_REWRITE;
     const variationsCount = config.queryVariationsCount || 3;
 
-    // Prepare parallel tasks
+    // Record model info
+    debugInfo.models!.intentModel = intentModelId;
+    if (config.rewriteQuery) {
+        debugInfo.models!.rewriteModel = rewriteModelId;
+    }
+
+    // Prepare parallel tasks with timing
+    const intentStart = Date.now();
     const intentPromise = resolveAndCreateModel(intentModelId).then((model) =>
         classifyQueryIntent(model, userQuery)
     );
 
+    const rewriteStart = Date.now();
     const rewritePromise = config.rewriteQuery
         ? resolveAndCreateModel(rewriteModelId).then((model) =>
             rewriteQuery(model, userQuery, variationsCount)
         )
         : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
 
-    // Execute in parallel
-    const [intentClassification, rewriteResult] = await Promise.all([
-        intentPromise,
-        rewritePromise,
+    // Execute in parallel and track timings
+    const [intentResult, rewriteResult] = await Promise.all([
+        intentPromise.then(result => {
+            debugInfo.timing!.intentClassificationMs = Date.now() - intentStart;
+            return result;
+        }),
+        rewritePromise.then(result => {
+            if (config.rewriteQuery) {
+                debugInfo.timing!.queryRewriteMs = Date.now() - rewriteStart;
+            }
+            return result;
+        }),
     ]);
 
     // Check intent result - if RAG not needed, skip (rewrite result is discarded)
-    if (!intentClassification.requiresRAG) {
+    if (!intentResult.requiresRAG) {
         console.log(
-            `[RAG Pipeline] Skipping RAG - query classified as not requiring knowledge: ${intentClassification.reason}`,
+            `[RAG Pipeline] Skipping RAG - query classified as not requiring knowledge: ${intentResult.reason}`,
         );
         debugInfo.skippedByIntent = true;
-        debugInfo.intentReason = intentClassification.reason;
+        debugInfo.intentReason = intentResult.reason;
+        debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
         return { context: null, debugInfo };
     }
 
@@ -415,7 +470,11 @@ export async function performRAGRetrieval(
 
     // Step 3: Hybrid search
     const topK = config.topK || RAG_CONFIG.TOP_K;
+    const hybridSearchStart = Date.now();
     const searchResult = await hybridSearch(queries, keywords, agentId, topK);
+    debugInfo.timing!.hybridSearchMs = Date.now() - hybridSearchStart;
+    debugInfo.timing!.vectorSearchMs = searchResult.timing.vectorSearchMs;
+    debugInfo.timing!.ftsSearchMs = searchResult.timing.ftsSearchMs;
 
     debugInfo.vectorResultsCount = searchResult.vectorCount;
     debugInfo.ftsResultsCount = searchResult.ftsCount;
@@ -427,13 +486,16 @@ export async function performRAGRetrieval(
     if (config.rerank && topMatches.length > 0) {
         const rerankModelId = config.rerankModel || DEFAULT_MODELS.RERANKER;
         debugInfo.rerankModel = rerankModelId;
+        debugInfo.models!.rerankModel = rerankModelId;
 
+        const rerankStart = Date.now();
         topMatches = await rerankResults(
             userQuery,
             topMatches,
             topK,
             rerankModelId,
         );
+        debugInfo.timing!.rerankMs = Date.now() - rerankStart;
     } else if (topMatches.length > 0) {
         // No reranking, just take top results
         topMatches = topMatches.slice(0, topK);
@@ -441,12 +503,15 @@ export async function performRAGRetrieval(
 
     // Step 5: Fetch full text from database to avoid Vectorize metadata truncation
     if (topMatches.length > 0) {
+        const enrichmentStart = Date.now();
         topMatches = await enrichWithFullText(topMatches);
+        debugInfo.timing!.enrichmentMs = Date.now() - enrichmentStart;
     }
 
     // Step 6: Build result
     if (topMatches.length === 0) {
         console.log("[RAG Pipeline] No relevant chunks found");
+        debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
         return { context: null, debugInfo };
     }
 
@@ -481,6 +546,10 @@ export async function performRAGRetrieval(
             metadata: match.metadata || {},
         };
     });
+
+    // Record total RAG time
+    debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
+    console.log(`[RAG Pipeline] Total RAG time: ${debugInfo.timing!.totalRagMs}ms`);
 
     return { context, debugInfo };
 }

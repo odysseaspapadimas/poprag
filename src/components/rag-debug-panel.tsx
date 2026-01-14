@@ -1,19 +1,21 @@
-import {
-  BarChart3,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  FileText,
-  Search,
-} from "lucide-react";
-import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+    BarChart3,
+    ChevronDown,
+    ChevronUp,
+    Clock,
+    Copy,
+    Cpu,
+    FileText,
+    Search,
+} from "lucide-react";
+import { useState } from "react";
 
 interface RAGDebugInfo {
   enabled: boolean;
@@ -33,11 +35,39 @@ interface RAGDebugInfo {
     sourceId?: string;
     metadata?: Record<string, unknown>;
   }>;
+  // Timing metrics (in milliseconds)
+  timing?: {
+    intentClassificationMs?: number;
+    queryRewriteMs?: number;
+    vectorSearchMs?: number;
+    ftsSearchMs?: number;
+    hybridSearchMs?: number;
+    rerankMs?: number;
+    enrichmentMs?: number;
+    totalRagMs?: number;
+  };
+  // Model information
+  models?: {
+    intentModel?: string;
+    rewriteModel?: string;
+    rerankModel?: string;
+    chatModel?: string;
+    chatProvider?: string;
+  };
 }
 
 interface RAGDebugPanelProps {
   debugInfo: RAGDebugInfo | null;
 }
+
+// Helper to format model names for display
+const formatModelName = (model: string) => {
+  // Shorten long model names by extracting the key part
+  if (model.startsWith("@cf/")) {
+    return model.replace("@cf/", "");
+  }
+  return model;
+};
 
 export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -92,6 +122,37 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <span className="text-muted-foreground">Reason: </span>
               <span>{debugInfo.intentReason}</span>
             </div>
+            {/* Show timing and models even for skipped queries */}
+            {(debugInfo.timing?.intentClassificationMs || debugInfo.models?.intentModel || debugInfo.models?.chatModel) && (
+              <div className="pl-6 pt-2 border-t mt-2 space-y-1">
+                {debugInfo.models?.intentModel && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Cpu className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Intent Model:</span>
+                    <span className="font-mono">{formatModelName(debugInfo.models.intentModel)}</span>
+                  </div>
+                )}
+                {debugInfo.models?.chatModel && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Cpu className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Chat Model:</span>
+                    <span className="font-mono">{debugInfo.models.chatModel}</span>
+                    {debugInfo.models.chatProvider && (
+                      <Badge variant="outline" className="text-[10px] px-1 py-0">
+                        {debugInfo.models.chatProvider}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                {debugInfo.timing?.intentClassificationMs && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Clock className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Intent Classification:</span>
+                    <span className="font-mono">{debugInfo.timing.intentClassificationMs}ms</span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="pl-6 text-xs text-muted-foreground">
               The query was classified as not requiring knowledge base retrieval
               (e.g., greeting, acknowledgment, small talk).
@@ -142,6 +203,16 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             {debugInfo.chunks && debugInfo.chunks.length > 0 && (
               <Badge variant="secondary" className="ml-2">
                 {debugInfo.chunks.length} chunks
+              </Badge>
+            )}
+            {debugInfo.timing?.totalRagMs && (
+              <Badge variant="outline" className="ml-1 text-xs">
+                {debugInfo.timing.totalRagMs}ms
+              </Badge>
+            )}
+            {debugInfo.models?.chatModel && (
+              <Badge variant="outline" className="ml-1 text-xs hidden sm:inline-flex">
+                {debugInfo.models.chatModel}
               </Badge>
             )}
           </div>
@@ -245,6 +316,128 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               </div>
             )}
           </div>
+
+          {/* Models Used */}
+          {debugInfo.models && Object.keys(debugInfo.models).length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <Cpu className="h-4 w-4" />
+                <span>Models Used</span>
+              </div>
+              <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {debugInfo.models.chatModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">Chat Model</div>
+                    <div className="text-sm font-mono truncate" title={debugInfo.models.chatModel}>
+                      {debugInfo.models.chatModel}
+                    </div>
+                    {debugInfo.models.chatProvider && (
+                      <Badge variant="outline" className="text-[10px] mt-1">
+                        {debugInfo.models.chatProvider}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                {debugInfo.models.intentModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">Intent Classification</div>
+                    <div className="text-sm font-mono truncate" title={debugInfo.models.intentModel}>
+                      {formatModelName(debugInfo.models.intentModel)}
+                    </div>
+                  </div>
+                )}
+                {debugInfo.models.rewriteModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">Query Rewrite</div>
+                    <div className="text-sm font-mono truncate" title={debugInfo.models.rewriteModel}>
+                      {formatModelName(debugInfo.models.rewriteModel)}
+                    </div>
+                  </div>
+                )}
+                {debugInfo.models.rerankModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">Reranker</div>
+                    <div className="text-sm font-mono truncate" title={debugInfo.models.rerankModel}>
+                      {formatModelName(debugInfo.models.rerankModel)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Timing Information */}
+          {debugInfo.timing && Object.keys(debugInfo.timing).length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <Clock className="h-4 w-4" />
+                <span>Performance Timing</span>
+                {debugInfo.timing.totalRagMs && (
+                  <Badge variant="secondary" className="ml-auto">
+                    Total: {debugInfo.timing.totalRagMs}ms
+                  </Badge>
+                )}
+              </div>
+              <div className="pl-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {debugInfo.timing.intentClassificationMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">Intent</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.intentClassificationMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.queryRewriteMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">Query Rewrite</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.queryRewriteMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.vectorSearchMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">Vector Search</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.vectorSearchMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.ftsSearchMs !== undefined && debugInfo.timing.ftsSearchMs > 0 && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">FTS Search</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.ftsSearchMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.rerankMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">Rerank</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.rerankMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.enrichmentMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">DB Enrichment</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.enrichmentMs}
+                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Retrieved Chunks */}
           {debugInfo.chunks && debugInfo.chunks.length > 0 && (
