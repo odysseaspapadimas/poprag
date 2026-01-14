@@ -2,11 +2,12 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
 import { Separator } from "@/components/ui/separator";
 import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
+    SidebarInset,
+    SidebarProvider,
+    SidebarTrigger,
 } from "@/components/ui/sidebar";
 
 export const Route = createFileRoute("/_app")({
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_app")({
     }
     return { session };
   },
+  errorComponent: DefaultCatchBoundary,
   component: LayoutComponent,
 });
 

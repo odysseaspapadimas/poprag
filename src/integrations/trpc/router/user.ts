@@ -1,7 +1,7 @@
-import type { TRPCRouterRecord } from "@trpc/server";
-import { z } from "zod";
 import { adminProcedure } from "@/integrations/trpc/init";
 import { getAllUsers, getUserById } from "@/lib/firebase/queries";
+import type { TRPCRouterRecord } from "@trpc/server";
+import { z } from "zod";
 
 /**
  * User router - fetches from Firebase Firestore using REST API

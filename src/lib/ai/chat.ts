@@ -55,6 +55,7 @@ export interface ChatRequest {
     rerankModel?: string;
   };
   requestTags?: string[];
+  languageInstruction?: string; // Explicit language instruction for Flutter app
 }
 
 /**
@@ -98,6 +99,11 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     let systemPrompt = basePrompt;
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
+    }
+
+    // 4b. Append language instruction if provided (for Flutter app)
+    if (request.languageInstruction) {
+      systemPrompt = `${systemPrompt}\n\n${request.languageInstruction}`;
     }
 
     // 5. Resolve model and capabilities
