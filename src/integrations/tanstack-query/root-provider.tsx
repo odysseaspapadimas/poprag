@@ -35,11 +35,8 @@ const getHeaders = createIsomorphicFn()
 
 // Create a custom link for server-side that calls procedures directly
 // This avoids HTTP loopback which can fail on Cloudflare Workers
-// The entire link function is wrapped in createIsomorphicFn to ensure proper tree-shaking
 const createServerDirectLink = createIsomorphicFn()
   .server((): TRPCLink<AppRouter> => {
-    // Import server-only modules inside the server branch
-    // These will be tree-shaken from the client bundle
     return () => {
       return ({ op }) => {
         return observable((observer) => {
@@ -57,16 +54,15 @@ const createServerDirectLink = createIsomorphicFn()
               const ctx = await createServerSideContext(new Headers(headers));
               const caller = createCaller(ctx);
               
-              // Navigate to the procedure using the path
+              // Navigate to the procedure using typed path traversal
               const pathParts = path.split(".");
-              // biome-ignore lint/suspicious/noExplicitAny: Dynamic procedure access
-              let procedure: any = caller;
+              let procedure: unknown = caller;
               for (const part of pathParts) {
-                procedure = procedure[part];
+                procedure = (procedure as Record<string, unknown>)[part];
               }
               
-              // Call the procedure with input
-              const result = await procedure(input);
+              // Call the procedure as a function
+              const result = await (procedure as CallableFunction)(input);
               
               observer.next({
                 result: {
