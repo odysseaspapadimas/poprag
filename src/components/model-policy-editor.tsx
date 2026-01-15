@@ -3,17 +3,17 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
 import {
-    useMutation,
-    useQueryClient,
-    useSuspenseQuery,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -160,7 +160,7 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
           onChange={(e) =>
             setFormState({ 
               ...formState, 
-              maxTokens: e.target.value ? Number(e.target.value) : undefined 
+              maxTokens: e.target.value ? Number(e.target.value) : null 
             })
           }
         />

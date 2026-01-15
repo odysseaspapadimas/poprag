@@ -116,6 +116,8 @@ export const agentRouter = createTRPCRouter({
         queryVariationsCount: z.number().min(1).max(10).optional(),
         rerank: z.boolean().default(false),
         rerankModel: z.string().optional(),
+        topK: z.number().min(1).max(20).optional(),
+        minSimilarity: z.number().min(0).max(100).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
