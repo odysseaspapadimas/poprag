@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { createAiGateway } from "ai-gateway-provider";
+import { env } from "cloudflare:workers";
 import { createWorkersAI } from "workers-ai-provider";
 
 export type ProviderType =
@@ -27,8 +27,8 @@ export function createModel(config: ModelConfig): LanguageModel {
   const aigateway =
     env.AI_GATEWAY_ID && env.AI
       ? createAiGateway({
-          binding: env.AI.gateway(env.AI_GATEWAY_ID),
-        })
+        binding: env.AI.gateway(env.AI_GATEWAY_ID),
+      })
       : null;
 
   switch (config.provider) {
@@ -51,9 +51,7 @@ export function createModel(config: ModelConfig): LanguageModel {
       const model = openrouterProvider(config.modelId);
 
       // Route through AI Gateway if configured
-      // TODO: re-enable once openrouter updates to ai sdk v6, (pretty soon)‰
-      //  return aigateway ? aigateway([model]) : model;
-      return model;
+      return aigateway ? aigateway([model]) : model;
     }
 
     case "cloudflare-workers-ai": {

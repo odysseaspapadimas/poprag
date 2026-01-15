@@ -24,8 +24,8 @@ importers:
         specifier: ^1.0.0
         version: 1.0.0(@langchain/core@1.0.5(@opentelemetry/api@1.9.0)(openai@6.9.1(ws@8.18.3)(zod@4.1.12)))
       '@openrouter/ai-sdk-provider':
-        specifier: ^1.5.4
-        version: 1.5.4(ai@6.0.3(zod@4.1.12))(zod@4.1.12)
+        specifier: 6.0.0-alpha.1
+        version: 6.0.0-alpha.1(zod@4.1.12)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.6))(@types/react@19.2.6)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -2167,8 +2167,17 @@ packages:
       ai: ^5.0.0
       zod: ^3.24.1 || ^v4
 
+  '@openrouter/ai-sdk-provider@6.0.0-alpha.1':
+    resolution: {integrity: sha512-N91glWtq6XFl8Kvgft14BiDeCLABHatylAVKHOWMRJHnBl6iKblI4iZgcipnF9Pj8ZRUO752qpPoZVC+L2C6tA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^4.3.5
+
   '@openrouter/sdk@0.1.27':
     resolution: {integrity: sha512-RH//L10bSmc81q25zAZudiI4kNkLgxF2E+WU42vghp3N6TEvZ6F0jK7uT3tOxkEn91gzmMw9YVmDENy7SJsajQ==}
+
+  '@openrouter/sdk@0.3.14':
+    resolution: {integrity: sha512-+smUr3ZmMLXO/vLjXKvQzED44vd+45U4GoSTOOnNcln5lLv4JslPtCRBIYXEVx+adiBsiRkFaq5BAPsZhKIEDA==}
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -7948,8 +7957,21 @@ snapshots:
       '@openrouter/sdk': 0.1.27
       ai: 6.0.3(zod@4.1.12)
       zod: 4.1.12
+    optional: true
+
+  '@openrouter/ai-sdk-provider@6.0.0-alpha.1(zod@4.1.12)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.0
+      '@ai-sdk/provider-utils': 4.0.1(zod@4.1.12)
+      '@openrouter/sdk': 0.3.14
+      zod: 4.1.12
 
   '@openrouter/sdk@0.1.27':
+    dependencies:
+      zod: 4.2.1
+    optional: true
+
+  '@openrouter/sdk@0.3.14':
     dependencies:
       zod: 4.2.1
 
@@ -10771,7 +10793,7 @@ snapshots:
       isstream: 0.1.2
       jsonwebtoken: 9.0.3
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.13.2)
+      retry-axios: 2.6.0(axios@1.13.2(debug@4.4.3))
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -11857,7 +11879,7 @@ snapshots:
 
   resolve-pkg-maps@1.0.0: {}
 
-  retry-axios@2.6.0(axios@1.13.2):
+  retry-axios@2.6.0(axios@1.13.2(debug@4.4.3)):
     dependencies:
       axios: 1.13.2(debug@4.4.3)
 
