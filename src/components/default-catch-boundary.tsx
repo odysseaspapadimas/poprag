@@ -1,7 +1,4 @@
-import {
-  useRouter,
-  type ErrorComponentProps
-} from "@tanstack/react-router";
+import { type ErrorComponentProps, useRouter } from "@tanstack/react-router";
 import { AlertCircle, Home, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -72,7 +69,10 @@ export function DefaultCatchBoundary({ error, reset }: ErrorComponentProps) {
             <RefreshCw className="mr-2 h-4 w-4" />
             Try Again
           </Button>
-          <Button onClick={() => router.navigate({ to: "/" })} variant="outline">
+          <Button
+            onClick={() => router.navigate({ to: "/" })}
+            variant="outline"
+          >
             <Home className="mr-2 h-4 w-4" />
             Go Home
           </Button>

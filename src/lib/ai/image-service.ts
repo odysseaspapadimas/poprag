@@ -3,9 +3,9 @@
  * Handles image fetching, processing, and validation for multimodal chat
  */
 
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { chatImage } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { type ModelCapabilities, supportsModality } from "./helpers";
 
 // ─────────────────────────────────────────────────────

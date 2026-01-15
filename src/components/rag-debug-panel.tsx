@@ -1,21 +1,21 @@
+import {
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Copy,
+  Cpu,
+  FileText,
+  Search,
+} from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-    BarChart3,
-    ChevronDown,
-    ChevronUp,
-    Clock,
-    Copy,
-    Cpu,
-    FileText,
-    Search,
-} from "lucide-react";
-import { useState } from "react";
 
 interface RAGDebugInfo {
   enabled: boolean;
@@ -123,22 +123,31 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <span>{debugInfo.intentReason}</span>
             </div>
             {/* Show timing and models even for skipped queries */}
-            {(debugInfo.timing?.intentClassificationMs || debugInfo.models?.intentModel || debugInfo.models?.chatModel) && (
+            {(debugInfo.timing?.intentClassificationMs ||
+              debugInfo.models?.intentModel ||
+              debugInfo.models?.chatModel) && (
               <div className="pl-6 pt-2 border-t mt-2 space-y-1">
                 {debugInfo.models?.intentModel && (
                   <div className="flex items-center gap-2 text-xs">
                     <Cpu className="h-3 w-3 text-muted-foreground" />
                     <span className="text-muted-foreground">Intent Model:</span>
-                    <span className="font-mono">{formatModelName(debugInfo.models.intentModel)}</span>
+                    <span className="font-mono">
+                      {formatModelName(debugInfo.models.intentModel)}
+                    </span>
                   </div>
                 )}
                 {debugInfo.models?.chatModel && (
                   <div className="flex items-center gap-2 text-xs">
                     <Cpu className="h-3 w-3 text-muted-foreground" />
                     <span className="text-muted-foreground">Chat Model:</span>
-                    <span className="font-mono">{debugInfo.models.chatModel}</span>
+                    <span className="font-mono">
+                      {debugInfo.models.chatModel}
+                    </span>
                     {debugInfo.models.chatProvider && (
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1 py-0"
+                      >
                         {debugInfo.models.chatProvider}
                       </Badge>
                     )}
@@ -147,8 +156,12 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 {debugInfo.timing?.intentClassificationMs && (
                   <div className="flex items-center gap-2 text-xs">
                     <Clock className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-muted-foreground">Intent Classification:</span>
-                    <span className="font-mono">{debugInfo.timing.intentClassificationMs}ms</span>
+                    <span className="text-muted-foreground">
+                      Intent Classification:
+                    </span>
+                    <span className="font-mono">
+                      {debugInfo.timing.intentClassificationMs}ms
+                    </span>
                   </div>
                 )}
               </div>
@@ -211,7 +224,10 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               </Badge>
             )}
             {debugInfo.models?.chatModel && (
-              <Badge variant="outline" className="ml-1 text-xs hidden sm:inline-flex">
+              <Badge
+                variant="outline"
+                className="ml-1 text-xs hidden sm:inline-flex"
+              >
                 {debugInfo.models.chatModel}
               </Badge>
             )}
@@ -327,8 +343,13 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {debugInfo.models.chatModel && (
                   <div className="bg-background border rounded p-2">
-                    <div className="text-xs text-muted-foreground">Chat Model</div>
-                    <div className="text-sm font-mono truncate" title={debugInfo.models.chatModel}>
+                    <div className="text-xs text-muted-foreground">
+                      Chat Model
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.chatModel}
+                    >
                       {debugInfo.models.chatModel}
                     </div>
                     {debugInfo.models.chatProvider && (
@@ -340,24 +361,39 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 )}
                 {debugInfo.models.intentModel && (
                   <div className="bg-background border rounded p-2">
-                    <div className="text-xs text-muted-foreground">Intent Classification</div>
-                    <div className="text-sm font-mono truncate" title={debugInfo.models.intentModel}>
+                    <div className="text-xs text-muted-foreground">
+                      Intent Classification
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.intentModel}
+                    >
                       {formatModelName(debugInfo.models.intentModel)}
                     </div>
                   </div>
                 )}
                 {debugInfo.models.rewriteModel && (
                   <div className="bg-background border rounded p-2">
-                    <div className="text-xs text-muted-foreground">Query Rewrite</div>
-                    <div className="text-sm font-mono truncate" title={debugInfo.models.rewriteModel}>
+                    <div className="text-xs text-muted-foreground">
+                      Query Rewrite
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.rewriteModel}
+                    >
                       {formatModelName(debugInfo.models.rewriteModel)}
                     </div>
                   </div>
                 )}
                 {debugInfo.models.rerankModel && (
                   <div className="bg-background border rounded p-2">
-                    <div className="text-xs text-muted-foreground">Reranker</div>
-                    <div className="text-sm font-mono truncate" title={debugInfo.models.rerankModel}>
+                    <div className="text-xs text-muted-foreground">
+                      Reranker
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.rerankModel}
+                    >
                       {formatModelName(debugInfo.models.rerankModel)}
                     </div>
                   </div>
@@ -382,55 +418,80 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {debugInfo.timing.intentClassificationMs !== undefined && (
                     <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">Intent</div>
+                      <div className="text-xs text-muted-foreground">
+                        Intent
+                      </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.intentClassificationMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
                       </div>
                     </div>
                   )}
                   {debugInfo.timing.queryRewriteMs !== undefined && (
                     <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">Query Rewrite</div>
+                      <div className="text-xs text-muted-foreground">
+                        Query Rewrite
+                      </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.queryRewriteMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
                       </div>
                     </div>
                   )}
                   {debugInfo.timing.vectorSearchMs !== undefined && (
                     <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">Vector Search</div>
+                      <div className="text-xs text-muted-foreground">
+                        Vector Search
+                      </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.vectorSearchMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
                       </div>
                     </div>
                   )}
-                  {debugInfo.timing.ftsSearchMs !== undefined && debugInfo.timing.ftsSearchMs > 0 && (
-                    <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">FTS Search</div>
-                      <div className="text-lg font-semibold">
-                        {debugInfo.timing.ftsSearchMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                  {debugInfo.timing.ftsSearchMs !== undefined &&
+                    debugInfo.timing.ftsSearchMs > 0 && (
+                      <div className="bg-background border rounded p-2">
+                        <div className="text-xs text-muted-foreground">
+                          FTS Search
+                        </div>
+                        <div className="text-lg font-semibold">
+                          {debugInfo.timing.ftsSearchMs}
+                          <span className="text-xs font-normal text-muted-foreground">
+                            ms
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                   {debugInfo.timing.rerankMs !== undefined && (
                     <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">Rerank</div>
+                      <div className="text-xs text-muted-foreground">
+                        Rerank
+                      </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.rerankMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
                       </div>
                     </div>
                   )}
                   {debugInfo.timing.enrichmentMs !== undefined && (
                     <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">DB Enrichment</div>
+                      <div className="text-xs text-muted-foreground">
+                        DB Enrichment
+                      </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.enrichmentMs}
-                        <span className="text-xs font-normal text-muted-foreground">ms</span>
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
                       </div>
                     </div>
                   )}

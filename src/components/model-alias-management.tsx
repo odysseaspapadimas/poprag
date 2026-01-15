@@ -1,32 +1,32 @@
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { AudioLines, FileText, Image, Video } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import {
-    useMutation,
-    useQuery,
-    useQueryClient,
-    useSuspenseQuery,
-} from "@tanstack/react-query";
-import { AudioLines, FileText, Image, Video } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
 import ModelAliasActions from "./model-alias-actions";
 import { columns, type ModelAliasRow } from "./tables/columns-models";
 import { DataTable } from "./tables/data-table";
@@ -142,7 +142,7 @@ export function ModelAliasManagement() {
     model: NonNullable<typeof modelsDevModels>[number],
   ) => {
     const mappedProvider = PROVIDER_MAPPING[model.provider] || "openrouter";
-    
+
     // Determine the model ID to use based on provider:
     // - OpenRouter: use the full model ID (e.g., "anthropic/claude-3-5-sonnet")
     // - Cloudflare Workers AI: use the model name which contains the full path (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")

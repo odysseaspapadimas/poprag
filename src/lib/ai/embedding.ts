@@ -1,8 +1,8 @@
+import { env } from "cloudflare:workers";
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks } from "@/db/schema";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { env } from "cloudflare:workers";
-import { inArray, sql } from "drizzle-orm";
 
 /**
  * Default embedding model configuration
@@ -216,10 +216,7 @@ export async function findRelevantContent(
     minSimilarity?: number;
   },
 ) {
-  const {
-    topK = 6,
-    minSimilarity = 0.3,
-  } = options || {};
+  const { topK = 6, minSimilarity = 0.3 } = options || {};
 
   try {
     // Preprocess query - remove noise and normalize

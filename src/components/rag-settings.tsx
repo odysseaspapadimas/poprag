@@ -1,32 +1,32 @@
-import { Button } from "@/components/ui/button";
-import {
-    Form,
-    FormControl,
-    FormDescription,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { useTRPC } from "@/integrations/trpc/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-    useMutation,
-    useQueryClient,
-    useSuspenseQuery,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useTRPC } from "@/integrations/trpc/react";
 
 const ragSettingsSchema = z.object({
   ragEnabled: z.boolean(),
@@ -36,6 +36,8 @@ const ragSettingsSchema = z.object({
   queryVariationsCount: z.number().min(1).max(10),
   rerank: z.boolean(),
   rerankModel: z.string().optional(),
+  topK: z.number().min(1).max(20),
+  minSimilarity: z.number().min(0).max(100), // Percentage 0-100
 });
 
 type RAGSettingsForm = z.infer<typeof ragSettingsSchema>;
@@ -66,6 +68,8 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
       queryVariationsCount: agent?.queryVariationsCount ?? 3,
       rerank: agent?.rerank ?? false,
       rerankModel: agent?.rerank ? "@cf/baai/bge-reranker-base" : undefined,
+      topK: agent?.topK ?? 5,
+      minSimilarity: agent?.minSimilarity ?? 30,
     },
   });
 
@@ -150,7 +154,8 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
                     </SelectContent>
                   </Select>
                   <FormDescription>
-                    Model used to determine if a query needs knowledge base search (smaller = faster)
+                    Model used to determine if a query needs knowledge base
+                    search (smaller = faster)
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -225,11 +230,14 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
                           min={1}
                           max={10}
                           {...field}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
+                          onChange={(e) =>
+                            field.onChange(Number(e.target.value))
+                          }
                         />
                       </FormControl>
                       <FormDescription>
-                        Number of query variations to generate (2-3 for speed, 4-5 for coverage)
+                        Number of query variations to generate (2-3 for speed,
+                        4-5 for coverage)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -280,6 +288,58 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
                 )}
               />
             )}
+
+            <div className="rounded-lg border p-4 shadow-sm space-y-4">
+              <h3 className="text-base font-medium">Search Performance</h3>
+
+              <FormField
+                control={form.control}
+                name="topK"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Top K Results</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        {...field}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Number of chunks to retrieve from vector search (1-5 for
+                      speed, 5-10 for coverage)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="minSimilarity"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Minimum Similarity (%)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        {...field}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Filter out results below this similarity threshold (30-40%
+                      for broader recall, 50-70% for precision)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           </>
         )}
 

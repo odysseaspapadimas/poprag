@@ -1,15 +1,12 @@
 /// <reference types="vite/client" />
 
-import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
-import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import {
   createRootRouteWithContext,
   HeadContent,
   Outlet,
   Scripts,
 } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
 import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
@@ -70,22 +67,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="antialiased font-display min-h-screen flex flex-col">
         {children}
         <Toaster richColors />
-
-        <TanStackDevtools
-          plugins={[
-            {
-              name: "TanStack Query",
-              render: <ReactQueryDevtoolsPanel />,
-            },
-            {
-              name: "TanStack Router",
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-          ]}
-          config={{
-            position: "bottom-left",
-          }}
-        />
         <Scripts />
       </body>
     </html>

@@ -1,6 +1,3 @@
-import { RAGDebugPanel } from "@/components/rag-debug-panel";
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import {
   useMutation,
@@ -19,6 +16,9 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
+import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;

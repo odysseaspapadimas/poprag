@@ -64,6 +64,20 @@
       "when": 1766661436316,
       "tag": "0008_fantastic_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1768426191239,
+      "tag": "0009_true_jack_murdock",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1768512541717,
+      "tag": "0010_eager_wonder_man",
+      "breakpoints": true
     }
   ]
 }

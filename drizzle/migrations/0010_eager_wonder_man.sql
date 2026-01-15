@@ -1,0 +1,1 @@
+ALTER TABLE `agent_model_policy` ADD `max_tokens` integer;

@@ -3,11 +3,11 @@
  * Reduces duplication across routers for common patterns
  */
 
-import { db } from "@/db";
-import { type Agent, agent, auditLog } from "@/db/schema";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { db } from "@/db";
+import { type Agent, agent, auditLog } from "@/db/schema";
 
 // ─────────────────────────────────────────────────────
 // Audit Logging

@@ -26,9 +26,7 @@ export const createTRPCContext = async ({
 
 // Context for server-side calls (no request/response needed)
 export const createServerSideContext = async (headers?: Headers) => {
-  const session = headers
-    ? await auth.api.getSession({ headers })
-    : null;
+  const session = headers ? await auth.api.getSession({ headers }) : null;
 
   return {
     request: null as unknown as Request,

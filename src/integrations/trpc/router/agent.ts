@@ -161,6 +161,8 @@ export const agentRouter = createTRPCRouter({
         queryVariationsCount: input.queryVariationsCount,
         rerank: input.rerank,
         rerankModel: input.rerankModel,
+        topK: input.topK || 5,
+        minSimilarity: input.minSimilarity || 30,
         createdBy: ctx.session.user.id,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -230,6 +232,8 @@ export const agentRouter = createTRPCRouter({
         queryVariationsCount: z.number().min(1).max(10).optional(),
         rerank: z.boolean().optional(),
         rerankModel: z.string().optional(),
+        topK: z.number().min(1).max(20).optional(),
+        minSimilarity: z.number().min(0).max(100).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -256,6 +260,9 @@ export const agentRouter = createTRPCRouter({
       if (input.rerank !== undefined) updates.rerank = input.rerank;
       if (input.rerankModel !== undefined)
         updates.rerankModel = input.rerankModel;
+      if (input.topK !== undefined) updates.topK = input.topK;
+      if (input.minSimilarity !== undefined)
+        updates.minSimilarity = input.minSimilarity;
 
       await db.update(agent).set(updates).where(eq(agent.id, input.id));
 
@@ -528,6 +535,7 @@ export const agentRouter = createTRPCRouter({
         modelAlias: z.string().optional(),
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),
+        maxTokens: z.number().min(1).max(32000).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -562,6 +570,7 @@ export const agentRouter = createTRPCRouter({
       if (input.temperature !== undefined)
         updates.temperature = input.temperature;
       if (input.topP !== undefined) updates.topP = input.topP;
+      if (input.maxTokens !== undefined) updates.maxTokens = input.maxTokens;
 
       await db
         .update(agentModelPolicy)

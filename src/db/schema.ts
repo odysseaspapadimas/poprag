@@ -151,6 +151,8 @@ export const agent = sqliteTable(
     queryVariationsCount: integer("query_variations_count").default(3),
     rerank: integer("rerank", { mode: "boolean" }).default(true).notNull(),
     rerankModel: text("rerank_model"),
+    topK: integer("top_k").default(5),
+    minSimilarity: integer("min_similarity").default(30), // Stored as percentage (30 = 0.3)
   },
   (table) => [
     index("agent_slug_idx").on(table.slug),
@@ -200,6 +202,7 @@ export const agentModelPolicy = sqliteTable(
       .references(() => modelAlias.alias),
     temperature: integer("temperature"),
     topP: integer("top_p"),
+    maxTokens: integer("max_tokens"),
     presencePenalty: integer("presence_penalty"),
     frequencyPenalty: integer("frequency_penalty"),
     responseFormat: text("response_format", { mode: "json" }).$type<{

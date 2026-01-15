@@ -1,22 +1,22 @@
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
+import {
+    useMutation,
+    useQueryClient,
+    useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 interface ModelPolicyEditorProps {
   agentId: string;
@@ -38,6 +38,7 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
     modelAlias: policy?.modelAlias,
     temperature: policy?.temperature,
     topP: policy?.topP,
+    maxTokens: policy?.maxTokens,
   }));
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
         modelAlias: policy.modelAlias ?? s.modelAlias,
         temperature: policy.temperature ?? s.temperature,
         topP: policy.topP ?? s.topP,
+        maxTokens: policy.maxTokens ?? s.maxTokens,
       }));
     }
   }, [policy]);
@@ -81,6 +83,7 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
       modelAlias: formState.modelAlias,
       temperature: Number(formState.temperature),
       topP: Number(formState.topP),
+      maxTokens: formState.maxTokens ? Number(formState.maxTokens) : undefined,
     });
   };
 
@@ -144,6 +147,27 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
           />
         </Field>
       </div>
+
+      <Field>
+        <Label>Max Output Tokens</Label>
+        <Input
+          type="number"
+          min={1}
+          max={32000}
+          step={1}
+          placeholder="4096"
+          value={formState.maxTokens ?? ''}
+          onChange={(e) =>
+            setFormState({ 
+              ...formState, 
+              maxTokens: e.target.value ? Number(e.target.value) : undefined 
+            })
+          }
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Maximum tokens for a single response. Default: 4096. Does not affect conversation context length.
+        </p>
+      </Field>
 
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={updatePolicy.isPending}>

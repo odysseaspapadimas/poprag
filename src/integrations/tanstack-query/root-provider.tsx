@@ -1,11 +1,6 @@
-import { TRPCProvider } from "@/integrations/trpc/react";
-import type { AppRouter } from "@/integrations/trpc/router";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { createIsomorphicFn } from "@tanstack/react-start";
-import {
-  getRequestHeaders,
-  getRequestUrl,
-} from "@tanstack/react-start/server";
+import { getRequestHeaders, getRequestUrl } from "@tanstack/react-start/server";
 import {
   createTRPCClient,
   httpBatchLink,
@@ -19,6 +14,8 @@ import {
 import { observable } from "@trpc/server/observable";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import superjson from "superjson";
+import { TRPCProvider } from "@/integrations/trpc/react";
+import type { AppRouter } from "@/integrations/trpc/router";
 
 // Get URL - uses createIsomorphicFn for proper server/client code splitting
 const getUrl = createIsomorphicFn()
@@ -35,35 +32,36 @@ const getHeaders = createIsomorphicFn()
 
 // Create a custom link for server-side that calls procedures directly
 // This avoids HTTP loopback which can fail on Cloudflare Workers
-const createServerDirectLink = createIsomorphicFn()
-  .server((): TRPCLink<AppRouter> => {
+const createServerDirectLink = createIsomorphicFn().server(
+  (): TRPCLink<AppRouter> => {
     return () => {
       return ({ op }) => {
         return observable((observer) => {
           const { path, input } = op;
-          
+
           (async () => {
             try {
               // Dynamic imports ensure server code stays out of client bundle
-              const [{ createServerSideContext }, { createCaller }] = await Promise.all([
-                import("@/integrations/trpc/init"),
-                import("@/integrations/trpc/router"),
-              ]);
-              
+              const [{ createServerSideContext }, { createCaller }] =
+                await Promise.all([
+                  import("@/integrations/trpc/init"),
+                  import("@/integrations/trpc/router"),
+                ]);
+
               const headers = getHeaders();
               const ctx = await createServerSideContext(new Headers(headers));
               const caller = createCaller(ctx);
-              
+
               // Navigate to the procedure using typed path traversal
               const pathParts = path.split(".");
               let procedure: unknown = caller;
               for (const part of pathParts) {
                 procedure = (procedure as Record<string, unknown>)[part];
               }
-              
+
               // Call the procedure as a function
               const result = await (procedure as CallableFunction)(input);
-              
+
               observer.next({
                 result: {
                   data: result,
@@ -77,7 +75,8 @@ const createServerDirectLink = createIsomorphicFn()
         });
       };
     };
-  });
+  },
+);
 
 // Factory function to create tRPC client - uses isomorphic function to split server/client code
 const createTrpcClient = createIsomorphicFn()
@@ -111,7 +110,7 @@ const createTrpcClient = createIsomorphicFn()
   .server(() => {
     const url = getUrl();
     const serverLink = createServerDirectLink();
-    
+
     // If server direct link is available, use it (avoids HTTP loopback on Cloudflare)
     if (serverLink) {
       return createTRPCClient<AppRouter>({
@@ -125,7 +124,7 @@ const createTrpcClient = createIsomorphicFn()
         ],
       });
     }
-    
+
     // Fallback to HTTP if server link not available
     return createTRPCClient<AppRouter>({
       links: [
@@ -154,7 +153,9 @@ const createTrpcClient = createIsomorphicFn()
   });
 
 // Singleton for client-side, recreated for each request server-side
-let clientSideTrpcClient: ReturnType<typeof createTRPCClient<AppRouter>> | null = null;
+let clientSideTrpcClient: ReturnType<
+  typeof createTRPCClient<AppRouter>
+> | null = null;
 
 function getTrpcClient() {
   // On the server, always create a fresh client per request with direct procedure calls

@@ -65,34 +65,25 @@ export function buildSystemPrompt(
   const sortedChunks = [...ragContext.chunks].sort((a, b) => b.score - a.score);
 
   const contextSection = sortedChunks
-    .map(
-      (chunk) =>
-        `---
-Source: ${chunk.metadata?.fileName || chunk.sourceId}
-Relevance: ${chunk.score.toFixed(3)}
-Content:
-${chunk.content}
----`,
-    )
-    .join("\n\n");
+    .map((chunk) => chunk.content)
+    .join("\n\n---\n\n");
 
   return `${basePrompt}
 
-${"═".repeat(80)}
-## 📚 Retrieved Knowledge Base Context
-${"═".repeat(80)}
+## Reference Information
 
-The following information has been retrieved from your knowledge base. Use it to answer the user's question.
+The following information is available to help you answer the user's question:
 
-**Instructions:**
-1. **Answer based ONLY on the provided context.** If the answer is not in the context, say so.
-2. **Cite your sources.** When using information, reference the source filename (e.g., "According to [filename]...").
-3. **Handle missing data gracefully.** If a number or unit is missing (e.g., "g" instead of "200g"), do NOT output the partial data. State that the specific value is missing from the context.
-4. **Do NOT mention "Context 1", "Context 2", etc.** Refer to the source filenames.
-5. **Formatting:** Present lists clearly.
-
-${"═".repeat(80)}
 ${contextSection}
-${"═".repeat(80)}
+
+---
+
+**Important guidelines:**
+- Answer naturally using the information above as if it were your own knowledge.
+- NEVER mention documents, files, sources, PDFs, or that you retrieved this information.
+- NEVER say things like "According to the document..." or "Based on the file...".
+- If the information doesn't contain the answer, say you don't know.
+- If data appears incomplete (e.g., missing numbers or units), acknowledge you don't have that specific detail.
+- Always provide complete answers - do not cut off mid-sentence.
 `;
 }

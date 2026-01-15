@@ -1,16 +1,16 @@
-import { db } from "@/db";
-import {
-    documentChunks,
-    type InsertKnowledgeSource,
-    knowledgeSource,
-} from "@/db/schema";
 import type { TextSplitter } from "@langchain/textsplitters";
 import {
-    MarkdownTextSplitter,
-    RecursiveCharacterTextSplitter,
+  MarkdownTextSplitter,
+  RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulidx";
+import { db } from "@/db";
+import {
+  documentChunks,
+  type InsertKnowledgeSource,
+  knowledgeSource,
+} from "@/db/schema";
 
 /**
  * Utility to split an array into chunks of specified size

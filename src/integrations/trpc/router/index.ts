@@ -1,4 +1,7 @@
-import { createCallerFactory, createTRPCRouter } from "@/integrations/trpc/init";
+import {
+  createCallerFactory,
+  createTRPCRouter,
+} from "@/integrations/trpc/init";
 import { userRouter } from "@/integrations/trpc/router/user";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";

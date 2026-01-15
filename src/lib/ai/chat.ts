@@ -28,12 +28,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 // Import refactored modules
-import { type ModelCapabilities } from "./helpers";
+import type { ModelCapabilities } from "./helpers";
 import { processMessageParts } from "./image-service";
 import {
   performRAGRetrieval,
   type RAGConfig,
-  type RAGDebugInfo
+  type RAGDebugInfo,
 } from "./rag-pipeline";
 
 // Re-export functions for backwards compatibility
@@ -89,7 +89,8 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
       queryVariationsCount: agentData.queryVariationsCount || 3,
       rerank: agentData.rerank,
       rerankModel: agentData.rerankModel || undefined,
-      topK: request.rag?.topK,
+      topK: request.rag?.topK ?? agentData.topK ?? undefined,
+      minSimilarity: agentData.minSimilarity ?? undefined,
     };
 
     const { context: ragContext, debugInfo: ragDebugInfo } =
@@ -107,9 +108,8 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     }
 
     // 5. Resolve model and capabilities
-    const { model, capabilities, selectedAlias, provider } = await resolveModelForChat(
-      request.modelAlias || policy.modelAlias,
-    );
+    const { model, capabilities, selectedAlias, provider } =
+      await resolveModelForChat(request.modelAlias || policy.modelAlias);
 
     // 5b. Add chat model info to debug info
     if (ragDebugInfo.models) {
@@ -123,7 +123,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     }
 
     // 6. Process messages (handle images based on model capabilities)
-    const processedMessages = await Promise.all(
+    const processedMessages = (await Promise.all(
       request.messages.map(async (msg) => ({
         ...msg,
         parts: await processMessageParts(
@@ -133,7 +133,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           env,
         ),
       })),
-    ) as UIMessage[];
+    )) as UIMessage[];
 
     // 7. Convert to model messages
     const modelMessages = await convertToModelMessages(processedMessages);
@@ -147,6 +147,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
       messages: modelMessages,
       temperature: policy.temperature || 0.7,
       topP: policy.topP || 1,
+      maxOutputTokens: policy.maxTokens || 4096,
       onChunk: (event) => {
         if (!firstTokenTime && event.chunk.type === "text-delta") {
           firstTokenTime = Date.now();

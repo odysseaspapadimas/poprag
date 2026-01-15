@@ -6,12 +6,12 @@
  * bypassing tRPC for mobile client compatibility.
  */
 
-import { db } from "@/db";
-import { chatImage } from "@/db/schema";
 import { createFileRoute } from "@tanstack/react-router";
 import { AwsClient } from "aws4fetch";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { db } from "@/db";
+import { chatImage } from "@/db/schema";
 
 const uploadRequestSchema = z.object({
   agentSlug: z.string(),
@@ -116,7 +116,9 @@ export const Route = createFileRoute("/api/upload/image")({
           const maxSize = 10 * 1024 * 1024;
           if (file.size > maxSize) {
             return new Response(
-              JSON.stringify({ error: "Image too large. Maximum size is 10MB." }),
+              JSON.stringify({
+                error: "Image too large. Maximum size is 10MB.",
+              }),
               {
                 status: 400,
                 headers: {

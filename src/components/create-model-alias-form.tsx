@@ -1,3 +1,7 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AudioLines, FileText, Image, Video } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -11,10 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AudioLines, FileText, Image, Video } from "lucide-react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 
 // Debounce hook for search input
 function useDebounce<T>(value: T, delay: number): T {
@@ -133,7 +133,7 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
     model: NonNullable<typeof modelsDevModels>[number],
   ) => {
     // Map the provider to our internal type
-    const mappedProvider = PROVIDER_MAPPING[model.provider]
+    const mappedProvider = PROVIDER_MAPPING[model.provider];
 
     // Determine the model ID to use based on provider:
     // - Cloudflare Workers AI: use the model name which contains the full path (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
@@ -197,12 +197,12 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
 
         {(isLoadingModels ||
           (modelSearch !== debouncedModelSearch && modelSearch.length > 0)) && (
-            <div className="text-sm text-muted-foreground">
-              {modelSearch !== debouncedModelSearch
-                ? "Typing..."
-                : "Loading models..."}
-            </div>
-          )}
+          <div className="text-sm text-muted-foreground">
+            {modelSearch !== debouncedModelSearch
+              ? "Typing..."
+              : "Loading models..."}
+          </div>
+        )}
 
         {modelsDevModels && modelsDevModels.length > 0 && (
           <div className="max-h-64 overflow-y-auto space-y-1 border rounded p-2 bg-background">

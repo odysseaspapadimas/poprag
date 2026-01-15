@@ -3,14 +3,14 @@
  * Reduces duplication across chat, embedding, and other AI-related code
  */
 
-import { db } from "@/db";
-import { modelAlias } from "@/db/schema";
 import type { LanguageModel } from "ai";
 import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { modelAlias } from "@/db/schema";
 import {
-    DEFAULT_MODELS,
-    DEFAULT_PROVIDER,
-    type ProviderType,
+  DEFAULT_MODELS,
+  DEFAULT_PROVIDER,
+  type ProviderType,
 } from "./constants";
 import { createModel, type ModelConfig } from "./models";
 
