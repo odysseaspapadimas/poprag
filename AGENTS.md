@@ -150,6 +150,16 @@ API keys in `.env`:
 - React Hook Form for forms
 - Prefer `useSuspenseQuery` over `useQuery`
 
+### Type Safety Guidelines
+
+**IMPORTANT**: Always check for TypeScript errors after making changes that could affect types:
+- Adding/modifying interfaces or types
+- Changing function signatures or return types
+- Updating data structures passed between modules
+- Modifying database schema or API responses
+
+Use `get_errors` tool to verify no type errors exist before completing your work. Fix all type errors immediately - do not leave broken types in the codebase.
+
 ## Testing Changes
 
 1. Run `pnpm dev` for local development

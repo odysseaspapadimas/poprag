@@ -1,16 +1,12 @@
-import type { TextSplitter } from "@langchain/textsplitters";
-import {
-  MarkdownTextSplitter,
-  RecursiveCharacterTextSplitter,
-} from "@langchain/textsplitters";
-import { eq } from "drizzle-orm";
-import { ulid } from "ulidx";
 import { db } from "@/db";
 import {
   documentChunks,
   type InsertKnowledgeSource,
   knowledgeSource,
 } from "@/db/schema";
+import { generateChunks } from "@/lib/ai/embedding";
+import { eq } from "drizzle-orm";
+import { ulid } from "ulidx";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -268,27 +264,16 @@ export async function processKnowledgeSource(
       metadata: parsed.metadata,
     });
 
-    // Choose appropriate text splitter based on file type
-    let splitter: TextSplitter;
-    if (parsed.metadata.type === "markdown") {
-      // Use MarkdownTextSplitter for markdown files to preserve structure
-      splitter = new MarkdownTextSplitter({
-        chunkSize: options?.chunkSize || 1024,
-        chunkOverlap: 200,
-      });
-      console.log(`Using MarkdownTextSplitter for ${source.fileName}`);
-    } else {
-      // Use RecursiveCharacterTextSplitter for all other file types
-      splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: options?.chunkSize || 1024,
-        chunkOverlap: 200,
-      });
-      console.log(
-        `Using RecursiveCharacterTextSplitter for ${source.fileName}`,
-      );
-    }
+    const contentType =
+      parsed.metadata.type === "markdown" ? "markdown" : "text";
 
-    const chunks = await splitter.splitText(parsed.content);
+    const chunks = await generateChunks(parsed.content, {
+      chunkSize: options?.chunkSize || 1024,
+      chunkOverlap: 200,
+      minChunkSize: 100,
+      maxChunkSize: 2000,
+      contentType,
+    });
     await streamResponse({ message: `Split into ${chunks.length} chunks` });
 
     console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);

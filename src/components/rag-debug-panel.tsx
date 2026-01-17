@@ -1,21 +1,21 @@
-import {
-  BarChart3,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Copy,
-  Cpu,
-  FileText,
-  Search,
-} from "lucide-react";
-import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+    BarChart3,
+    ChevronDown,
+    ChevronUp,
+    Clock,
+    Copy,
+    Cpu,
+    FileText,
+    Search,
+} from "lucide-react";
+import { useState } from "react";
 
 interface RAGDebugInfo {
   enabled: boolean;
@@ -32,6 +32,8 @@ interface RAGDebugInfo {
     id: string;
     content: string;
     score: number;
+    vectorScore?: number; // Original vector similarity score (0-1)
+    rerankScore?: number; // Reranker cross-encoder score
     sourceId?: string;
     metadata?: Record<string, unknown>;
   }>;
@@ -194,12 +196,27 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
     return score.toFixed(4);
   };
 
-  const getScoreColor = (score: number) => {
+  const getVectorScoreColor = (score: number) => {
+    // Vector similarity scores range from 0-1 (cosine similarity)
     if (score >= 0.7)
       return "bg-green-500/20 text-green-700 dark:text-green-400";
     if (score >= 0.5)
       return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400";
+    if (score >= 0.3)
+      return "bg-orange-500/20 text-orange-700 dark:text-orange-400";
     return "bg-red-500/20 text-red-700 dark:text-red-400";
+  };
+
+  const getRerankScoreColor = (score: number) => {
+    // Reranker scores are typically much lower (different scale)
+    // Positive scores indicate relevance, higher is better
+    if (score >= 0.08)
+      return "bg-green-500/20 text-green-700 dark:text-green-400";
+    if (score >= 0.05)
+      return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400";
+    if (score >= 0.02)
+      return "bg-orange-500/20 text-orange-700 dark:text-orange-400";
+    return "bg-blue-500/20 text-blue-700 dark:text-blue-400";
   };
 
   return (
@@ -510,7 +527,6 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <div className="pl-6 space-y-2">
                 {debugInfo.chunks.map((chunk, idx) => {
                   const isExpanded = expandedChunks.has(idx);
-                  const scoreColor = getScoreColor(chunk.score);
                   const fileName =
                     (chunk.metadata?.fileName as string) ||
                     chunk.sourceId?.slice(0, 8) ||
@@ -523,10 +539,23 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                     >
                       <div className="p-3 space-y-2">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Badge className={scoreColor}>
-                              Score: {formatScore(chunk.score)}
-                            </Badge>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {chunk.rerankScore !== undefined ? (
+                              <>
+                                <Badge className={getRerankScoreColor(chunk.rerankScore)}>
+                                  Rerank: {formatScore(chunk.rerankScore)}
+                                </Badge>
+                                {chunk.vectorScore !== undefined && (
+                                  <Badge className={getVectorScoreColor(chunk.vectorScore)}>
+                                    Vector: {formatScore(chunk.vectorScore)}
+                                  </Badge>
+                                )}
+                              </>
+                            ) : (
+                              <Badge className={chunk.vectorScore !== undefined ? getVectorScoreColor(chunk.vectorScore) : getVectorScoreColor(chunk.score)}>
+                                {chunk.vectorScore !== undefined ? 'Vector' : 'Score'}: {formatScore(chunk.score)}
+                              </Badge>
+                            )}
                             <span className="text-xs text-muted-foreground">
                               #{idx + 1}
                             </span>

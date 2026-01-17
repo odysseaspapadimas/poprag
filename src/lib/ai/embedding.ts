@@ -1,8 +1,11 @@
-import { env } from "cloudflare:workers";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks } from "@/db/schema";
+import {
+  MarkdownTextSplitter,
+  RecursiveCharacterTextSplitter,
+} from "@langchain/textsplitters";
+import { env } from "cloudflare:workers";
+import { inArray, sql } from "drizzle-orm";
 
 /**
  * Default embedding model configuration
@@ -32,6 +35,7 @@ export async function generateChunks(
     chunkOverlap?: number;
     minChunkSize?: number;
     maxChunkSize?: number; // Hard limit for metadata
+    contentType?: "markdown" | "text";
   },
 ): Promise<string[]> {
   const {
@@ -39,28 +43,50 @@ export async function generateChunks(
     chunkOverlap = 200, // Helps maintain context across chunks
     minChunkSize = 100,
     maxChunkSize = 2000, // Hard cap for Vectorize metadata
+    contentType = "text",
   } = options || {};
 
   // Use LangChain's RecursiveCharacterTextSplitter for intelligent splitting
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize,
-    chunkOverlap,
-  });
+  const splitter =
+    contentType === "markdown"
+      ? new MarkdownTextSplitter({
+          chunkSize,
+          chunkOverlap,
+        })
+      : new RecursiveCharacterTextSplitter({
+          chunkSize,
+          chunkOverlap,
+        });
 
   const chunks = await splitter.splitText(input);
 
+  // Resplit oversized chunks instead of truncating mid-sentence
+  const fallbackOverlap = Math.min(chunkOverlap, Math.floor(maxChunkSize * 0.2));
+  const fallbackSplitter = new RecursiveCharacterTextSplitter({
+    chunkSize: maxChunkSize,
+    chunkOverlap: fallbackOverlap,
+  });
+
+  const normalizedChunks: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= maxChunkSize) {
+      normalizedChunks.push(chunk);
+      continue;
+    }
+
+    console.warn(
+      `Chunk exceeds max size (${chunk.length} > ${maxChunkSize}), resplitting`,
+    );
+    const subChunks = await fallbackSplitter.splitText(chunk);
+    normalizedChunks.push(...subChunks);
+  }
+
   // Filter and enforce size constraints for Vectorize metadata limits
-  const filteredChunks = chunks
+  const filteredChunks = normalizedChunks
     .filter((chunk) => chunk.length >= minChunkSize)
-    .map((chunk) => {
-      if (chunk.length > maxChunkSize) {
-        console.warn(
-          `Chunk exceeds max size (${chunk.length} > ${maxChunkSize}), truncating`,
-        );
-        return chunk.substring(0, maxChunkSize);
-      }
-      return chunk;
-    });
+    .map((chunk) =>
+      chunk.length > maxChunkSize ? chunk.substring(0, maxChunkSize) : chunk,
+    );
 
   console.log(
     `Generated ${filteredChunks.length} chunks from ${input.length} characters`,
@@ -131,6 +157,286 @@ export async function generateEmbedding(value: string): Promise<number[]> {
   console.log(`Generated embedding with ${embedding.length} dimensions`);
 
   return embedding;
+}
+
+/**
+ * Generate embeddings for multiple inputs in a single batch
+ * Used for query variations and bulk operations
+ */
+export async function generateEmbeddings(values: string[]): Promise<number[][]> {
+  const inputs = values.map((value) => value.replaceAll("\n", " ").trim());
+
+  if (inputs.length === 0) {
+    return [];
+  }
+
+  if (inputs.some((input) => input.length === 0)) {
+    throw new Error("Cannot generate embeddings for empty text");
+  }
+
+  console.log(`Generating embeddings for ${inputs.length} inputs`);
+
+  // Use AI Gateway for analytics and caching if configured
+  const aiOptions = env.AI_GATEWAY_ID
+    ? { gateway: { id: env.AI_GATEWAY_ID } }
+    : {};
+  const response = await env.AI.run(
+    "@cf/baai/bge-large-en-v1.5",
+    {
+      text: inputs,
+    },
+    aiOptions,
+  );
+
+  const embeddings = (response as { data: number[][] }).data;
+
+  if (!Array.isArray(embeddings) || embeddings.length !== inputs.length) {
+    throw new Error(
+      `Invalid embeddings response: expected ${inputs.length} embeddings, got ${Array.isArray(embeddings) ? embeddings.length : "non-array"}`,
+    );
+  }
+
+  embeddings.forEach((embedding, index) => {
+    if (!Array.isArray(embedding) || embedding.length === 0) {
+      throw new Error(
+        `Invalid embedding response at index ${index}: expected array with 1024 dimensions, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`,
+      );
+    }
+    if (embedding.length !== 1024) {
+      throw new Error(
+        `Invalid embedding dimensions at index ${index}: expected 1024, got ${embedding.length}`,
+      );
+    }
+  });
+
+  console.log(
+    `Generated ${embeddings.length} embeddings with ${embeddings[0]?.length || 0} dimensions`,
+  );
+
+  return embeddings;
+}
+
+/**
+ * Search document chunks using a precomputed embedding
+ * Used for query variations to avoid repeated embedding calls
+ */
+export async function findRelevantContentWithEmbedding(
+  query: string,
+  queryEmbedding: number[],
+  agentId: string,
+  options?: {
+    topK?: number;
+    minSimilarity?: number;
+  },
+) {
+  const { topK = 6, minSimilarity = 0.3 } = options || {};
+
+  try {
+    // Preprocess query - remove noise and normalize
+    const cleanedQuery = query.trim();
+
+    if (!cleanedQuery) {
+      console.warn("[RAG] Empty query provided");
+      return { matches: [], query };
+    }
+
+    console.log(
+      `[RAG] Searching for: "${cleanedQuery.substring(
+        0,
+        100,
+      )}..." in namespace: ${agentId}`,
+    );
+    console.log(
+      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}`,
+    );
+
+    console.log(
+      `[RAG] Query embedding provided: ${queryEmbedding.length} dimensions`,
+    );
+
+    // Query Vectorize with agent namespace
+
+    if (!env.VECTORIZE) {
+      throw new Error("VECTORIZE binding not available");
+    }
+
+    const results = await env.VECTORIZE.query(queryEmbedding, {
+      namespace: agentId, // Agent-based isolation
+      topK: 5,
+      returnValues: false, // We don't need the vectors back
+      returnMetadata: "all", // Get all metadata including text
+    });
+
+    console.log(
+      `[RAG] Vectorize returned ${results.matches?.length || 0} raw results`,
+    );
+
+    if (!results.matches || results.matches.length === 0) {
+      console.warn(
+        `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`,
+      );
+      console.warn(
+        `[RAG] Query was: "${cleanedQuery.substring(0, 100)}..."`,
+      );
+      return {
+        matches: [],
+        query,
+      };
+    }
+
+    // Debug: Log first raw match for inspection
+    if (results.matches.length > 0) {
+      const firstMatch = results.matches[0];
+      console.log(`[RAG] First raw match sample:`, {
+        id: firstMatch.id,
+        score: firstMatch.score,
+        hasMetadata: !!firstMatch.metadata,
+        hasText: !!firstMatch.metadata?.text,
+        textLength: firstMatch.metadata?.text
+          ? String(firstMatch.metadata.text).length
+          : 0,
+        textPreview: firstMatch.metadata?.text
+          ? String(firstMatch.metadata.text).substring(0, 100)
+          : "N/A",
+        metadataKeys: firstMatch.metadata
+          ? Object.keys(firstMatch.metadata)
+          : [],
+      });
+    }
+
+    // Transform and filter results
+    const matches = results.matches
+      .filter((match) => {
+        // Validate metadata structure
+        if (!match.metadata) {
+          console.warn(`[RAG] Match ${match.id} has no metadata object`);
+          return false;
+        }
+
+        // Check for text content
+        const hasText =
+          match.metadata.text && String(match.metadata.text).trim().length > 0;
+        if (!hasText) {
+          console.warn(
+            `[RAG] Match ${
+              match.id
+            } missing text field in metadata. Available fields: ${Object.keys(
+              match.metadata,
+            ).join(", ")}`,
+          );
+          return false;
+        }
+
+        // Check similarity threshold
+        const meetsThreshold = match.score >= minSimilarity;
+        if (!meetsThreshold) {
+          console.debug(
+            `[RAG] Match ${match.id} score ${match.score.toFixed(
+              3,
+            )} below threshold ${minSimilarity}`,
+          );
+          return false;
+        }
+
+        return true;
+      })
+      .map((match) => {
+        const textContent = String(match.metadata?.text || "");
+        return {
+          id: match.id,
+          score: match.score,
+          vectorScore: match.score, // Preserve original vector similarity score
+          content: textContent,
+          metadata: {
+            ...match.metadata,
+            fileName: match.metadata?.fileName || "Unknown source",
+            sourceId: match.metadata?.sourceId,
+            chunkIndex: match.metadata?.chunkIndex,
+            contentLength: textContent.length,
+          },
+        };
+      })
+      // Sort by score descending (Vectorize should return sorted, but ensure it)
+      .sort((a, b) => b.score - a.score)
+      // Take only topK after filtering
+      .slice(0, topK);
+
+    // Fetch full text from database to avoid Vectorize metadata truncation
+    if (matches.length > 0) {
+      try {
+        const chunkIds = matches.map((m) => m.id);
+        const dbChunks = await db
+          .select({
+            id: documentChunks.id,
+            text: documentChunks.text,
+          })
+          .from(documentChunks)
+          .where(inArray(documentChunks.id, chunkIds));
+
+        const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c.text]));
+
+        let replacedCount = 0;
+        matches.forEach((match) => {
+          const fullText = dbChunkMap.get(match.id);
+          if (fullText && fullText.length > match.content.length) {
+            match.content = fullText;
+            match.metadata.contentLength = fullText.length;
+            replacedCount++;
+          }
+        });
+
+        if (replacedCount > 0) {
+          console.log(
+            `[RAG] Replaced ${replacedCount} chunks with full text from DB`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          "[RAG] Failed to fetch full text from DB, using Vectorize metadata:",
+          error,
+        );
+      }
+    }
+
+    if (matches.length === 0) {
+      console.warn(
+        `[RAG] All ${results.matches.length} results filtered out. Check metadata structure and similarity threshold.`,
+      );
+    } else {
+      console.log(
+        `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`,
+      );
+      console.log(
+        `[RAG] Score range: ${matches[0].score.toFixed(3)} to ${matches[
+          matches.length - 1
+        ].score.toFixed(3)}`,
+      );
+      console.log(
+        `[RAG] Content lengths: ${matches
+          .map((m) => m.metadata.contentLength)
+          .join(", ")}`,
+      );
+    }
+
+    return {
+      matches,
+      query,
+    };
+  } catch (error) {
+    console.error("[RAG] Critical error querying Vectorize:", error);
+    console.error("[RAG] Error details:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : "No stack trace",
+      agentId,
+      query: query.substring(0, 100),
+    });
+    // Return empty results on error rather than failing the chat
+    return {
+      matches: [],
+      query,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**
@@ -216,214 +522,22 @@ export async function findRelevantContent(
     minSimilarity?: number;
   },
 ) {
-  const { topK = 6, minSimilarity = 0.3 } = options || {};
+  const cleanedQuery = userQuery.trim();
 
-  try {
-    // Preprocess query - remove noise and normalize
-    const cleanedQuery = userQuery.trim();
-
-    if (!cleanedQuery) {
-      console.warn("[RAG] Empty query provided");
-      return { matches: [], query: userQuery };
-    }
-
-    console.log(
-      `[RAG] Searching for: "${cleanedQuery.substring(
-        0,
-        100,
-      )}..." in namespace: ${agentId}`,
-    );
-    console.log(
-      `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}`,
-    );
-
-    // Generate embedding for the query with consistent dimensions
-    const queryEmbedding = await generateEmbedding(cleanedQuery);
-
-    console.log(
-      `[RAG] Query embedding generated: ${queryEmbedding.length} dimensions`,
-    );
-
-    // Query Vectorize with agent namespace
-
-    if (!env.VECTORIZE) {
-      throw new Error("VECTORIZE binding not available");
-    }
-
-    const results = await env.VECTORIZE.query(queryEmbedding, {
-      namespace: agentId, // Agent-based isolation
-      topK: 5,
-      returnValues: false, // We don't need the vectors back
-      returnMetadata: "all", // Get all metadata including text
-    });
-
-    console.log(
-      `[RAG] Vectorize returned ${results.matches?.length || 0} raw results`,
-    );
-
-    if (!results.matches || results.matches.length === 0) {
-      console.warn(
-        `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`,
-      );
-      console.warn(`[RAG] Query was: "${cleanedQuery.substring(0, 100)}..."`);
-      return {
-        matches: [],
-        query: userQuery,
-      };
-    }
-
-    // Debug: Log first raw match for inspection
-    if (results.matches.length > 0) {
-      const firstMatch = results.matches[0];
-      console.log(`[RAG] First raw match sample:`, {
-        id: firstMatch.id,
-        score: firstMatch.score,
-        hasMetadata: !!firstMatch.metadata,
-        hasText: !!firstMatch.metadata?.text,
-        textLength: firstMatch.metadata?.text
-          ? String(firstMatch.metadata.text).length
-          : 0,
-        textPreview: firstMatch.metadata?.text
-          ? String(firstMatch.metadata.text).substring(0, 100)
-          : "N/A",
-        metadataKeys: firstMatch.metadata
-          ? Object.keys(firstMatch.metadata)
-          : [],
-      });
-    }
-
-    // Transform and filter results
-    const matches = results.matches
-      .filter((match) => {
-        // Validate metadata structure
-        if (!match.metadata) {
-          console.warn(`[RAG] Match ${match.id} has no metadata object`);
-          return false;
-        }
-
-        // Check for text content
-        const hasText =
-          match.metadata.text && String(match.metadata.text).trim().length > 0;
-        if (!hasText) {
-          console.warn(
-            `[RAG] Match ${
-              match.id
-            } missing text field in metadata. Available fields: ${Object.keys(
-              match.metadata,
-            ).join(", ")}`,
-          );
-          return false;
-        }
-
-        // Check similarity threshold
-        const meetsThreshold = match.score >= minSimilarity;
-        if (!meetsThreshold) {
-          console.debug(
-            `[RAG] Match ${match.id} score ${match.score.toFixed(
-              3,
-            )} below threshold ${minSimilarity}`,
-          );
-          return false;
-        }
-
-        return true;
-      })
-      .map((match) => {
-        const textContent = String(match.metadata?.text || "");
-        return {
-          id: match.id,
-          score: match.score,
-          content: textContent,
-          metadata: {
-            ...match.metadata,
-            fileName: match.metadata?.fileName || "Unknown source",
-            sourceId: match.metadata?.sourceId,
-            chunkIndex: match.metadata?.chunkIndex,
-            contentLength: textContent.length,
-          },
-        };
-      })
-      // Sort by score descending (Vectorize should return sorted, but ensure it)
-      .sort((a, b) => b.score - a.score)
-      // Take only topK after filtering
-      .slice(0, topK);
-
-    // Fetch full text from database to avoid Vectorize metadata truncation
-    if (matches.length > 0) {
-      try {
-        const chunkIds = matches.map((m) => m.id);
-        const dbChunks = await db
-          .select({
-            id: documentChunks.id,
-            text: documentChunks.text,
-          })
-          .from(documentChunks)
-          .where(inArray(documentChunks.id, chunkIds));
-
-        const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c.text]));
-
-        let replacedCount = 0;
-        matches.forEach((match) => {
-          const fullText = dbChunkMap.get(match.id);
-          if (fullText && fullText.length > match.content.length) {
-            match.content = fullText;
-            match.metadata.contentLength = fullText.length;
-            replacedCount++;
-          }
-        });
-
-        if (replacedCount > 0) {
-          console.log(
-            `[RAG] Replaced ${replacedCount} chunks with full text from DB`,
-          );
-        }
-      } catch (error) {
-        console.warn(
-          "[RAG] Failed to fetch full text from DB, using Vectorize metadata:",
-          error,
-        );
-      }
-    }
-
-    if (matches.length === 0) {
-      console.warn(
-        `[RAG] All ${results.matches.length} results filtered out. Check metadata structure and similarity threshold.`,
-      );
-    } else {
-      console.log(
-        `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`,
-      );
-      console.log(
-        `[RAG] Score range: ${matches[0].score.toFixed(3)} to ${matches[
-          matches.length - 1
-        ].score.toFixed(3)}`,
-      );
-      console.log(
-        `[RAG] Content lengths: ${matches
-          .map((m) => m.metadata.contentLength)
-          .join(", ")}`,
-      );
-    }
-
-    return {
-      matches,
-      query: userQuery,
-    };
-  } catch (error) {
-    console.error("[RAG] Critical error querying Vectorize:", error);
-    console.error("[RAG] Error details:", {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : "No stack trace",
-      agentId,
-      query: userQuery.substring(0, 100),
-    });
-    // Return empty results on error rather than failing the chat
-    return {
-      matches: [],
-      query: userQuery,
-      error: error instanceof Error ? error.message : String(error),
-    };
+  if (!cleanedQuery) {
+    console.warn("[RAG] Empty query provided");
+    return { matches: [], query: userQuery };
   }
+
+  // Generate embedding for the query with consistent dimensions
+  const queryEmbedding = await generateEmbedding(cleanedQuery);
+
+  return findRelevantContentWithEmbedding(
+    userQuery,
+    queryEmbedding,
+    agentId,
+    options,
+  );
 }
 
 /**

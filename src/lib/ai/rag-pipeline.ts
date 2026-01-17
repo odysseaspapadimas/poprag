@@ -7,15 +7,16 @@
  * - Result fusion and reranking
  */
 
-import type { LanguageModel } from "ai";
-import { generateText } from "ai";
-import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks, knowledgeSource } from "@/db/schema";
+import type { LanguageModel } from "ai";
+import { generateText } from "ai";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
-  findRelevantContent,
+  findRelevantContentWithEmbedding,
+  generateEmbeddings,
   rerank,
   searchDocumentChunksFTS,
 } from "./embedding";
@@ -52,6 +53,8 @@ export interface RAGDebugInfo {
     id: string;
     content: string;
     score: number;
+    vectorScore?: number; // Original vector similarity score (0-1)
+    rerankScore?: number; // Reranker cross-encoder score
     sourceId?: string;
     metadata?: Record<string, unknown>;
   }>;
@@ -92,6 +95,8 @@ export interface RAGResult {
 
 interface MatchMetadata {
   sourceId?: string;
+  chunkIndex?: number;
+  documentId?: string;
   [key: string]: unknown;
 }
 
@@ -128,6 +133,8 @@ User message: "${query}"
 
 Respond ONLY with valid JSON in this exact format:
 {"requiresRAG": true/false, "reason": "your explanation"}`,
+  temperature: 0,
+  maxOutputTokens: 120,
     });
 
     // Parse JSON response
@@ -168,10 +175,22 @@ export async function rewriteQuery(
   query: string,
   variationsCount: number = 3,
 ): Promise<{ queries: string[]; keywords: string[] }> {
+  const trimmedQuery = query.trim();
+  const wordCount = trimmedQuery ? trimmedQuery.split(/\s+/).length : 0;
+
+  if (wordCount > 0 && wordCount <= 3) {
+    return {
+      queries: [query],
+      keywords: trimmedQuery.split(/\s+/).slice(0, 3),
+    };
+  }
+
+  const maxOutputTokens = Math.min(512, 80 + variationsCount * 60);
   const promptText = `Given the following user message, rewrite it into ${variationsCount} distinct queries that could be used to search for relevant information, and provide additional keywords related to the query.
 
 Each query should focus on different aspects or potential interpretations of the original message.
 Each keyword should be derived from an interpretation of the provided user message.
+Keep each query under 12 words and provide at most 6 keywords total.
 
 User message: ${query}
 
@@ -182,6 +201,8 @@ Respond ONLY with valid JSON in this exact format:
     const { text } = await generateText({
       model,
       prompt: promptText,
+      temperature: 0.2,
+      maxOutputTokens,
     });
 
     // Parse JSON response
@@ -217,6 +238,7 @@ Respond ONLY with valid JSON in this exact format:
 interface HybridSearchResult {
   id: string;
   score: number;
+  vectorScore?: number; // Original vector similarity score (undefined for FTS results)
   content: string;
   metadata: Record<string, unknown>;
 }
@@ -244,13 +266,27 @@ export async function hybridSearch(
     ftsSearchMs: number;
   };
 }> {
+  const cleanedQueries = queries.map((query) => query.trim()).filter(Boolean);
+  if (cleanedQueries.length === 0) {
+    return {
+      results: [],
+      vectorCount: 0,
+      ftsCount: 0,
+      timing: {
+        vectorSearchMs: 0,
+        ftsSearchMs: 0,
+      },
+    };
+  }
+
   // Optimize topK per query variation - fewer results per query, rely on fusion/reranking
-  const topKPerQuery = Math.max(3, Math.ceil(topK / queries.length));
+  const topKPerQuery = Math.max(3, Math.ceil(topK / cleanedQueries.length));
 
   // Step 1: Perform vector search for all query variations
   const vectorSearchStart = Date.now();
-  const vectorSearchPromises = queries.map((q) =>
-    findRelevantContent(q, agentId, {
+  const queryEmbeddings = await generateEmbeddings(cleanedQueries);
+  const vectorSearchPromises = queryEmbeddings.map((embedding, index) =>
+    findRelevantContentWithEmbedding(cleanedQueries[index], embedding, agentId, {
       topK: topKPerQuery,
       minSimilarity: minSimilarity / 100, // Convert percentage to 0-1
     }),
@@ -315,13 +351,18 @@ export async function hybridSearch(
     id: r.id,
     content: r.text,
     score: -r.rank, // FTS rank is negative, convert to positive score
+    vectorScore: undefined, // FTS results don't have vector scores
     metadata: {},
   }));
 
-  // Merge all result sets
+  // Merge all result sets (vector results already have vectorScore from findRelevantContent)
   const allResultSets = [...vectorResults.map((r) => r.matches), ftsMatches];
 
-  const fusedResults = reciprocalRankFusion(allResultSets, RAG_CONFIG.RRF_K);
+  // reciprocalRankFusion only uses id and score, vectorScore is preserved through the process
+  const fusedResults = reciprocalRankFusion(
+    allResultSets as Array<Array<{ id: string; score: number }>>,
+    RAG_CONFIG.RRF_K
+  ) as HybridSearchResult[];
 
   // Return more candidates for reranking (2x topK instead of 3x for speed)
   return {
@@ -355,6 +396,11 @@ export async function rerankResults(
     `[Rerank] Reranking ${candidates.length} candidates using ${modelId}`,
   );
 
+  // Create a map to preserve original vector scores
+  const vectorScoreMap = new Map(
+    candidates.map((c) => [c.id, c.vectorScore])
+  );
+
   const reranked = await rerank(
     query,
     candidates.map((c) => ({
@@ -367,7 +413,8 @@ export async function rerankResults(
 
   return reranked.map((r) => ({
     id: r.id,
-    score: r.score,
+    score: r.score, // This is now the reranker score
+    vectorScore: vectorScoreMap.get(r.id), // Preserve original vector score
     content: r.content,
     metadata: r.metadata || {},
   }));
@@ -519,6 +566,7 @@ export async function performRAGRetrieval(
   if (topMatches.length > 0) {
     const enrichmentStart = Date.now();
     topMatches = await enrichWithFullText(topMatches);
+    topMatches = await expandWithNeighborChunks(topMatches, topK);
     debugInfo.timing!.enrichmentMs = Date.now() - enrichmentStart;
   }
 
@@ -556,6 +604,8 @@ export async function performRAGRetrieval(
       id: match.id,
       content: String(match.content),
       score: match.score,
+      vectorScore: match.vectorScore, // Original vector similarity (if available)
+      rerankScore: config.rerank ? match.score : undefined, // Reranker score (if reranking was used)
       sourceId: metadata?.sourceId || match.id,
       metadata: match.metadata || {},
     };
@@ -586,6 +636,7 @@ async function enrichWithFullText(
         id: documentChunks.id,
         text: documentChunks.text,
         documentId: documentChunks.documentId,
+        chunkIndex: documentChunks.chunkIndex,
       })
       .from(documentChunks)
       .where(inArray(documentChunks.id, chunkIds));
@@ -602,7 +653,7 @@ async function enrichWithFullText(
 
     const sourceMap = new Map(sources.map((s) => [s.id, s.fileName]));
     const dbChunkMap = new Map(
-      dbChunks.map((c) => [c.id, { text: c.text, documentId: c.documentId }]),
+      dbChunks.map((c) => [c.id, c]),
     );
 
     let replacedCount = 0;
@@ -629,6 +680,8 @@ async function enrichWithFullText(
               : String(match.content).length,
             fileName,
             sourceId: chunkData.documentId,
+            documentId: chunkData.documentId,
+            chunkIndex: chunkData.chunkIndex,
           },
         };
       }
@@ -649,4 +702,93 @@ async function enrichWithFullText(
     );
     return matches;
   }
+}
+
+/**
+ * Expand results with adjacent chunks to avoid mid-sentence cutoffs
+ */
+async function expandWithNeighborChunks(
+  matches: HybridSearchResult[],
+  topK: number,
+): Promise<HybridSearchResult[]> {
+  const baseMatches = matches.filter(
+    (match) => match.metadata?.sourceId && match.metadata?.chunkIndex !== undefined,
+  );
+
+  if (baseMatches.length === 0) return matches;
+
+  type NeighborKey = `${string}:${number}`;
+  const baseByKey = new Map<NeighborKey, HybridSearchResult>();
+  const neighborTargets: Array<{ documentId: string; chunkIndex: number }> = [];
+
+  baseMatches.forEach((match) => {
+    const metadata = match.metadata as MatchMetadata;
+    const documentId = metadata.documentId || metadata.sourceId;
+    const chunkIndex = metadata.chunkIndex;
+
+    if (!documentId || chunkIndex === undefined || chunkIndex === null) return;
+
+    baseByKey.set(`${documentId}:${chunkIndex}`, match);
+
+    if (chunkIndex > 0) {
+      neighborTargets.push({ documentId, chunkIndex: chunkIndex - 1 });
+    }
+    neighborTargets.push({ documentId, chunkIndex: chunkIndex + 1 });
+  });
+
+  if (neighborTargets.length === 0) return matches;
+
+  const uniqueTargets = Array.from(
+    new Map(
+      neighborTargets.map((t) => [`${t.documentId}:${t.chunkIndex}`, t]),
+    ).values(),
+  );
+
+  const conditions = uniqueTargets.map((target) =>
+    and(
+      eq(documentChunks.documentId, target.documentId),
+      eq(documentChunks.chunkIndex, target.chunkIndex),
+    ),
+  );
+
+  const neighborRows = await db
+    .select({
+      id: documentChunks.id,
+      text: documentChunks.text,
+      documentId: documentChunks.documentId,
+      chunkIndex: documentChunks.chunkIndex,
+    })
+    .from(documentChunks)
+    .where(or(...conditions));
+
+  if (neighborRows.length === 0) return matches;
+
+  const existingIds = new Set(matches.map((m) => m.id));
+  const neighborMatches: HybridSearchResult[] = neighborRows
+    .filter((row) => !existingIds.has(row.id))
+    .map((row) => {
+      const prevKey = `${row.documentId}:${row.chunkIndex + 1}` as NeighborKey;
+      const nextKey = `${row.documentId}:${row.chunkIndex - 1}` as NeighborKey;
+      const baseMatch = baseByKey.get(prevKey) || baseByKey.get(nextKey);
+      const baseScore = baseMatch?.score ?? 0;
+
+      return {
+        id: row.id,
+        content: row.text,
+        score: baseScore * 0.9,
+        vectorScore: baseMatch?.vectorScore,
+        metadata: {
+          ...baseMatch?.metadata,
+          sourceId: row.documentId,
+          documentId: row.documentId,
+          chunkIndex: row.chunkIndex,
+          contentLength: row.text.length,
+          neighborOf: baseMatch?.id,
+        },
+      };
+    });
+
+  const merged = [...matches, ...neighborMatches];
+
+  return merged.slice(0, Math.max(topK * 2, topK + 2));
 }
