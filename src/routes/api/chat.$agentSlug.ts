@@ -23,24 +23,33 @@ const chatRequestSchema = z.object({
       rerankModel: z.string().optional(),
     })
     .optional(),
-  requestTags: z.array(z.string()).optional(),
+  conversationId: z.string().optional(),
 });
 
 export const Route = createFileRoute("/api/chat/$agentSlug")({
   server: {
     handlers: {
-      OPTIONS: () => {
+      OPTIONS: ({ request }) => {
+        const origin = request.headers.get("Origin") || "*";
         return new Response(null, {
           status: 200,
           headers: {
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Methods": "POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
+            Vary: "Origin",
           },
         });
       },
 
       POST: async ({ request, params }) => {
+        const origin = request.headers.get("Origin") || "*";
+        const corsHeaders = {
+          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          Vary: "Origin",
+        };
         try {
           const body = await request.json();
           const validated = chatRequestSchema.parse(body);
@@ -57,7 +66,15 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
             env,
           );
 
-          return result.toUIMessageStreamResponse();
+          const response = result.toUIMessageStreamResponse();
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: {
+              ...Object.fromEntries(response.headers.entries()),
+              ...corsHeaders,
+            },
+          });
         } catch (error) {
           console.error("Chat API error:", error);
 
@@ -67,7 +84,13 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
                 error: "Invalid request",
                 details: error.issues,
               }),
-              { status: 400, headers: { "Content-Type": "application/json" } },
+              {
+                status: 400,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...corsHeaders,
+                },
+              },
             );
           }
 
@@ -78,7 +101,13 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
                   ? error.message
                   : "Internal server error",
             }),
-            { status: 500, headers: { "Content-Type": "application/json" } },
+            {
+              status: 500,
+              headers: {
+                "Content-Type": "application/json",
+                ...corsHeaders,
+              },
+            },
           );
         }
       },

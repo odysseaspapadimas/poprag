@@ -54,7 +54,7 @@ export interface ChatRequest {
     rerank?: boolean;
     rerankModel?: string;
   };
-  requestTags?: string[];
+  conversationId?: string;
   languageInstruction?: string; // Explicit language instruction for Flutter app
 }
 
@@ -321,7 +321,7 @@ async function saveTranscriptAndMetrics(
   await db.insert(transcript).values({
     id: nanoid(),
     agentId: agentData.id,
-    conversationId: request.requestTags?.[0] || nanoid(),
+    conversationId: request.conversationId || nanoid(),
     runId,
     request: {
       ...(request as unknown as Record<string, unknown>),

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PopRAG Vanilla JS Chat Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1d1f23;
+        --muted: #5f6670;
+        --border: #e3e6ea;
+        --accent: #2563eb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .page {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .row > * {
+        flex: 1;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+      input[type="text"],
+      textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      button {
+        padding: 10px 14px;
+        border: none;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #ffffff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .messages {
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .message {
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #fff;
+        white-space: pre-wrap;
+      }
+      .message.user {
+        border-color: #dbe3ff;
+        background: #f4f7ff;
+      }
+      .message.assistant {
+        border-color: #e9eef5;
+        background: #ffffff;
+      }
+      .meta {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .small {
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="top">
+        <div>
+          <div class="title">PopRAG Chat Demo</div>
+          <div class="small">Vanilla JS, no SDK. Uses /api/chat/nescafe-assistant</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <label for="baseUrl">Base URL (optional)</label>
+            <input
+              id="baseUrl"
+              type="text"
+              value="http://localhost:3000"
+              placeholder="Leave empty for same origin"
+            />
+          </div>
+          <div>
+            <label for="agentSlug">Agent Slug</label>
+            <input id="agentSlug" type="text" value="nescafe-assistant" />
+          </div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <label for="messageInput">Message</label>
+          <textarea
+            id="messageInput"
+            rows="3"
+            placeholder="Type your message..."
+          ></textarea>
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <button id="sendBtn">Send</button>
+          <button id="clearBtn" type="button">Clear</button>
+        </div>
+
+        <div class="status" id="status">Idle</div>
+
+        <div class="messages" id="messages"></div>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        messages: [],
+        conversationId: getConversationId(),
+      };
+
+      const baseUrlInput = document.getElementById('baseUrl');
+      const agentSlugInput = document.getElementById('agentSlug');
+      const messageInput = document.getElementById('messageInput');
+      const sendBtn = document.getElementById('sendBtn');
+      const clearBtn = document.getElementById('clearBtn');
+      const messagesEl = document.getElementById('messages');
+      const statusEl = document.getElementById('status');
+
+      sendBtn.addEventListener('click', () => {
+        const text = messageInput.value.trim();
+        if (!text) return;
+        sendMessage(text);
+      });
+
+      clearBtn.addEventListener('click', () => {
+        state.messages = [];
+        state.conversationId = getConversationId();
+        messagesEl.innerHTML = '';
+        statusEl.textContent = 'Cleared. New conversation started.';
+      });
+
+      messageInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          const text = messageInput.value.trim();
+          if (!text) return;
+          sendMessage(text);
+        }
+      });
+
+      async function sendMessage(text) {
+        setBusy(true, 'Sending...');
+        messageInput.value = '';
+
+        const userMessage = createMessage('user', text);
+        state.messages.push(userMessage);
+        renderMessage(userMessage);
+
+        const baseUrl = (baseUrlInput.value || '').trim().replace(/\/+$/, '');
+        const agentSlug = (agentSlugInput.value || 'nescafe-assistant').trim();
+        const endpoint = `${baseUrl}/api/chat/${agentSlug}`;
+
+        const payloadMessages = state.messages.slice();
+        const requestBody = {
+          messages: payloadMessages,
+          conversationId: state.conversationId,
+          rag: { topK: 6 },
+        };
+
+        const assistantMessage = createMessage('assistant', '');
+        state.messages.push(assistantMessage);
+        const assistantEl = renderMessage(assistantMessage);
+
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          });
+
+          if (!response.ok || !response.body) {
+            const errorText = await response.text();
+            throw new Error(`Request failed (${response.status}): ${errorText}`);
+          }
+
+          setBusy(true, 'Streaming...');
+          await streamResponse(response.body, (delta) => {
+            assistantMessage.parts[0].text += delta;
+            assistantEl.textContent = assistantMessage.parts[0].text;
+          });
+
+          setBusy(false, 'Idle');
+        } catch (error) {
+          setBusy(false, 'Error');
+          assistantEl.textContent = `Error: ${error.message}`;
+        }
+      }
+
+      function createMessage(role, text) {
+        return {
+          id: generateId(),
+          role,
+          parts: [{ type: 'text', text }],
+        };
+      }
+
+      function renderMessage(message) {
+        const el = document.createElement('div');
+        el.className = `message ${message.role}`;
+        el.textContent = message.parts[0]?.text || '';
+        messagesEl.appendChild(el);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return el;
+      }
+
+      async function streamResponse(stream, onTextDelta) {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            if (trimmed.startsWith('0:')) {
+              const text = JSON.parse(trimmed.slice(2));
+              onTextDelta(text);
+            } else if (trimmed.startsWith('data:')) {
+              const payload = trimmed.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(payload);
+                if (typeof parsed === 'string') {
+                  onTextDelta(parsed);
+                } else if (parsed && parsed.type === 'text-delta') {
+                  onTextDelta(parsed.delta || '');
+                }
+              } catch (_) {
+                // Ignore invalid JSON chunks
+              }
+            } else if (trimmed.startsWith('e:')) {
+              // finish event
+            }
+          }
+        }
+      }
+
+      function setBusy(isBusy, label) {
+        sendBtn.disabled = isBusy;
+        statusEl.textContent = label;
+      }
+
+      function generateId() {
+        if (window.crypto && crypto.randomUUID) {
+          return crypto.randomUUID();
+        }
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
+      function getConversationId() {
+        return generateId();
+      }
+    </script>
+  </body>
+</html>

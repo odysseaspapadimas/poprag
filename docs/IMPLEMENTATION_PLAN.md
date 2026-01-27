@@ -37,7 +37,7 @@ Versioning: Prompt labels are pointers to immutable versions; `AgentModelPolicy`
 - Workers AI path: `provider='workers-ai'` uses binding (e.g., `env.AI.run("@cf/meta/llama-3.1-8b-instruct", payload)`). Wrap in AI SDK custom provider adapter while still exposing alias.
 
 ### Runtime chat sequence (Cloudflare Worker/Pages Function)
-1. Client call `POST /api/chat` (SSE). Payload: `{ agentSlug, messages[], modelAlias?, variables?, rag?: { query?, topK?, filters? }, requestTags? }`.
+1. Client call `POST /api/chat` (SSE). Payload: `{ agentSlug, messages[], modelAlias?, variables?, rag?: { query?, topK?, filters? }, conversationId? }`.
 2. Worker resolves agent from D1 (cache in KV for 60s). Validate status `active` and optional RBAC.
 3. Fetch active PromptVersion labelled `prod`; load AgentModelPolicy effective now; merge default variables with request overrides (validate via prompt template engine).
 4. Determine generation provider: if request-specified `modelAlias` allowed in policy, otherwise default.
@@ -101,7 +101,7 @@ Request body:
   "modelAlias": "gpt4o-primary",// optional, validated
   "variables": { "brand": "Nescafé" },
   "rag": { "query": "best capsule", "topK": 4, "filters": { "tags": ["coffee"] } },
-  "requestTags": ["web","session:abc"]
+  "conversationId": "session:abc"
 }
 ```
 Response stream frames: `{ textDelta?, toolCalls?, citations: [{sourceId, chunkId, ref, score}], finishReason?, usage, warnings? }`.

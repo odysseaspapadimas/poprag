@@ -298,7 +298,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
         rag: {
           topK: 6,
         },
-        requestTags: [conversationId], // Include conversationId in request
+        conversationId, // Include conversationId in request
       },
     }),
     onFinish: async ({ message }) => {
