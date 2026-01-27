@@ -30,6 +30,8 @@ import { useTRPC } from "@/integrations/trpc/react";
 
 const ragSettingsSchema = z.object({
   ragEnabled: z.boolean(),
+  contextualEmbeddingsEnabled: z.boolean(),
+  skipIntentClassification: z.boolean(),
   rewriteQuery: z.boolean(),
   rewriteModel: z.string().optional(),
   intentModel: z.string().optional(),
@@ -37,7 +39,7 @@ const ragSettingsSchema = z.object({
   rerank: z.boolean(),
   rerankModel: z.string().optional(),
   topK: z.number().min(1).max(20),
-  minSimilarity: z.number().min(0).max(100), // Percentage 0-100
+  minSimilarity: z.number().min(0).max(100),
 });
 
 type RAGSettingsForm = z.infer<typeof ragSettingsSchema>;
@@ -62,6 +64,8 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
     resolver: zodResolver(ragSettingsSchema),
     defaultValues: {
       ragEnabled: agent?.ragEnabled ?? true,
+      contextualEmbeddingsEnabled: agent?.contextualEmbeddingsEnabled ?? false,
+      skipIntentClassification: agent?.skipIntentClassification ?? false,
       rewriteQuery: agent?.rewriteQuery ?? false,
       rewriteModel: agent?.rewriteModel || undefined,
       intentModel: agent?.intentModel || undefined,
@@ -132,35 +136,86 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
           <>
             <FormField
               control={form.control}
-              name="intentModel"
+              name="contextualEmbeddingsEnabled"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Intent Classification Model</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model for intent classification" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {modelAliases.map((model) => (
-                        <SelectItem key={model.alias} value={model.alias}>
-                          {model.alias}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Model used to determine if a query needs knowledge base
-                    search (smaller = faster)
-                  </FormDescription>
-                  <FormMessage />
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">
+                      Contextual Embeddings
+                    </FormLabel>
+                    <FormDescription>
+                      Prepend short chunk context during ingestion to improve
+                      retrieval quality (adds ingestion latency)
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
                 </FormItem>
               )}
             />
+
+            <FormField
+              control={form.control}
+              name="skipIntentClassification"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">
+                      Skip Intent Classification
+                    </FormLabel>
+                    <FormDescription>
+                      Always perform RAG without checking if query needs it
+                      (saves ~200-400ms per request, use for knowledge-heavy
+                      agents)
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            {!form.watch("skipIntentClassification") && (
+              <FormField
+                control={form.control}
+                name="intentModel"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Intent Classification Model</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a model for intent classification" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {modelAliases.map((model) => (
+                          <SelectItem key={model.alias} value={model.alias}>
+                            {model.alias}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Model used to determine if a query needs knowledge base
+                      search (smaller = faster)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <FormField
               control={form.control}

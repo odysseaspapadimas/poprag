@@ -1,0 +1,1 @@
+ALTER TABLE `agent` ADD `contextual_embeddings_enabled` integer DEFAULT false NOT NULL;

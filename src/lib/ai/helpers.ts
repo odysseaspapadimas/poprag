@@ -14,9 +14,23 @@ import {
 } from "./constants";
 import { createModel, type ModelConfig } from "./models";
 
+// ─────────────────────────────────────────────────────
+// Model Alias Cache
+// ─────────────────────────────────────────────────────
+
+interface CachedModelAlias {
+  provider: ProviderType;
+  modelId: string;
+  timestamp: number;
+}
+
+const modelAliasCache = new Map<string, CachedModelAlias>();
+const CACHE_TTL = 60000; // 1 minute TTL
+
 /**
  * Resolve a model alias from the database and create a LanguageModel instance
  * Handles fallback to Workers AI if alias not found in database
+ * Uses in-memory caching to avoid repeated DB queries
  *
  * @param alias - The model alias to resolve (e.g., "gpt-4o" or "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
  * @returns A configured LanguageModel instance
@@ -24,18 +38,36 @@ import { createModel, type ModelConfig } from "./models";
 export async function resolveAndCreateModel(
   alias: string,
 ): Promise<LanguageModel> {
-  // Look up the model alias from DB to get the correct provider
+  const now = Date.now();
+  const cached = modelAliasCache.get(alias);
+
+  if (cached && now - cached.timestamp < CACHE_TTL) {
+    return createModel({
+      alias,
+      provider: cached.provider,
+      modelId: cached.modelId,
+    });
+  }
+
   const [aliasRecord] = await db
     .select()
     .from(modelAlias)
     .where(eq(modelAlias.alias, alias))
     .limit(1);
 
-  // If model alias not found, try to use it directly as a Workers AI model
+  const provider = (aliasRecord?.provider as ProviderType) || DEFAULT_PROVIDER;
+  const modelId = aliasRecord?.modelId || alias;
+
+  modelAliasCache.set(alias, {
+    provider,
+    modelId,
+    timestamp: now,
+  });
+
   const config: ModelConfig = {
     alias,
-    provider: (aliasRecord?.provider as ProviderType) || DEFAULT_PROVIDER,
-    modelId: aliasRecord?.modelId || alias,
+    provider,
+    modelId,
   };
 
   return createModel(config);

@@ -1,0 +1,1 @@
+ALTER TABLE `agent` ADD `skip_intent_classification` integer DEFAULT false NOT NULL;

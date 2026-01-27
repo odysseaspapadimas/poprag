@@ -1,11 +1,11 @@
-import { db } from "@/db";
-import { documentChunks } from "@/db/schema";
+import { env } from "cloudflare:workers";
 import {
   MarkdownTextSplitter,
   RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
-import { env } from "cloudflare:workers";
 import { inArray, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { documentChunks } from "@/db/schema";
 
 /**
  * Default embedding model configuration
@@ -61,7 +61,10 @@ export async function generateChunks(
   const chunks = await splitter.splitText(input);
 
   // Resplit oversized chunks instead of truncating mid-sentence
-  const fallbackOverlap = Math.min(chunkOverlap, Math.floor(maxChunkSize * 0.2));
+  const fallbackOverlap = Math.min(
+    chunkOverlap,
+    Math.floor(maxChunkSize * 0.2),
+  );
   const fallbackSplitter = new RecursiveCharacterTextSplitter({
     chunkSize: maxChunkSize,
     chunkOverlap: fallbackOverlap,
@@ -163,7 +166,9 @@ export async function generateEmbedding(value: string): Promise<number[]> {
  * Generate embeddings for multiple inputs in a single batch
  * Used for query variations and bulk operations
  */
-export async function generateEmbeddings(values: string[]): Promise<number[][]> {
+export async function generateEmbeddings(
+  values: string[],
+): Promise<number[][]> {
   const inputs = values.map((value) => value.replaceAll("\n", " ").trim());
 
   if (inputs.length === 0) {
@@ -262,7 +267,7 @@ export async function findRelevantContentWithEmbedding(
 
     const results = await env.VECTORIZE.query(queryEmbedding, {
       namespace: agentId, // Agent-based isolation
-      topK: 5,
+      topK,
       returnValues: false, // We don't need the vectors back
       returnMetadata: "all", // Get all metadata including text
     });
@@ -275,9 +280,7 @@ export async function findRelevantContentWithEmbedding(
       console.warn(
         `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`,
       );
-      console.warn(
-        `[RAG] Query was: "${cleanedQuery.substring(0, 100)}..."`,
-      );
+      console.warn(`[RAG] Query was: "${cleanedQuery.substring(0, 100)}..."`);
       return {
         matches: [],
         query,
@@ -467,7 +470,7 @@ export async function searchDocumentChunksFTS(
 					JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
 					WHERE document_chunks_fts MATCH ${sanitizedTerm}
 					  AND document_chunks.agent_id = ${agentId}
-					ORDER BY rank DESC
+          ORDER BY rank ASC
 					LIMIT ${limit}
 				`;
       })

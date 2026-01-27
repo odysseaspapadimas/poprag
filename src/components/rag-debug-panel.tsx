@@ -1,24 +1,25 @@
+import {
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Copy,
+  Cpu,
+  FileText,
+  Search,
+} from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-    BarChart3,
-    ChevronDown,
-    ChevronUp,
-    Clock,
-    Copy,
-    Cpu,
-    FileText,
-    Search,
-} from "lucide-react";
-import { useState } from "react";
 
 interface RAGDebugInfo {
   enabled: boolean;
+  contextualEmbeddingsEnabled?: boolean;
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
@@ -336,6 +337,16 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             </div>
+            {debugInfo.contextualEmbeddingsEnabled !== undefined && (
+              <div className="pl-6">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">
+                    Contextual Embeddings:{" "}
+                    {debugInfo.contextualEmbeddingsEnabled ? "On" : "Off"}
+                  </Badge>
+                </div>
+              </div>
+            )}
             {debugInfo.rerankEnabled && (
               <div className="pl-6">
                 <div className="flex items-center gap-2">
@@ -542,18 +553,35 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                           <div className="flex items-center gap-2 flex-wrap">
                             {chunk.rerankScore !== undefined ? (
                               <>
-                                <Badge className={getRerankScoreColor(chunk.rerankScore)}>
+                                <Badge
+                                  className={getRerankScoreColor(
+                                    chunk.rerankScore,
+                                  )}
+                                >
                                   Rerank: {formatScore(chunk.rerankScore)}
                                 </Badge>
                                 {chunk.vectorScore !== undefined && (
-                                  <Badge className={getVectorScoreColor(chunk.vectorScore)}>
+                                  <Badge
+                                    className={getVectorScoreColor(
+                                      chunk.vectorScore,
+                                    )}
+                                  >
                                     Vector: {formatScore(chunk.vectorScore)}
                                   </Badge>
                                 )}
                               </>
                             ) : (
-                              <Badge className={chunk.vectorScore !== undefined ? getVectorScoreColor(chunk.vectorScore) : getVectorScoreColor(chunk.score)}>
-                                {chunk.vectorScore !== undefined ? 'Vector' : 'Score'}: {formatScore(chunk.score)}
+                              <Badge
+                                className={
+                                  chunk.vectorScore !== undefined
+                                    ? getVectorScoreColor(chunk.vectorScore)
+                                    : getVectorScoreColor(chunk.score)
+                                }
+                              >
+                                {chunk.vectorScore !== undefined
+                                  ? "Vector"
+                                  : "Score"}
+                                : {formatScore(chunk.score)}
                               </Badge>
                             )}
                             <span className="text-xs text-muted-foreground">

@@ -1,3 +1,10 @@
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -10,13 +17,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTRPC } from "@/integrations/trpc/react";
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
 
 interface ModelPolicyEditorProps {
   agentId: string;
@@ -156,16 +156,17 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
           max={32000}
           step={1}
           placeholder="4096"
-          value={formState.maxTokens ?? ''}
+          value={formState.maxTokens ?? ""}
           onChange={(e) =>
-            setFormState({ 
-              ...formState, 
-              maxTokens: e.target.value ? Number(e.target.value) : null 
+            setFormState({
+              ...formState,
+              maxTokens: e.target.value ? Number(e.target.value) : null,
             })
           }
         />
         <p className="text-sm text-muted-foreground mt-1">
-          Maximum tokens for a single response. Default: 4096. Does not affect conversation context length.
+          Maximum tokens for a single response. Default: 4096. Does not affect
+          conversation context length.
         </p>
       </Field>
 

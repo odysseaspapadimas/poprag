@@ -1,12 +1,14 @@
+import { eq } from "drizzle-orm";
+import { ulid } from "ulidx";
 import { db } from "@/db";
 import {
+  agent,
   documentChunks,
   type InsertKnowledgeSource,
   knowledgeSource,
 } from "@/db/schema";
+import { DEFAULT_MODELS } from "@/lib/ai/constants";
 import { generateChunks } from "@/lib/ai/embedding";
-import { eq } from "drizzle-orm";
-import { ulid } from "ulidx";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -17,6 +19,92 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
     out.push(arr.slice(i, i + size));
   }
   return out;
+}
+
+const VECTORIZE_DELETE_BATCH_SIZE = 100;
+const DEFAULT_RETRY_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 400;
+
+function isRetryableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("terminated") ||
+    message.includes("abort") ||
+    message.includes("aborted") ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("socket")
+  );
+}
+
+function assertNotAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    const abortError = new Error("Request aborted");
+    abortError.name = "AbortError";
+    throw abortError;
+  }
+}
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  options?: {
+    retries?: number;
+    baseDelayMs?: number;
+    label?: string;
+    abortSignal?: AbortSignal;
+  },
+): Promise<T> {
+  const retries = options?.retries ?? DEFAULT_RETRY_ATTEMPTS;
+  const baseDelayMs = options?.baseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    assertNotAborted(options?.abortSignal);
+
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableError(error) || attempt >= retries) {
+        throw error;
+      }
+
+      const backoff =
+        baseDelayMs * 2 ** attempt + Math.floor(Math.random() * 100);
+      console.warn(
+        `[Ingestion] ${options?.label ?? "operation"} failed (attempt ${
+          attempt + 1
+        }/${retries + 1}). Retrying in ${backoff}ms...`,
+        error,
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
+  }
+
+  throw new Error("Retry attempts exhausted");
+}
+
+export async function deleteVectorizeIds(
+  vectorize: {
+    deleteByIds: (ids: string[]) => Promise<{ mutationId: string }>;
+  },
+  ids: string[],
+  options?: {
+    namespace?: string;
+    logPrefix?: string;
+  },
+): Promise<void> {
+  const batches = chunkArray(ids, VECTORIZE_DELETE_BATCH_SIZE);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    if (batch.length === 0) continue;
+
+    const deleteResult = await vectorize.deleteByIds(batch);
+    console.log(
+      `${options?.logPrefix ?? "Vectorize"} deleted batch ${i + 1}/${batches.length} (${batch.length} ids)` +
+        (options?.namespace ? ` in namespace ${options.namespace}` : "") +
+        `, mutationId: ${deleteResult.mutationId}`,
+    );
+  }
 }
 
 /**
@@ -78,6 +166,58 @@ export interface ParsedDocument {
     text: string;
     metadata: Record<string, unknown>;
   }>;
+}
+
+const CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS = 8000;
+const CONTEXTUAL_EMBEDDINGS_MAX_OUTPUT_TOKENS = 120;
+
+async function generateContextualEmbeddingText(
+  documentText: string,
+  chunkText: string,
+  modelId: keyof AiModels,
+  abortSignal?: AbortSignal,
+): Promise<{
+  contextualizedText: string;
+  contextLength: number;
+  truncatedDocument: boolean;
+  durationMs: number;
+}> {
+  const { env } = await import("cloudflare:workers");
+  const startTime = Date.now();
+  const trimmedDocument = documentText.trim();
+  assertNotAborted(abortSignal);
+
+  let docForContext = trimmedDocument;
+  let truncatedDocument = false;
+  if (docForContext.length > CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS) {
+    docForContext = `${docForContext.slice(0, CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS)}\n\n[...truncated...]`;
+    truncatedDocument = true;
+  }
+
+  const prompt = `<document>\n${docForContext}\n</document>\nHere is the chunk we want to situate within the whole document:\n<chunk>\n${chunkText}\n</chunk>\nPlease give a short, succinct context (1-2 sentences) to situate this chunk within the overall document for retrieval. Answer only with the context and nothing else.`;
+
+  const response = (await withRetry(
+    () =>
+      env.AI.run(modelId, {
+        prompt,
+        max_tokens: CONTEXTUAL_EMBEDDINGS_MAX_OUTPUT_TOKENS,
+        temperature: 0,
+      }),
+    {
+      label: "contextual embedding",
+      abortSignal,
+    },
+  )) as { response?: string };
+
+  const context = response.response?.trim() || "";
+  const contextualizedText = context ? `${context}\n\n${chunkText}` : chunkText;
+
+  return {
+    contextualizedText,
+    contextLength: context.length,
+    truncatedDocument,
+    durationMs: Date.now() - startTime,
+  };
 }
 
 /**
@@ -231,6 +371,7 @@ export async function processKnowledgeSource(
     embeddingDimensions?: number;
     chunkSize?: number;
     streamResponse?: StreamResponseCallback;
+    abortSignal?: AbortSignal;
   },
 ) {
   // Get source from database
@@ -244,7 +385,19 @@ export async function processKnowledgeSource(
     throw new Error(`Knowledge source ${sourceId} not found`);
   }
 
+  const [agentData] = await db
+    .select()
+    .from(agent)
+    .where(eq(agent.id, source.agentId))
+    .limit(1);
+
+  const contextualEmbeddingsEnabled =
+    agentData?.contextualEmbeddingsEnabled ?? false;
+  const contextualEmbeddingModel =
+    DEFAULT_MODELS.CONTEXTUAL_EMBEDDING as keyof AiModels;
+
   const streamResponse = options?.streamResponse || (async () => {});
+  const abortSignal = options?.abortSignal;
 
   try {
     // Update status to parsing
@@ -253,6 +406,7 @@ export async function processKnowledgeSource(
       .set({ status: "parsed", updatedAt: new Date() })
       .where(eq(knowledgeSource.id, sourceId));
 
+    assertNotAborted(abortSignal);
     // Parse document
     const parsed = await parseDocument(
       content,
@@ -267,6 +421,7 @@ export async function processKnowledgeSource(
     const contentType =
       parsed.metadata.type === "markdown" ? "markdown" : "text";
 
+    assertNotAborted(abortSignal);
     const chunks = await generateChunks(parsed.content, {
       chunkSize: options?.chunkSize || 1024,
       chunkOverlap: 200,
@@ -284,17 +439,72 @@ export async function processKnowledgeSource(
     const vectorizeIds: string[] = [];
     const { env } = await import("cloudflare:workers");
     let processedChunks = 0;
+    let contextualizedChunks = 0;
+    let totalContextualizationMs = 0;
 
     // Process each batch
     for (let batchIdx = 0; batchIdx < chunkBatches.length; batchIdx++) {
       const batch = chunkBatches[batchIdx];
+      assertNotAborted(abortSignal);
+
+      let embeddingInputs = batch;
+      let contextualizationDetails: Array<{
+        contextLength: number;
+        truncatedDocument: boolean;
+        durationMs: number;
+      }> = [];
+
+      if (contextualEmbeddingsEnabled) {
+        const contextualized = await Promise.all(
+          batch.map(async (chunk) => {
+            try {
+              return await generateContextualEmbeddingText(
+                parsed.content,
+                chunk,
+                contextualEmbeddingModel,
+                abortSignal,
+              );
+            } catch (error) {
+              console.warn(
+                "[Ingestion] Contextualization failed, using raw chunk:",
+                error,
+              );
+              return {
+                contextualizedText: chunk,
+                contextLength: 0,
+                truncatedDocument: false,
+                durationMs: 0,
+              };
+            }
+          }),
+        );
+
+        embeddingInputs = contextualized.map((item) => item.contextualizedText);
+        contextualizationDetails = contextualized.map((item) => ({
+          contextLength: item.contextLength,
+          truncatedDocument: item.truncatedDocument,
+          durationMs: item.durationMs,
+        }));
+
+        contextualizedChunks += contextualized.filter(
+          (item) => item.contextLength > 0,
+        ).length;
+        totalContextualizationMs += contextualized.reduce(
+          (sum, item) => sum + item.durationMs,
+          0,
+        );
+      }
 
       // Generate embeddings for this batch using Workers AI BGE model
       const startTime = Date.now();
-      const embeddingResult: { data: number[][] } = (await env.AI.run(
-        "@cf/baai/bge-large-en-v1.5",
+      const embeddingResult: { data: number[][] } = (await withRetry(
+        () =>
+          env.AI.run("@cf/baai/bge-large-en-v1.5", {
+            text: embeddingInputs,
+          }),
         {
-          text: batch,
+          label: `embedding batch ${batchIdx + 1}`,
+          abortSignal,
         },
       )) as { data: number[][] };
       const embeddingBatch: number[][] = embeddingResult.data;
@@ -327,20 +537,38 @@ export async function processKnowledgeSource(
 
       // Insert vectors into VECTORIZE_INDEX with proper metadata
       const vectorizeStartTime = Date.now();
-      await env.VECTORIZE.insert(
-        embeddingBatch.map((embedding, index) => ({
-          id: chunkIds[index],
-          values: embedding,
-          namespace: source.agentId, // Use agentId for namespace isolation
-          metadata: {
-            sessionId: source.agentId,
-            documentId: source.id,
-            sourceId: source.id,
-            chunkId: chunkIds[index],
-            fileName: source.fileName || "Unknown source",
-            text: batch[index],
-          },
-        })),
+      await withRetry(
+        () =>
+          env.VECTORIZE.insert(
+            embeddingBatch.map((embedding, index) => ({
+              id: chunkIds[index],
+              values: embedding,
+              namespace: source.agentId, // Use agentId for namespace isolation
+              metadata: {
+                sessionId: source.agentId,
+                documentId: source.id,
+                sourceId: source.id,
+                chunkId: chunkIds[index],
+                fileName: source.fileName || "Unknown source",
+                text: batch[index],
+                contextualized: contextualEmbeddingsEnabled,
+                ...(contextualEmbeddingsEnabled &&
+                contextualizationDetails[index]
+                  ? {
+                      contextualModel: contextualEmbeddingModel,
+                      contextualSummaryLength:
+                        contextualizationDetails[index].contextLength,
+                      contextualDocTruncated:
+                        contextualizationDetails[index].truncatedDocument,
+                    }
+                  : {}),
+              },
+            })),
+          ),
+        {
+          label: `vectorize insert batch ${batchIdx + 1}`,
+          abortSignal,
+        },
       );
       const vectorizeTime = Date.now() - vectorizeStartTime;
 
@@ -353,6 +581,10 @@ export async function processKnowledgeSource(
       await streamResponse({
         message: `Embedding... (${progressPercent.toFixed(1)}%)`,
         progress: progressPercent,
+        contextualEmbeddingsEnabled,
+        contextualizationMs: contextualEmbeddingsEnabled
+          ? totalContextualizationMs
+          : 0,
       });
 
       console.log(
@@ -382,6 +614,11 @@ export async function processKnowledgeSource(
       message: "Inserted vectors into database",
       chunksProcessed: processedChunks,
       vectorsInserted: vectorizeIds.length,
+      contextualEmbeddingsEnabled,
+      contextualizedChunks,
+      contextualizationMs: contextualEmbeddingsEnabled
+        ? totalContextualizationMs
+        : 0,
     });
 
     return {
@@ -453,10 +690,10 @@ export async function deleteKnowledgeSource(sourceId: string): Promise<void> {
     const { env } = await import("cloudflare:workers");
     try {
       // Delete vectors from agent's namespace
-      const deleteResult = await env.VECTORIZE.deleteByIds(source.vectorizeIds);
-      console.log(
-        `Initiated deletion of ${source.vectorizeIds.length} vectors from Vectorize namespace: ${source.agentId}, mutationId: ${deleteResult.mutationId}`,
-      );
+      await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
+        namespace: source.agentId,
+        logPrefix: "Vectorize",
+      });
     } catch (error) {
       console.error("Failed to delete vectors from Vectorize:", error);
       // Continue with deletion even if Vectorize fails

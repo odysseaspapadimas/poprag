@@ -1,3 +1,10 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { z } from "zod";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,13 +46,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { Agent } from "@/db/schema";
 import { useTRPC } from "@/integrations/trpc/react";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
-import { z } from "zod";
 
 const editAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -216,8 +216,8 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                     </SelectContent>
                   </Select>
                   <FormDescription>
-                    Draft agents are not available for use. Archived agents
-                    are hidden but can be restored.
+                    Draft agents are not available for use. Archived agents are
+                    hidden but can be restored.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -245,8 +245,8 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                     </SelectContent>
                   </Select>
                   <FormDescription>
-                    Private: Only you can see this agent. Workspace: Visible
-                    to your team. Public: Anyone can see this agent.
+                    Private: Only you can see this agent. Workspace: Visible to
+                    your team. Public: Anyone can see this agent.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -303,8 +303,8 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                         </AlertDialogTitle>
                         <AlertDialogDescription>
                           Are you sure you want to permanently delete this
-                          agent? This action cannot be undone and all
-                          associated data will be lost.
+                          agent? This action cannot be undone and all associated
+                          data will be lost.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

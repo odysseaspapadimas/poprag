@@ -231,6 +231,7 @@ export const knowledgeRouter = createTRPCRouter({
         const result = await processKnowledgeSource(input.sourceId, content, {
           embeddingModel: "text-embedding-3-small",
           embeddingDimensions: 1536,
+          abortSignal: ctx.request.signal,
         });
 
         // Update source status to indexed
@@ -403,10 +404,11 @@ export const knowledgeRouter = createTRPCRouter({
         // Delete old vectors from Vectorize if they exist
         if (source.vectorizeIds && source.vectorizeIds.length > 0) {
           try {
-            await env.VECTORIZE.deleteByIds(source.vectorizeIds);
-            console.log(
-              `Deleted ${source.vectorizeIds.length} old vectors for source ${input.sourceId}`,
-            );
+            const { deleteVectorizeIds } = await import("@/lib/ai/ingestion");
+            await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
+              namespace: source.agentId,
+              logPrefix: "Vectorize",
+            });
           } catch (error) {
             console.error("Failed to delete old vectors:", error);
             // Continue anyway - will create duplicates but at least new chunks will be there
@@ -424,7 +426,9 @@ export const knowledgeRouter = createTRPCRouter({
           .where(eq(knowledgeSource.id, input.sourceId));
 
         // Reprocess with new chunking strategy
-        await processKnowledgeSource(input.sourceId, content);
+        await processKnowledgeSource(input.sourceId, content, {
+          abortSignal: ctx.request.signal,
+        });
 
         // Audit log
         await audit(

@@ -7,11 +7,11 @@
  * - Result fusion and reranking
  */
 
-import { db } from "@/db";
-import { documentChunks, knowledgeSource } from "@/db/schema";
 import type { LanguageModel } from "ai";
 import { generateText } from "ai";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { db } from "@/db";
+import { documentChunks, knowledgeSource } from "@/db/schema";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -28,6 +28,8 @@ import { resolveAndCreateModel } from "./helpers";
 
 export interface RAGConfig {
   enabled: boolean;
+  contextualEmbeddingsEnabled?: boolean;
+  skipIntentClassification?: boolean;
   rewriteQuery: boolean;
   rewriteModel?: string;
   intentModel?: string;
@@ -35,11 +37,12 @@ export interface RAGConfig {
   rerank: boolean;
   rerankModel?: string;
   topK?: number;
-  minSimilarity?: number; // Percentage 0-100
+  minSimilarity?: number;
 }
 
 export interface RAGDebugInfo {
   enabled: boolean;
+  contextualEmbeddingsEnabled?: boolean;
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
@@ -133,8 +136,8 @@ User message: "${query}"
 
 Respond ONLY with valid JSON in this exact format:
 {"requiresRAG": true/false, "reason": "your explanation"}`,
-  temperature: 0,
-  maxOutputTokens: 120,
+      temperature: 0,
+      maxOutputTokens: 120,
     });
 
     // Parse JSON response
@@ -286,10 +289,15 @@ export async function hybridSearch(
   const vectorSearchStart = Date.now();
   const queryEmbeddings = await generateEmbeddings(cleanedQueries);
   const vectorSearchPromises = queryEmbeddings.map((embedding, index) =>
-    findRelevantContentWithEmbedding(cleanedQueries[index], embedding, agentId, {
-      topK: topKPerQuery,
-      minSimilarity: minSimilarity / 100, // Convert percentage to 0-1
-    }),
+    findRelevantContentWithEmbedding(
+      cleanedQueries[index],
+      embedding,
+      agentId,
+      {
+        topK: topKPerQuery,
+        minSimilarity: minSimilarity / 100, // Convert percentage to 0-1
+      },
+    ),
   );
 
   const vectorResults = await Promise.all(vectorSearchPromises);
@@ -332,9 +340,8 @@ export async function hybridSearch(
       console.log(
         `[Hybrid Search] FTS search: ${ftsResults.length} results in ${ftsSearchMs}ms`,
       );
-    } catch (error) {
+    } catch (_error) {
       ftsSearchMs = Date.now() - ftsSearchStart;
-      // FTS failure is logged in searchDocumentChunksFTS
       console.warn("[Hybrid Search] FTS unavailable, using vector search only");
     }
 
@@ -361,7 +368,7 @@ export async function hybridSearch(
   // reciprocalRankFusion only uses id and score, vectorScore is preserved through the process
   const fusedResults = reciprocalRankFusion(
     allResultSets as Array<Array<{ id: string; score: number }>>,
-    RAG_CONFIG.RRF_K
+    RAG_CONFIG.RRF_K,
   ) as HybridSearchResult[];
 
   // Return more candidates for reranking (2x topK instead of 3x for speed)
@@ -397,9 +404,7 @@ export async function rerankResults(
   );
 
   // Create a map to preserve original vector scores
-  const vectorScoreMap = new Map(
-    candidates.map((c) => [c.id, c.vectorScore])
-  );
+  const vectorScoreMap = new Map(candidates.map((c) => [c.id, c.vectorScore]));
 
   const reranked = await rerank(
     query,
@@ -440,6 +445,7 @@ export async function performRAGRetrieval(
   const ragStartTime = Date.now();
   const debugInfo: RAGDebugInfo = {
     enabled: config.enabled,
+    contextualEmbeddingsEnabled: config.contextualEmbeddingsEnabled ?? false,
     timing: {},
     models: {},
   };
@@ -456,70 +462,96 @@ export async function performRAGRetrieval(
 
   debugInfo.originalQuery = userQuery;
 
-  // Step 1 & 2: Run intent classification and query rewriting in PARALLEL for speed
-  const intentModelId =
-    config.intentModel || DEFAULT_MODELS.INTENT_CLASSIFICATION;
   const rewriteModelId = config.rewriteModel || DEFAULT_MODELS.QUERY_REWRITE;
   const variationsCount = config.queryVariationsCount || 3;
 
-  // Record model info
-  debugInfo.models!.intentModel = intentModelId;
-  if (config.rewriteQuery) {
-    debugInfo.models!.rewriteModel = rewriteModelId;
-  }
+  let queries = [userQuery];
+  let keywords: string[] = [];
 
-  // Prepare parallel tasks with timing
-  const intentStart = Date.now();
-  const intentPromise = resolveAndCreateModel(intentModelId).then((model) =>
-    classifyQueryIntent(model, userQuery),
-  );
+  if (config.skipIntentClassification) {
+    console.log("[RAG Pipeline] Intent classification skipped by config");
+    debugInfo.skippedByIntent = false;
 
-  const rewriteStart = Date.now();
-  const rewritePromise = config.rewriteQuery
-    ? resolveAndCreateModel(rewriteModelId).then((model) =>
-        rewriteQuery(model, userQuery, variationsCount),
-      )
-    : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
-
-  // Execute in parallel and track timings
-  const [intentResult, rewriteResult] = await Promise.all([
-    intentPromise.then((result) => {
-      debugInfo.timing!.intentClassificationMs = Date.now() - intentStart;
-      return result;
-    }),
-    rewritePromise.then((result) => {
-      if (config.rewriteQuery) {
-        debugInfo.timing!.queryRewriteMs = Date.now() - rewriteStart;
-      }
-      return result;
-    }),
-  ]);
-
-  // Check intent result - if RAG not needed, skip (rewrite result is discarded)
-  if (!intentResult.requiresRAG) {
-    console.log(
-      `[RAG Pipeline] Skipping RAG - query classified as not requiring knowledge: ${intentResult.reason}`,
-    );
-    debugInfo.skippedByIntent = true;
-    debugInfo.intentReason = intentResult.reason;
-    debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
-    return { context: null, debugInfo };
-  }
-
-  // Use rewrite results
-  const queries = rewriteResult.queries;
-  const keywords = rewriteResult.keywords;
-
-  if (config.rewriteQuery) {
-    debugInfo.rewrittenQueries = queries;
-    debugInfo.keywords = keywords;
-    console.log(
-      `[RAG Pipeline] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`,
-    );
+    if (config.rewriteQuery) {
+      debugInfo.models!.rewriteModel = rewriteModelId;
+      const rewriteStart = Date.now();
+      const model = await resolveAndCreateModel(rewriteModelId);
+      const rewriteResult = await rewriteQuery(
+        model,
+        userQuery,
+        variationsCount,
+      );
+      debugInfo.timing!.queryRewriteMs = Date.now() - rewriteStart;
+      queries = rewriteResult.queries;
+      keywords = rewriteResult.keywords;
+      debugInfo.rewrittenQueries = queries;
+      debugInfo.keywords = keywords;
+      console.log(
+        `[RAG Pipeline] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`,
+      );
+    } else {
+      console.log(
+        "[RAG Pipeline] Query rewriting disabled, using original query",
+      );
+    }
   } else {
-    console.log(
-      "[RAG Pipeline] Query rewriting disabled, using original query",
+    const intentModelId =
+      config.intentModel || DEFAULT_MODELS.INTENT_CLASSIFICATION;
+
+    debugInfo.models!.intentModel = intentModelId;
+    if (config.rewriteQuery) {
+      debugInfo.models!.rewriteModel = rewriteModelId;
+    }
+
+    const intentStart = Date.now();
+    const intentPromise = resolveAndCreateModel(intentModelId).then((model) =>
+      classifyQueryIntent(model, userQuery),
     );
+
+    const rewriteStart = Date.now();
+    const rewritePromise = config.rewriteQuery
+      ? resolveAndCreateModel(rewriteModelId).then((model) =>
+          rewriteQuery(model, userQuery, variationsCount),
+        )
+      : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
+
+    const [intentResult, rewriteResult] = await Promise.all([
+      intentPromise.then((result) => {
+        debugInfo.timing!.intentClassificationMs = Date.now() - intentStart;
+        return result;
+      }),
+      rewritePromise.then((result) => {
+        if (config.rewriteQuery) {
+          debugInfo.timing!.queryRewriteMs = Date.now() - rewriteStart;
+        }
+        return result;
+      }),
+    ]);
+
+    if (!intentResult.requiresRAG) {
+      console.log(
+        `[RAG Pipeline] Skipping RAG - query classified as not requiring knowledge: ${intentResult.reason}`,
+      );
+      debugInfo.skippedByIntent = true;
+      debugInfo.intentReason = intentResult.reason;
+      debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
+      return { context: null, debugInfo };
+    }
+
+    queries = rewriteResult.queries;
+    keywords = rewriteResult.keywords;
+
+    if (config.rewriteQuery) {
+      debugInfo.rewrittenQueries = queries;
+      debugInfo.keywords = keywords;
+      console.log(
+        `[RAG Pipeline] Query rewritten into ${queries.length} variations with ${keywords.length} keywords`,
+      );
+    } else {
+      console.log(
+        "[RAG Pipeline] Query rewriting disabled, using original query",
+      );
+    }
   }
 
   // Step 3: Hybrid search
@@ -652,9 +684,7 @@ async function enrichWithFullText(
       .where(inArray(knowledgeSource.id, sourceIds));
 
     const sourceMap = new Map(sources.map((s) => [s.id, s.fileName]));
-    const dbChunkMap = new Map(
-      dbChunks.map((c) => [c.id, c]),
-    );
+    const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c]));
 
     let replacedCount = 0;
     const enrichedMatches = matches.map((match) => {
@@ -712,7 +742,8 @@ async function expandWithNeighborChunks(
   topK: number,
 ): Promise<HybridSearchResult[]> {
   const baseMatches = matches.filter(
-    (match) => match.metadata?.sourceId && match.metadata?.chunkIndex !== undefined,
+    (match) =>
+      match.metadata?.sourceId && match.metadata?.chunkIndex !== undefined,
   );
 
   if (baseMatches.length === 0) return matches;

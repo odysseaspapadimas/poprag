@@ -9,6 +9,10 @@
  * - image-service.ts: Image fetching and processing
  */
 
+import type { StepResult, ToolSet, UIMessage } from "ai";
+import { convertToModelMessages, streamText } from "ai";
+import { and, desc, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
   type Agent,
@@ -22,10 +26,6 @@ import {
 } from "@/db/schema";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
-import type { StepResult, ToolSet, UIMessage } from "ai";
-import { convertToModelMessages, streamText } from "ai";
-import { and, desc, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
 
 // Import refactored modules
 import type { ModelCapabilities } from "./helpers";
@@ -83,6 +83,9 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     const userQuery = extractUserQuery(request);
     const ragConfig: RAGConfig = {
       enabled: agentData.ragEnabled,
+      contextualEmbeddingsEnabled:
+        agentData.contextualEmbeddingsEnabled ?? false,
+      skipIntentClassification: agentData.skipIntentClassification ?? false,
       rewriteQuery: agentData.rewriteQuery,
       rewriteModel: agentData.rewriteModel || undefined,
       intentModel: agentData.intentModel || undefined,

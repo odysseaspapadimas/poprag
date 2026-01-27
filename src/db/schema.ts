@@ -143,16 +143,26 @@ export const agent = sqliteTable(
     ragEnabled: integer("rag_enabled", { mode: "boolean" })
       .default(true)
       .notNull(),
+    contextualEmbeddingsEnabled: integer("contextual_embeddings_enabled", {
+      mode: "boolean",
+    })
+      .default(false)
+      .notNull(),
     rewriteQuery: integer("rewrite_query", { mode: "boolean" })
       .default(true)
       .notNull(),
     rewriteModel: text("rewrite_model"),
+    skipIntentClassification: integer("skip_intent_classification", {
+      mode: "boolean",
+    })
+      .default(false)
+      .notNull(),
     intentModel: text("intent_model"),
     queryVariationsCount: integer("query_variations_count").default(3),
     rerank: integer("rerank", { mode: "boolean" }).default(true).notNull(),
     rerankModel: text("rerank_model"),
     topK: integer("top_k").default(5),
-    minSimilarity: integer("min_similarity").default(30), // Stored as percentage (30 = 0.3)
+    minSimilarity: integer("min_similarity").default(30),
   },
   (table) => [
     index("agent_slug_idx").on(table.slug),

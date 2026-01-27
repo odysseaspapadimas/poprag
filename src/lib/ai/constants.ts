@@ -9,16 +9,19 @@
  */
 export const DEFAULT_MODELS = {
   /** Model used for intent classification (determining if RAG is needed) */
-  INTENT_CLASSIFICATION: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  INTENT_CLASSIFICATION: "@cf/meta/llama-3.1-8b-instruct-fast",
 
   /** Model used for query rewriting to improve search coverage */
-  QUERY_REWRITE: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  QUERY_REWRITE: "@cf/meta/llama-3.1-8b-instruct-fast",
 
   /** Embedding model for vector search (1024 dimensions) */
   EMBEDDING: "@cf/baai/bge-large-en-v1.5",
 
   /** Cross-encoder model for reranking search results */
   RERANKER: "@cf/baai/bge-reranker-base",
+
+  /** Model used to generate contextual embeddings during ingestion */
+  CONTEXTUAL_EMBEDDING: "@cf/meta/llama-3.1-8b-instruct-fast",
 } as const;
 
 /**

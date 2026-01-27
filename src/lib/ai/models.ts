@@ -27,8 +27,8 @@ export function createModel(config: ModelConfig): LanguageModel {
   const aigateway =
     env.AI_GATEWAY_ID && env.AI
       ? createAiGateway({
-        binding: env.AI.gateway(env.AI_GATEWAY_ID),
-      })
+          binding: env.AI.gateway(env.AI_GATEWAY_ID),
+        })
       : null;
 
   switch (config.provider) {
