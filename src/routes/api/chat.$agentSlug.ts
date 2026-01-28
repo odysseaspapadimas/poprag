@@ -26,6 +26,55 @@ const chatRequestSchema = z.object({
   conversationId: z.string().optional(),
 });
 
+class BadRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
+function validateChatPayload(payload: z.infer<typeof chatRequestSchema>) {
+  if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+    throw new BadRequestError("Messages array cannot be empty.");
+  }
+
+  const lastMessage = payload.messages[payload.messages.length - 1] as
+    | { role?: string; parts?: Array<Record<string, unknown>> }
+    | undefined;
+
+  if (!lastMessage || lastMessage.role !== "user") {
+    throw new BadRequestError(
+      "Last message must be a user message. Remove empty assistant placeholders.",
+    );
+  }
+
+  const parts = Array.isArray(lastMessage.parts) ? lastMessage.parts : [];
+  const hasText = parts.some(
+    (part) =>
+      part?.type === "text" &&
+      typeof part.text === "string" &&
+      part.text.trim().length > 0,
+  );
+  const hasImage = parts.some(
+    (part) =>
+      part?.type === "image" &&
+      typeof part.image === "string" &&
+      part.image.length > 0,
+  );
+  const queryOverride =
+    typeof payload.rag?.query === "string" ? payload.rag.query.trim() : "";
+
+  if (payload.rag?.query !== undefined && queryOverride.length === 0) {
+    throw new BadRequestError("rag.query must be a non-empty string.");
+  }
+
+  if (!hasText && !hasImage && queryOverride.length === 0) {
+    throw new BadRequestError(
+      "Last user message must include text or image, or provide rag.query.",
+    );
+  }
+}
+
 export const Route = createFileRoute("/api/chat/$agentSlug")({
   server: {
     handlers: {
@@ -53,6 +102,9 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
         try {
           const body = await request.json();
           const validated = chatRequestSchema.parse(body);
+
+          console.log("[Chat API] Request payload:", validated);
+          validateChatPayload(validated);
 
           // Access Cloudflare Workers environment
           const { env } = await import("cloudflare:workers");
@@ -83,6 +135,21 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
               JSON.stringify({
                 error: "Invalid request",
                 details: error.issues,
+              }),
+              {
+                status: 400,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...corsHeaders,
+                },
+              },
+            );
+          }
+
+          if (error instanceof BadRequestError) {
+            return new Response(
+              JSON.stringify({
+                error: error.message,
               }),
               {
                 status: 400,

@@ -364,6 +364,11 @@ class ChatRequest {
   }
 }
 
+// Note:
+// Only these fields are accepted by the current API: messages, conversationId,
+// modelAlias, variables, rag. Fields like `id`, `trigger`, or `requestTags`
+// are ignored by the server.
+
 /// Stream finish event
 class StreamFinishEvent {
   final String finishReason;
@@ -1857,6 +1862,44 @@ await for (final chunk in _client.sendMessage(text)) { // ✅
   print(chunk);
 }
 ```
+
+### Generic Responses (RAG Not Applied)
+
+If you receive generic responses instead of knowledge-based answers, check these:
+
+1. **Last message must be a user message**
+   If you send an empty assistant placeholder at the end of `messages`, the
+   server will extract an empty query and RAG won’t run.
+
+   ✅ Good payload: last item is the user message you want answered
+   ❌ Bad payload: last item is an assistant message with empty text
+
+2. **Avoid extra fields**
+   Fields like `id`, `trigger`, or `requestTags` are ignored. Use `conversationId`.
+
+3. **Force retrieval when needed**
+   Provide `rag.query` to bypass query extraction:
+
+   ```dart
+   final request = ChatRequest(
+     messages: messages,
+     conversationId: conversationId,
+     rag: const RAGConfig(
+       topK: 6,
+       query: 'πως να φτιαξω εναν καφε;',
+     ),
+   );
+   ```
+
+4. **Local vs production data**
+   `http://localhost:3000` uses your local D1/Vectorize. If the agent or
+   knowledge isn’t seeded locally, retrieval returns nothing.
+
+5. **Agent configuration**
+   Ensure the agent has:
+   - `ragEnabled = true`
+   - a `prod` system prompt version
+   - knowledge chunks indexed for that agent
 
 ### UI Not Updating
 ```dart
