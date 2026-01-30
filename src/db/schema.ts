@@ -411,6 +411,7 @@ export const transcript = sqliteTable(
     conversationId: text("conversation_id").notNull(),
     runId: text("run_id").notNull(),
     initiatedBy: text("initiated_by").references(() => user.id),
+    firebaseUid: text("firebase_uid"), // Firebase user who made the request (external API)
     request: text("request", { mode: "json" }).$type<Record<string, unknown>>(),
     response: text("response", { mode: "json" }).$type<
       Record<string, unknown>
@@ -428,6 +429,7 @@ export const transcript = sqliteTable(
   (table) => [
     index("transcript_agent_idx").on(table.agentId),
     index("transcript_conversation_idx").on(table.conversationId),
+    index("transcript_firebase_uid_idx").on(table.firebaseUid),
   ],
 );
 
@@ -441,6 +443,7 @@ export const runMetric = sqliteTable(
     runId: text("run_id").notNull(),
     conversationId: text("conversation_id"),
     initiatedBy: text("initiated_by").references(() => user.id),
+    firebaseUid: text("firebase_uid"), // Firebase user who made the request (external API)
     modelAlias: text("model_alias"),
     promptTokens: integer("prompt_tokens"),
     completionTokens: integer("completion_tokens"),
@@ -459,6 +462,7 @@ export const runMetric = sqliteTable(
     index("run_metric_run_idx").on(table.runId),
     index("run_metric_conversation_idx").on(table.conversationId),
     index("run_metric_initiated_by_idx").on(table.initiatedBy),
+    index("run_metric_firebase_uid_idx").on(table.firebaseUid),
   ],
 );
 
@@ -533,3 +537,36 @@ export type InsertRunMetric = typeof runMetric.$inferInsert;
 
 export type ChatImage = typeof chatImage.$inferSelect;
 export type InsertChatImage = typeof chatImage.$inferInsert;
+
+// ─────────────────────────────────────────────────────
+// Firebase User (for external API authentication)
+// ─────────────────────────────────────────────────────
+
+export const firebaseUser = sqliteTable(
+  "firebase_user",
+  {
+    uid: text("uid").primaryKey(), // Firebase UID
+    email: text("email"),
+    displayName: text("display_name"),
+    photoUrl: text("photo_url"),
+    signInProvider: text("sign_in_provider"), // google.com, password, etc.
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    totalRequests: integer("total_requests").default(0).notNull(),
+    // Optional: link to dashboard user for extended permissions
+    linkedUserId: text("linked_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    index("firebase_user_email_idx").on(table.email),
+    index("firebase_user_linked_user_idx").on(table.linkedUserId),
+  ],
+);
+
+export type FirebaseUser = typeof firebaseUser.$inferSelect;
+export type InsertFirebaseUser = typeof firebaseUser.$inferInsert;

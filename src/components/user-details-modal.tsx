@@ -1,3 +1,8 @@
+import { useTRPC } from "@/integrations/trpc/react";
+import {
+  firebaseTimestampToDate,
+  formatFirebaseTimestamp,
+} from "@/lib/firebase/types";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -7,11 +12,6 @@ import {
   User,
 } from "lucide-react";
 import { useState } from "react";
-import { useTRPC } from "@/integrations/trpc/react";
-import {
-  firebaseTimestampToDate,
-  formatFirebaseTimestamp,
-} from "@/lib/firebase/types";
 import { Badge } from "./ui/badge";
 import {
   Dialog,
@@ -267,14 +267,14 @@ export function UserDetailsModal({
                                                 ).getTime();
                                               return dateA - dateB;
                                             })
-                                            .map((message) => (
-                                              <div
+                                            .map((message) => {
+                                              console.log("Rendering message:", message);
+                                              return <div
                                                 key={message.id}
-                                                className={`p-3 rounded-md text-sm ${
-                                                  message.role === "user"
-                                                    ? "bg-primary/10 border-l-2 border-primary"
-                                                    : "bg-muted/50 border-l-2 border-muted-foreground"
-                                                }`}
+                                                className={`p-3 rounded-md text-sm ${message.role === "user"
+                                                  ? "bg-primary/10 border-l-2 border-primary"
+                                                  : "bg-muted/50 border-l-2 border-muted-foreground"
+                                                  }`}
                                               >
                                                 <div className="flex items-center justify-between mb-1">
                                                   <Badge
@@ -316,7 +316,7 @@ export function UserDetailsModal({
                                                   />
                                                 )}
                                               </div>
-                                            ))}
+                                            })}
                                         </div>
                                       )}
                                   </div>

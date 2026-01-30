@@ -146,26 +146,45 @@ export async function getFirebaseAdmin() {
     collection: (collectionName: string) => ({
       async get() {
         const token = await getAccessToken();
-        const response = await fetch(`${baseUrl}/${collectionName}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const allDocuments: FirestoreDocument[] = [];
+        let nextPageToken: string | undefined;
 
-        if (!response.ok) {
-          throw new Error(`Firestore API error: ${response.statusText}`);
-        }
+        // Paginate through all documents
+        do {
+          const params = new URLSearchParams();
+          params.set("pageSize", "300"); // Firestore max page size
+          if (nextPageToken) {
+            params.set("pageToken", nextPageToken);
+          }
 
-        const data: FirestoreListResponse = await response.json();
+          const url = `${baseUrl}/${collectionName}?${params.toString()}`;
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error("[Firestore] Error response:", errorText);
+            throw new Error(`Firestore API error: ${response.statusText}`);
+          }
+
+          const data: FirestoreListResponse = await response.json();
+          if (data.documents) {
+            allDocuments.push(...data.documents);
+          }
+          nextPageToken = data.nextPageToken;
+        } while (nextPageToken);
 
         return {
-          size: data.documents?.length || 0,
-          docs: (data.documents || []).map((doc) => ({
+          size: allDocuments.length,
+          docs: allDocuments.map((doc) => ({
             id: doc.name.split("/").pop() || "",
             data: () => transformFirestoreFields(doc.fields),
           })),
           forEach: (callback: (doc: any) => void) => {
-            (data.documents || []).forEach((doc) => {
+            allDocuments.forEach((doc) => {
               callback({
                 id: doc.name.split("/").pop() || "",
                 data: () => transformFirestoreFields(doc.fields),
@@ -249,7 +268,13 @@ export async function getFirebaseAdmin() {
 /**
  * Transform Firestore REST API fields to plain objects
  */
-function transformFirestoreFields(fields: Record<string, any>): any {
+function transformFirestoreFields(
+  fields: Record<string, any> | null | undefined,
+): any {
+  if (!fields) {
+    return {};
+  }
+
   const result: any = {};
 
   for (const [key, value] of Object.entries(fields)) {

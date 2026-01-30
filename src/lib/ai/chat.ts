@@ -55,6 +55,7 @@ export interface ChatRequest {
   };
   conversationId?: string;
   initiatedBy?: string;
+  firebaseUid?: string; // Firebase user ID from verified token
   languageInstruction?: string; // Explicit language instruction for Flutter app
 }
 
@@ -397,6 +398,7 @@ async function saveTranscriptAndMetrics(
     conversationId,
     runId,
     initiatedBy: request.initiatedBy ?? null,
+    firebaseUid: request.firebaseUid ?? null,
     request: {
       ...(request as unknown as Record<string, unknown>),
       conversationId,
@@ -424,6 +426,7 @@ async function saveTranscriptAndMetrics(
       runId,
       conversationId,
       initiatedBy: request.initiatedBy ?? null,
+      firebaseUid: request.firebaseUid ?? null,
       modelAlias,
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
@@ -465,6 +468,7 @@ async function saveErrorMetric(
       runId,
       conversationId: request?.conversationId ?? null,
       initiatedBy: request?.initiatedBy ?? null,
+      firebaseUid: request?.firebaseUid ?? null,
       modelAlias,
       latencyMs: latency,
       errorType: error instanceof Error ? error.name : "UnknownError",
