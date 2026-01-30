@@ -299,12 +299,16 @@
 - [ ] Latency percentiles (p50, p95, p99)
 
 ### 33. Cost Management
-**Status:** Schema has `costMicrocents`, not calculated  
+**Status:** Partially implemented  
 **Description:** Track and manage AI costs.
-- [ ] Per-agent cost tracking
+- [x] Per-agent cost tracking (stored in `runMetric.costMicrocents`)
+- [x] Cost calculation based on model capabilities from models.dev
+- [x] Cost display in agent metrics (per run, per conversation, per user)
+- [x] Cost columns in model alias table with sorting
 - [ ] Budget alerts and limits
 - [ ] Cost forecasting
 - [ ] Cost optimization recommendations
+- [ ] Cost time-series visualization
 
 ### 34. Usage Quotas
 **Status:** Not implemented  
@@ -711,7 +715,7 @@
 | Agent Management | 6 | 🟡 Partial |
 | Chat & Conversation | 9 | 🟡 Partial |
 | Auth & Authorization | 4 | 🟡 Partial |
-| Observability | 7 | 🟡 Partial |
+| Observability | 7 | 🟢 Good |
 | UI/UX | 7 | 🟡 Partial |
 | Performance | 5 | 🟢 Adequate |
 | Developer Experience | 5 | 🔴 Needs Work |
@@ -736,4 +740,4 @@ When implementing any of these features:
 
 ---
 
-*Last updated: December 2024*
+*Last updated: January 2026*
