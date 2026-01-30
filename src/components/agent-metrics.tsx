@@ -15,8 +15,26 @@ import {
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { Fragment, useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { RAGDebugPanel } from "@/components/rag-debug-panel";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -30,6 +48,24 @@ import { useTRPC } from "@/integrations/trpc/react";
 interface Props {
   agentId: string;
 }
+
+type TimePeriod = "1h" | "24h" | "7d" | "30d" | "all";
+
+const TIME_PERIODS: { value: TimePeriod; label: string }[] = [
+  { value: "1h", label: "Last hour" },
+  { value: "24h", label: "Last 24 hours" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+];
+
+const TIME_PERIOD_MS: Record<TimePeriod, number | undefined> = {
+  "1h": 60 * 60 * 1000,
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  all: undefined,
+};
 
 type RagDebugInfo = ComponentProps<typeof RAGDebugPanel>["debugInfo"];
 
@@ -160,6 +196,189 @@ const extractResponseText = (response: Record<string, unknown> | null) => {
   const text = (response as { text?: string }).text;
   return typeof text === "string" && text.trim().length > 0 ? text : null;
 };
+
+// Chart data types and helpers
+type DailyMetric = {
+  date: string;
+  dateLabel: string;
+  cost: number;
+  tokens: number;
+  runs: number;
+};
+
+function aggregateByDay(rows: RunMetricRow[]): DailyMetric[] {
+  const grouped = new Map<string, DailyMetric>();
+
+  for (const row of rows) {
+    const date = new Date(row.createdAt);
+    const dateKey = date.toISOString().split("T")[0]; // YYYY-MM-DD
+    const dateLabel = date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+
+    const existing = grouped.get(dateKey);
+    const cost = (row.costMicrocents ?? 0) / 1_000_000; // Convert to dollars
+    const tokens = getRunTotalTokens(row) ?? 0;
+
+    if (existing) {
+      existing.cost += cost;
+      existing.tokens += tokens;
+      existing.runs += 1;
+    } else {
+      grouped.set(dateKey, {
+        date: dateKey,
+        dateLabel,
+        cost,
+        tokens,
+        runs: 1,
+      });
+    }
+  }
+
+  // Sort by date ascending
+  return Array.from(grouped.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+}
+
+// Bright colors that work well on both light and dark backgrounds
+const CHART_COLORS = {
+  primary: "#6366f1", // Indigo-500 - vibrant purple/blue
+  primaryLight: "#818cf8", // Indigo-400
+  secondary: "#22d3ee", // Cyan-400
+};
+
+function CostChart({ data }: { data: DailyMetric[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+        No data to display
+      </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <AreaChart
+        data={data}
+        margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+      >
+        <defs>
+          <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop
+              offset="5%"
+              stopColor={CHART_COLORS.primary}
+              stopOpacity={0.4}
+            />
+            <stop
+              offset="95%"
+              stopColor={CHART_COLORS.primary}
+              stopOpacity={0.05}
+            />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis
+          dataKey="dateLabel"
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          className="text-muted-foreground"
+        />
+        <YAxis
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(value) => `$${value.toFixed(2)}`}
+          className="text-muted-foreground"
+          width={50}
+        />
+        <Tooltip
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const data = payload[0].payload as DailyMetric;
+            return (
+              <div className="bg-popover border rounded-lg shadow-lg p-2 text-sm">
+                <div className="font-medium">{data.dateLabel}</div>
+                <div className="text-muted-foreground">
+                  Cost: ${data.cost.toFixed(4)}
+                </div>
+                <div className="text-muted-foreground">
+                  Tokens: {data.tokens.toLocaleString()}
+                </div>
+                <div className="text-muted-foreground">Runs: {data.runs}</div>
+              </div>
+            );
+          }}
+        />
+        <Area
+          type="monotone"
+          dataKey="cost"
+          stroke={CHART_COLORS.primary}
+          fill="url(#costGradient)"
+          strokeWidth={2}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function TokensChart({ data }: { data: DailyMetric[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+        No data to display
+      </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis
+          dataKey="dateLabel"
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          className="text-muted-foreground"
+        />
+        <YAxis
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(value) =>
+            value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value
+          }
+          className="text-muted-foreground"
+          width={45}
+        />
+        <Tooltip
+          cursor={false}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const data = payload[0].payload as DailyMetric;
+            return (
+              <div className="bg-popover border rounded-lg shadow-lg p-2 text-sm">
+                <div className="font-medium">{data.dateLabel}</div>
+                <div className="text-muted-foreground">
+                  Tokens: {data.tokens.toLocaleString()}
+                </div>
+                <div className="text-muted-foreground">Runs: {data.runs}</div>
+              </div>
+            );
+          }}
+        />
+        <Bar
+          dataKey="tokens"
+          fill={CHART_COLORS.primary}
+          radius={[4, 4, 0, 0]}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
 
 function MetricsTable<T>({
   table,
@@ -406,8 +625,18 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
 
 export function AgentMetrics({ agentId }: Props) {
   const trpc = useTRPC();
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
+
+  // Compute sinceMs based on time period - "all" = undefined (matches loader prefetch)
+  const sinceMs = useMemo(() => {
+    const offsetMs = TIME_PERIOD_MS[timePeriod];
+    if (offsetMs === undefined) return undefined;
+    return Date.now() - offsetMs;
+    // Only recompute when timePeriod changes, not on every render
+  }, [timePeriod]);
+
   const { data: metrics } = useSuspenseQuery(
-    trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 200 }),
+    trpc.agent.getRunMetrics.queryOptions({ agentId, sinceMs }),
   );
 
   const rows = (metrics ?? []) as RunMetricRow[];
@@ -417,10 +646,23 @@ export function AgentMetrics({ agentId }: Props) {
     (acc, metric) => acc + (getRunTotalTokens(metric) ?? 0),
     0,
   );
+  const totalPromptTokens = rows.reduce(
+    (acc, metric) => acc + (metric.promptTokens ?? 0),
+    0,
+  );
+  const totalCompletionTokens = rows.reduce(
+    (acc, metric) => acc + (metric.completionTokens ?? 0),
+    0,
+  );
   const totalCostMicrocents = rows.reduce(
     (acc, metric) => acc + (metric.costMicrocents ?? 0),
     0,
   );
+  const runsWithCost = rows.filter(
+    (metric) => metric.costMicrocents != null && metric.costMicrocents > 0,
+  ).length;
+  const avgCostPerRun =
+    runsWithCost > 0 ? totalCostMicrocents / runsWithCost : 0;
   const latencyRows = rows.filter((metric) => metric.latencyMs != null);
   const avgLatency = latencyRows.length
     ? Math.round(
@@ -441,6 +683,9 @@ export function AgentMetrics({ agentId }: Props) {
   const errorRate = totalRuns
     ? `${((errorCount / totalRuns) * 100).toFixed(1)}%`
     : "-";
+
+  // Aggregate data by day for charts
+  const dailyData = useMemo(() => aggregateByDay(rows), [rows]);
 
   const [activeView, setActiveView] = useState<
     "runs" | "conversations" | "users"
@@ -810,7 +1055,27 @@ export function AgentMetrics({ agentId }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* Time Period Selector */}
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-sm text-muted-foreground">Time period:</span>
+        <Select
+          value={timePeriod}
+          onValueChange={(value) => setTimePeriod(value as TimePeriod)}
+        >
+          <SelectTrigger className="w-[160px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TIME_PERIODS.map((period) => (
+              <SelectItem key={period.value} value={period.value}>
+                {period.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="bg-card border rounded-lg p-4">
           <div className="text-sm text-muted-foreground">Runs</div>
           <div className="text-xl font-semibold">{totalRuns}</div>
@@ -820,11 +1085,27 @@ export function AgentMetrics({ agentId }: Props) {
           <div className="text-xl font-semibold">
             {formatNumber(totalTokens)}
           </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {formatNumber(totalPromptTokens)} in /{" "}
+            {formatNumber(totalCompletionTokens)} out
+          </div>
         </div>
         <div className="bg-card border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground">Cost (estimated)</div>
+          <div className="text-sm text-muted-foreground">Total Cost</div>
           <div className="text-xl font-semibold">
             {formatCurrency(totalCostMicrocents)}
+          </div>
+          {runsWithCost > 0 && (
+            <div className="text-xs text-muted-foreground mt-1">
+              ~{formatCurrency(avgCostPerRun)} per run
+            </div>
+          )}
+        </div>
+        <div className="bg-card border rounded-lg p-4">
+          <div className="text-sm text-muted-foreground">Error Rate</div>
+          <div className="text-xl font-semibold">{errorRate}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {errorCount} of {totalRuns} runs failed
           </div>
         </div>
         <div className="bg-card border rounded-lg p-4">
@@ -839,9 +1120,17 @@ export function AgentMetrics({ agentId }: Props) {
             {avgTtft != null ? `${avgTtft} ms` : "-"}
           </div>
         </div>
+      </div>
+
+      {/* Time-series charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-card border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground">Error Rate</div>
-          <div className="text-xl font-semibold">{errorRate}</div>
+          <h3 className="text-sm font-medium mb-3">Daily Cost</h3>
+          <CostChart data={dailyData} />
+        </div>
+        <div className="bg-card border rounded-lg p-4">
+          <h3 className="text-sm font-medium mb-3">Daily Token Usage</h3>
+          <TokensChart data={dailyData} />
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
         context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 200 }),
+        context.trpc.agent.getRunMetrics.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(
         context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
@@ -73,6 +74,7 @@ function AgentDetailPage() {
     fileName: string;
     mime: string | null;
   } | null>(null);
+  const [isChatVisible, setIsChatVisible] = useState(true);
 
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
@@ -164,6 +166,21 @@ function AgentDetailPage() {
             >
               {agent.status}
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsChatVisible(!isChatVisible)}
+              title={isChatVisible ? "Hide chat panel" : "Show chat panel"}
+            >
+              {isChatVisible ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+              <span className="ml-2 hidden sm:inline">
+                {isChatVisible ? "Hide Chat" : "Show Chat"}
+              </span>
+            </Button>
             <EditAgentDialog
               agent={agent}
               trigger={
@@ -267,7 +284,9 @@ function AgentDetailPage() {
       </div>
 
       {/* Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div
+        className={`grid grid-cols-1 gap-6 ${isChatVisible ? "lg:grid-cols-2" : ""}`}
+      >
         {/* Tab Content */}
         <div>
           {activeTab === "overview" && (
@@ -570,9 +589,11 @@ function AgentDetailPage() {
         </div>
 
         {/* Chat */}
-        <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex flex-col">
-          <Chat agentId={agentId} onMessageComplete={handleMessageComplete} />
-        </div>
+        {isChatVisible && (
+          <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex flex-col">
+            <Chat agentId={agentId} onMessageComplete={handleMessageComplete} />
+          </div>
+        )}
       </div>
 
       {/* Knowledge Source Viewer Modal */}

@@ -534,7 +534,7 @@ export const agentRouter = createTRPCRouter({
     .input(
       z.object({
         agentId: z.string(),
-        limit: z.number().min(1).max(200).default(50),
+        limit: z.number().min(1).max(10000).optional(),
         sinceMs: z.number().optional(),
       }),
     )
@@ -544,7 +544,7 @@ export const agentRouter = createTRPCRouter({
         conditions.push(sql`${runMetric.createdAt} >= ${input.sinceMs}`);
       }
 
-      return await db
+      const query = db
         .select({
           id: runMetric.id,
           agentId: runMetric.agentId,
@@ -580,8 +580,13 @@ export const agentRouter = createTRPCRouter({
           ),
         )
         .where(conditions.length ? and(...conditions) : undefined)
-        .orderBy(desc(runMetric.createdAt))
-        .limit(input.limit);
+        .orderBy(desc(runMetric.createdAt));
+
+      // Apply limit if specified, otherwise return all matching rows
+      if (input.limit) {
+        return await query.limit(input.limit);
+      }
+      return await query;
     }),
 
   /**
