@@ -276,15 +276,23 @@ export function ModelAliasManagement() {
                       editModalState.selected.capabilities.contextLength / 1000
                     ).toFixed(1)}
                     k tokens
-                    {!!editModalState.selected.capabilities
-                      .costInputPerMillion && (
+                    {(editModalState.selected.capabilities
+                      .costInputPerMillion != null ||
+                      editModalState.selected.capabilities
+                        .costOutputPerMillion != null) && (
                       <>
                         {" "}
                         • Cost: $
-                        {editModalState.selected.capabilities.costInputPerMillion.toFixed(
-                          2,
-                        )}
-                        /M input
+                        {(
+                          editModalState.selected.capabilities
+                            .costInputPerMillion ?? 0
+                        ).toFixed(2)}
+                        /$
+                        {(
+                          editModalState.selected.capabilities
+                            .costOutputPerMillion ?? 0
+                        ).toFixed(2)}{" "}
+                        per M tokens
                       </>
                     )}
                   </div>
@@ -364,8 +372,13 @@ export function ModelAliasManagement() {
                           )}
                         </div>
                       </div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 ml-12">
-                        {model.id}
+                      <div className="flex gap-2 mt-0.5 text-[10px] text-muted-foreground ml-12">
+                        <span>{model.id}</span>
+                        <span>•</span>
+                        <span>
+                          ${model.costInput.toFixed(2)}/$
+                          {model.costOutput.toFixed(2)} per M
+                        </span>
                       </div>
                     </button>
                   ))}

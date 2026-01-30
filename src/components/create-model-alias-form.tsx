@@ -387,10 +387,23 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
       )}
 
       {form.modelsDevId && (
-        <div className="text-xs p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded">
+        <div className="text-xs p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded space-y-1">
           <span className="text-green-600 dark:text-green-400">
             ✓ Model capabilities will be automatically configured
           </span>
+          {modelsDevModels?.find((m) => m.id === form.modelsDevId) && (
+            <div className="text-muted-foreground">
+              Cost: $
+              {modelsDevModels
+                .find((m) => m.id === form.modelsDevId)
+                ?.costInput.toFixed(2)}
+              /M input, $
+              {modelsDevModels
+                .find((m) => m.id === form.modelsDevId)
+                ?.costOutput.toFixed(2)}
+              /M output
+            </div>
+          )}
         </div>
       )}
 
