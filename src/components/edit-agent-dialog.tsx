@@ -51,7 +51,7 @@ const editAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().optional(),
   status: z.enum(["draft", "active", "archived"]),
-  visibility: z.enum(["private", "workspace", "public"]),
+  visibility: z.enum(["private", "public"]),
 });
 
 type EditAgentForm = z.infer<typeof editAgentSchema>;
@@ -240,13 +240,12 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="private">Private</SelectItem>
-                      <SelectItem value="workspace">Workspace</SelectItem>
                       <SelectItem value="public">Public</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormDescription>
-                    Private: Only you can see this agent. Workspace: Visible to
-                    your team. Public: Anyone can see this agent.
+                    Private: Only you can see this agent. Public: Anyone can
+                    access this agent.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

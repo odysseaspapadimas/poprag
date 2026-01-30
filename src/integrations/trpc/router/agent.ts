@@ -1,4 +1,4 @@
-import { and, desc, eq, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
@@ -30,7 +30,7 @@ export const agentRouter = createTRPCRouter({
       z
         .object({
           status: z.enum(["draft", "active", "archived"]).optional(),
-          visibility: z.enum(["private", "workspace", "public"]).optional(),
+          visibility: z.enum(["private", "public"]).optional(),
           search: z.string().optional(),
           limit: z.number().min(1).max(100).default(50),
           offset: z.number().min(0).default(0),
@@ -48,8 +48,16 @@ export const agentRouter = createTRPCRouter({
         conditions.push(eq(agent.visibility, input.visibility));
       }
 
-      // No RBAC - all users can see all agents
-      // conditions.push(eq(agent.createdBy, ctx.session.user.id));
+      // Visibility enforcement: show public agents OR private agents owned by user
+      conditions.push(
+        or(
+          eq(agent.visibility, "public"),
+          and(
+            eq(agent.visibility, "private"),
+            eq(agent.createdBy, ctx.session.user.id),
+          ),
+        ),
+      );
 
       const agents = await db
         .select()
@@ -77,10 +85,23 @@ export const agentRouter = createTRPCRouter({
         throw new Error("Must provide either id or slug");
       }
 
+      const idOrSlugCondition = input.id
+        ? eq(agent.id, input.id)
+        : eq(agent.slug, input.slug!);
+
+      // Visibility enforcement: allow if public OR private and owned by user
+      const visibilityCondition = or(
+        eq(agent.visibility, "public"),
+        and(
+          eq(agent.visibility, "private"),
+          eq(agent.createdBy, ctx.session.user.id),
+        ),
+      );
+
       const [result] = await db
         .select()
         .from(agent)
-        .where(input.id ? eq(agent.id, input.id) : eq(agent.slug, input.slug!))
+        .where(and(idOrSlugCondition, visibilityCondition))
         .limit(1);
 
       if (!result) {
@@ -104,9 +125,7 @@ export const agentRouter = createTRPCRouter({
           .max(50)
           .regex(/^[a-z0-9-]+$/),
         description: z.string().optional(),
-        visibility: z
-          .enum(["private", "workspace", "public"])
-          .default("private"),
+        visibility: z.enum(["private", "public"]).default("private"),
         modelAlias: z.string(),
         systemPrompt: z.string().optional(),
         ragEnabled: z.boolean().default(true),
@@ -230,7 +249,7 @@ export const agentRouter = createTRPCRouter({
         name: z.string().min(1).max(100).optional(),
         description: z.string().optional(),
         status: z.enum(["draft", "active", "archived"]).optional(),
-        visibility: z.enum(["private", "workspace", "public"]).optional(),
+        visibility: z.enum(["private", "public"]).optional(),
         ragEnabled: z.boolean().optional(),
         contextualEmbeddingsEnabled: z.boolean().optional(),
         skipIntentClassification: z.boolean().optional(),

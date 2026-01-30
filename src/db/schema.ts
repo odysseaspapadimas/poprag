@@ -125,7 +125,7 @@ export const agent = sqliteTable(
       .default("draft")
       .notNull(),
     visibility: text("visibility", {
-      enum: ["private", "workspace", "public"],
+      enum: ["private", "public"],
     })
       .default("private")
       .notNull(),

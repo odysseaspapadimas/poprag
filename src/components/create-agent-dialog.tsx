@@ -49,7 +49,7 @@ const createAgentSchema = z.object({
     ),
   description: z.string().optional(),
   modelAlias: z.string(),
-  visibility: z.enum(["private", "workspace", "public"]),
+  visibility: z.enum(["private", "public"]),
 });
 
 type CreateAgentForm = z.infer<typeof createAgentSchema>;
