@@ -1,6 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
-import { AudioLines, FileText, Image, Video } from "lucide-react";
+import { ArrowUpDown, AudioLines, FileText, Image, Video } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 // Type for model alias from database
 export interface ModelAliasRow {
@@ -22,6 +23,15 @@ export interface ModelAliasRow {
     costOutputPerMillion?: number;
   } | null;
   updatedAt: Date;
+}
+
+// Format cost per million tokens
+function formatCost(cost?: number | null): string {
+  if (cost == null) return "—";
+  if (cost === 0) return "$0";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  if (cost < 1) return `$${cost.toFixed(3)}`;
+  return `$${cost.toFixed(2)}`;
 }
 
 export const columns: ColumnDef<ModelAliasRow>[] = [
@@ -59,6 +69,62 @@ export const columns: ColumnDef<ModelAliasRow>[] = [
           )}
         </div>
       );
+    },
+  },
+  {
+    id: "costInput",
+    accessorFn: (row) => row.capabilities?.costInputPerMillion ?? null,
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-3 h-8"
+        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+      >
+        Input $/M
+        <ArrowUpDown className="ml-1 h-3 w-3" />
+      </Button>
+    ),
+    cell: ({ row }) => {
+      const cost = row.original.capabilities?.costInputPerMillion;
+      return (
+        <span className={cost == null ? "text-muted-foreground" : ""}>
+          {formatCost(cost)}
+        </span>
+      );
+    },
+    sortingFn: (rowA, rowB) => {
+      const a = rowA.original.capabilities?.costInputPerMillion ?? -1;
+      const b = rowB.original.capabilities?.costInputPerMillion ?? -1;
+      return a - b;
+    },
+  },
+  {
+    id: "costOutput",
+    accessorFn: (row) => row.capabilities?.costOutputPerMillion ?? null,
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-3 h-8"
+        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+      >
+        Output $/M
+        <ArrowUpDown className="ml-1 h-3 w-3" />
+      </Button>
+    ),
+    cell: ({ row }) => {
+      const cost = row.original.capabilities?.costOutputPerMillion;
+      return (
+        <span className={cost == null ? "text-muted-foreground" : ""}>
+          {formatCost(cost)}
+        </span>
+      );
+    },
+    sortingFn: (rowA, rowB) => {
+      const a = rowA.original.capabilities?.costOutputPerMillion ?? -1;
+      const b = rowB.original.capabilities?.costOutputPerMillion ?? -1;
+      return a - b;
     },
   },
   {

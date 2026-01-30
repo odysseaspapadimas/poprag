@@ -158,17 +158,43 @@ export async function getModels(): Promise<ModelsDevModel[]> {
   return models;
 }
 
+// Preferred providers when looking up models by ID (most reliable/canonical sources first)
+const PREFERRED_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "meta",
+  "cohere",
+  "deepseek",
+  "cloudflare-workers-ai",
+];
+
 /**
  * Get model by ID (format: provider/model-name or just model-name)
+ * When multiple providers have the same model ID, prefers canonical providers
+ * (e.g., OpenAI for gpt-4o) to ensure accurate cost data
  */
 export async function getModel(
   modelId: string,
 ): Promise<ModelsDevModel | undefined> {
   const data = await fetchModelsDevData();
 
-  // Try to find the model across all providers
+  // First, check preferred providers in order (most canonical sources first)
+  for (const providerId of PREFERRED_PROVIDERS) {
+    const provider = data[providerId];
+    if (provider?.models[modelId]) {
+      return {
+        ...provider.models[modelId],
+        id: modelId,
+        provider: providerId,
+      };
+    }
+  }
+
+  // Fall back to searching all other providers
   for (const [providerId, provider] of Object.entries(data)) {
-    // Check if model exists directly with this ID
+    if (PREFERRED_PROVIDERS.includes(providerId)) continue; // Already checked
     if (provider.models[modelId]) {
       return {
         ...provider.models[modelId],
