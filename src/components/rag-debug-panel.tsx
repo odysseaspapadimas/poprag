@@ -53,6 +53,8 @@ interface RAGDebugInfo {
   models?: {
     intentModel?: string;
     rewriteModel?: string;
+    embeddingModel?: string;
+    embeddingDimensions?: number;
     rerankModel?: string;
     chatModel?: string;
     chatProvider?: string;
@@ -290,9 +292,9 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                     Rewritten Queries:
                   </div>
                   <div className="space-y-1">
-                    {debugInfo.rewrittenQueries.map((query, idx) => (
+                    {debugInfo.rewrittenQueries.map((query) => (
                       <div
-                        key={idx}
+                        key={query}
                         className="bg-background border rounded p-2 font-mono text-xs break-words"
                       >
                         {query}
@@ -305,8 +307,8 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <div className="pl-6 space-y-1">
                 <div className="text-muted-foreground">Extracted Keywords:</div>
                 <div className="flex flex-wrap gap-1">
-                  {debugInfo.keywords.map((keyword, idx) => (
-                    <Badge key={idx} variant="outline" className="text-xs">
+                  {debugInfo.keywords.map((keyword) => (
+                    <Badge key={keyword} variant="outline" className="text-xs">
                       {keyword}
                     </Badge>
                   ))}
@@ -411,6 +413,24 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                     >
                       {formatModelName(debugInfo.models.rewriteModel)}
                     </div>
+                  </div>
+                )}
+                {debugInfo.models.embeddingModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">
+                      Embedding
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.embeddingModel}
+                    >
+                      {formatModelName(debugInfo.models.embeddingModel)}
+                    </div>
+                    {debugInfo.models.embeddingDimensions && (
+                      <div className="text-[10px] text-muted-foreground mt-1">
+                        {debugInfo.models.embeddingDimensions} dims
+                      </div>
+                    )}
                   </div>
                 )}
                 {debugInfo.models.rerankModel && (

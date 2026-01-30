@@ -554,7 +554,7 @@ export async function performRAGRetrieval(
     }
   }
 
-  // Step 3: Hybrid search
+  // Step 3: Hybrid search (uses platform-wide embedding model)
   const topK = config.topK || RAG_CONFIG.TOP_K;
   const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
   const hybridSearchStart = Date.now();

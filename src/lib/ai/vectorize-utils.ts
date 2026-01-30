@@ -131,9 +131,10 @@ export function validateMetadataSize(metadata: Record<string, any>): {
 export async function listNamespaceVectors(namespace: string, limit = 10) {
   try {
     const { env } = await import("cloudflare:workers");
+    const { EMBEDDING_CONFIG } = await import("@/lib/ai/constants");
 
     // Create a zero vector for listing (matches all with low scores)
-    const zeroVector = new Array(1536).fill(0);
+    const zeroVector = new Array(EMBEDDING_CONFIG.DIMENSIONS).fill(0);
 
     const results = await env.VECTORIZE.query(zeroVector, {
       namespace,

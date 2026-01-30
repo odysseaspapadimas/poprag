@@ -61,6 +61,8 @@ interface EditModalState {
     provider: string;
     modelId: string;
     modelsDevId: string;
+    modelType: "chat" | "embedding" | "reranker";
+    embeddingDimensions: string;
   };
 }
 
@@ -73,7 +75,14 @@ export function ModelAliasManagement() {
   const [editModalState, setEditModalState] = useState<EditModalState>({
     open: false,
     selected: null,
-    form: { alias: "", provider: "", modelId: "", modelsDevId: "" },
+    form: {
+      alias: "",
+      provider: "",
+      modelId: "",
+      modelsDevId: "",
+      modelType: "chat",
+      embeddingDimensions: "",
+    },
   });
 
   const [modelSearch, setModelSearch] = useState("");
@@ -113,6 +122,10 @@ export function ModelAliasManagement() {
 
   const handleEditSubmit = async () => {
     try {
+      const dimensions = editModalState.form.embeddingDimensions
+        ? Number.parseInt(editModalState.form.embeddingDimensions, 10)
+        : null;
+
       await updateMutation.mutateAsync({
         alias: editModalState.selected!.alias,
         newAlias:
@@ -132,6 +145,14 @@ export function ModelAliasManagement() {
             ? editModalState.form.modelId
             : undefined,
         modelsDevId: editModalState.form.modelsDevId || undefined,
+        modelType:
+          editModalState.form.modelType !== editModalState.selected!.modelType
+            ? editModalState.form.modelType
+            : undefined,
+        embeddingDimensions:
+          dimensions !== editModalState.selected!.embeddingDimensions
+            ? dimensions
+            : undefined,
       });
     } catch (error) {
       console.error("Update failed:", error);
@@ -187,6 +208,9 @@ export function ModelAliasManagement() {
                 provider: row.original.provider,
                 modelId: row.original.modelId,
                 modelsDevId: "",
+                modelType: row.original.modelType,
+                embeddingDimensions:
+                  row.original.embeddingDimensions?.toString() ?? "",
               },
             });
             setModelSearch("");
@@ -400,6 +424,58 @@ export function ModelAliasManagement() {
                 placeholder="e.g., gpt-4o or anthropic/claude-3-5-sonnet"
               />
             </Field>
+
+            <Field>
+              <Label>Model Type</Label>
+              <Select
+                onValueChange={(v) => {
+                  setEditModalState((prev) => ({
+                    ...prev,
+                    form: {
+                      ...prev.form,
+                      modelType: v as "chat" | "embedding" | "reranker",
+                      // Clear dimensions if not embedding
+                      embeddingDimensions:
+                        v !== "embedding" ? "" : prev.form.embeddingDimensions,
+                    },
+                  }));
+                }}
+                value={editModalState.form.modelType}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Model Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="chat">chat</SelectItem>
+                  <SelectItem value="embedding">embedding</SelectItem>
+                  <SelectItem value="reranker">reranker</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+
+            {editModalState.form.modelType === "embedding" && (
+              <Field>
+                <Label>Embedding Dimensions</Label>
+                <Input
+                  type="number"
+                  value={editModalState.form.embeddingDimensions}
+                  onChange={(e) =>
+                    setEditModalState((prev) => ({
+                      ...prev,
+                      form: {
+                        ...prev.form,
+                        embeddingDimensions: e.target.value,
+                      },
+                    }))
+                  }
+                  placeholder="e.g., 1536, 1024, 768"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Required for embedding models. Common values: 1536 (OpenAI),
+                  1024 (Cohere), 768 (BERT-based)
+                </p>
+              </Field>
+            )}
 
             {editModalState.form.modelsDevId && (
               <div className="text-xs p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded">

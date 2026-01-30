@@ -8,7 +8,7 @@ import {
   knowledgeSource,
 } from "@/db/schema";
 import { DEFAULT_MODELS } from "@/lib/ai/constants";
-import { generateChunks } from "@/lib/ai/embedding";
+import { generateChunks, generateEmbeddings } from "@/lib/ai/embedding";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -361,14 +361,12 @@ export async function parseDocument(
 
 /**
  * Process and index a knowledge source with streaming updates
- * Full pipeline: parse → chunk → embed (batch) → store in Vectorize and D1
+ * Full pipeline: parse → chunk → embed → store in Vectorize and D1
  */
 export async function processKnowledgeSource(
   sourceId: string,
   content: string | Buffer | Uint8Array,
   options?: {
-    embeddingModel?: string;
-    embeddingDimensions?: number;
     chunkSize?: number;
     streamResponse?: StreamResponseCallback;
     abortSignal?: AbortSignal;
@@ -395,6 +393,8 @@ export async function processKnowledgeSource(
     agentData?.contextualEmbeddingsEnabled ?? false;
   const contextualEmbeddingModel =
     DEFAULT_MODELS.CONTEXTUAL_EMBEDDING as keyof AiModels;
+  // Platform-wide embedding model - no per-agent override
+  const embeddingModel = DEFAULT_MODELS.EMBEDDING;
 
   const streamResponse = options?.streamResponse || (async () => {});
   const abortSignal = options?.abortSignal;
@@ -495,19 +495,19 @@ export async function processKnowledgeSource(
         );
       }
 
-      // Generate embeddings for this batch using Workers AI BGE model
+      // Generate embeddings for this batch using platform-wide model
       const startTime = Date.now();
-      const embeddingResult: { data: number[][] } = (await withRetry(
+      const embeddingBatch: number[][] = await withRetry(
         () =>
-          env.AI.run("@cf/baai/bge-large-en-v1.5", {
-            text: embeddingInputs,
+          generateEmbeddings(embeddingInputs, {
+            model: embeddingModel,
+            abortSignal,
           }),
         {
           label: `embedding batch ${batchIdx + 1}`,
           abortSignal,
         },
-      )) as { data: number[][] };
-      const embeddingBatch: number[][] = embeddingResult.data;
+      );
       const embeddingTime = Date.now() - startTime;
 
       console.log(

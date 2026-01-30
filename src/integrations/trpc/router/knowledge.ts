@@ -229,8 +229,6 @@ export const knowledgeRouter = createTRPCRouter({
 
       try {
         const result = await processKnowledgeSource(input.sourceId, content, {
-          embeddingModel: "text-embedding-3-small",
-          embeddingDimensions: 1536,
           abortSignal: ctx.request.signal,
         });
 
@@ -305,7 +303,7 @@ export const knowledgeRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify agent exists
-      await requireAgent(input.agentId);
+      const agentData = await requireAgent(input.agentId);
 
       // Generate embedding for the query
       const queryEmbedding = await generateEmbedding(input.query);

@@ -62,7 +62,6 @@ pnpm check            # Lint & format with Biome
 pnpm db:push          # Push schema to D1
 pnpm db:generate      # Generate migrations
 pnpm db:studio        # Open Drizzle Studio
-pnpm db:seed-models   # Seed model aliases
 pnpm db:seed          # Seed test data
 
 # Deployment

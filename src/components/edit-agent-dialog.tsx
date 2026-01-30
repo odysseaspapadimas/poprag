@@ -286,39 +286,37 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                     </AlertDialogContent>
                   </AlertDialog>
                 )}
-                {agent.status === "archived" && (
-                  <AlertDialog
-                    open={showDeleteDialog}
-                    onOpenChange={setShowDeleteDialog}
-                  >
-                    <AlertDialogTrigger asChild>
-                      <Button type="button" variant="destructive" size="sm">
+                <AlertDialog
+                  open={showDeleteDialog}
+                  onOpenChange={setShowDeleteDialog}
+                >
+                  <AlertDialogTrigger asChild>
+                    <Button type="button" variant="destructive" size="sm">
+                      Delete Permanently
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Delete Agent Permanently
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to permanently delete this agent?
+                        This action cannot be undone and all associated data
+                        will be lost.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDelete}
+                        className="bg-red-600 hover:bg-red-700"
+                      >
                         Delete Permanently
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          Delete Agent Permanently
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to permanently delete this
-                          agent? This action cannot be undone and all associated
-                          data will be lost.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={handleDelete}
-                          className="bg-red-600 hover:bg-red-700"
-                        >
-                          Delete Permanently
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                )}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
               <div className="flex gap-2">
                 <Button

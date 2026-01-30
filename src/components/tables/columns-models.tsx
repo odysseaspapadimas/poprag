@@ -7,6 +7,8 @@ export interface ModelAliasRow {
   alias: string;
   provider: string;
   modelId: string;
+  modelType: "chat" | "embedding" | "reranker";
+  embeddingDimensions?: number | null;
   capabilities?: {
     inputModalities?: string[];
     outputModalities?: string[];
@@ -34,6 +36,30 @@ export const columns: ColumnDef<ModelAliasRow>[] = [
   {
     accessorKey: "modelId",
     header: "Model ID",
+  },
+  {
+    id: "type",
+    header: "Type",
+    cell: ({ row }) => {
+      const modelType = row.original.modelType;
+      const dimensions = row.original.embeddingDimensions;
+
+      return (
+        <div className="flex items-center gap-1.5">
+          <Badge
+            variant={modelType === "chat" ? "secondary" : "outline"}
+            className="text-[10px] px-1.5 py-0"
+          >
+            {modelType}
+          </Badge>
+          {modelType === "embedding" && dimensions && (
+            <span className="text-[10px] text-muted-foreground">
+              {dimensions}d
+            </span>
+          )}
+        </div>
+      );
+    },
   },
   {
     id: "capabilities",

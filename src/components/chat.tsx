@@ -1,6 +1,3 @@
-import { RAGDebugPanel } from "@/components/rag-debug-panel";
-import { Textarea } from "@/components/ui/textarea";
-import { useTRPC } from "@/integrations/trpc/react";
 import { useChat } from "@ai-sdk/react";
 import {
   useMutation,
@@ -19,6 +16,9 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
+import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import { Textarea } from "@/components/ui/textarea";
+import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
@@ -110,10 +110,11 @@ function Messages({
           return (
             <div
               key={id}
-              className={`p-4 ${role === "assistant"
+              className={`p-4 ${
+                role === "assistant"
                   ? "bg-linear-to-r from-primary/5 to-accent/5"
                   : "bg-transparent"
-                }`}
+              }`}
             >
               <div className="flex items-start gap-4 max-w-3xl mx-auto w-full">
                 {role === "assistant" ? (
@@ -546,10 +547,11 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className={`absolute inset-y-0 left-2 flex items-center p-2 transition-colors ${supportsImageUpload
+                  className={`absolute inset-y-0 left-2 flex items-center p-2 transition-colors ${
+                    supportsImageUpload
                       ? "text-muted-foreground hover:text-primary"
                       : "text-muted-foreground/30 cursor-not-allowed"
-                    }`}
+                  }`}
                   disabled={uploadImageStart.isPending || !supportsImageUpload}
                   title={
                     supportsImageUpload

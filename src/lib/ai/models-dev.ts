@@ -39,6 +39,7 @@ export interface ModelsDevInterleaved {
 // Model as stored in API (without full ID)
 export interface ModelsDevModelData {
   name: string; // Display name
+  family?: string; // Model family (e.g., "gpt-4", "text-embedding", "claude")
   attachment: boolean; // Supports file attachments
   reasoning: boolean; // Supports reasoning / chain-of-thought
   tool_call: boolean; // Supports tool calling
@@ -396,4 +397,99 @@ export function extractCapabilities(model: ModelsDevModel): ModelCapabilities {
     costInputPerMillion: model.cost.input,
     costOutputPerMillion: model.cost.output,
   };
+}
+
+// ─────────────────────────────────────────────────────
+// Model Type Detection
+// ─────────────────────────────────────────────────────
+
+/**
+ * Detect model type based on family field or naming conventions
+ * - Embedding models: family contains "embed" or name/id contains "embed"
+ * - Reranker models: name/id contains "rerank"
+ * - Chat models: everything else
+ */
+export type ModelType = "chat" | "embedding" | "reranker";
+
+/**
+ * Check if a model is an embedding model
+ * Detection based on:
+ * 1. family field contains "embed"
+ * 2. model name/id contains "embed" (fallback)
+ * 3. cost.output === 0 and no tool_call support (heuristic)
+ */
+export function isEmbeddingModel(model: ModelsDevModel): boolean {
+  // Check family field (most reliable)
+  if (model.family?.toLowerCase().includes("embed")) {
+    return true;
+  }
+
+  // Check name/id for "embed" keyword
+  const idLower = model.id.toLowerCase();
+  const nameLower = model.name.toLowerCase();
+  if (idLower.includes("embed") || nameLower.includes("embed")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a model is a reranker model
+ */
+export function isRerankerModel(model: ModelsDevModel): boolean {
+  const idLower = model.id.toLowerCase();
+  const nameLower = model.name.toLowerCase();
+  return idLower.includes("rerank") || nameLower.includes("rerank");
+}
+
+/**
+ * Detect the type of a model
+ */
+export function detectModelType(model: ModelsDevModel): ModelType {
+  if (isEmbeddingModel(model)) return "embedding";
+  if (isRerankerModel(model)) return "reranker";
+  return "chat";
+}
+
+/**
+ * Get the embedding dimensions for an embedding model
+ * For embedding models, limit.output represents the embedding dimensions
+ * Returns undefined for non-embedding models
+ */
+export function getEmbeddingDimensions(
+  model: ModelsDevModel,
+): number | undefined {
+  if (!isEmbeddingModel(model)) {
+    return undefined;
+  }
+  // For embedding models, limit.output is the vector dimensions
+  return model.limit.output;
+}
+
+/**
+ * Check if a model alias or model ID looks like an embedding model
+ * Useful when we don't have full model data from models.dev
+ */
+export function looksLikeEmbeddingModel(aliasOrModelId: string): boolean {
+  const lower = aliasOrModelId.toLowerCase();
+  return lower.includes("embed") || lower.includes("bge-");
+}
+
+/**
+ * Check if a model alias or model ID looks like a reranker model
+ */
+export function looksLikeRerankerModel(aliasOrModelId: string): boolean {
+  const lower = aliasOrModelId.toLowerCase();
+  return lower.includes("rerank");
+}
+
+/**
+ * Detect model type from alias or model ID string
+ * Fallback when we don't have full model data
+ */
+export function detectModelTypeFromString(aliasOrModelId: string): ModelType {
+  if (looksLikeEmbeddingModel(aliasOrModelId)) return "embedding";
+  if (looksLikeRerankerModel(aliasOrModelId)) return "reranker";
+  return "chat";
 }

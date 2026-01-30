@@ -4,7 +4,7 @@
  */
 
 /**
- * Default Workers AI model IDs
+ * Default model IDs
  * These are used as fallbacks when no specific model is configured
  */
 export const DEFAULT_MODELS = {
@@ -14,8 +14,8 @@ export const DEFAULT_MODELS = {
   /** Model used for query rewriting to improve search coverage */
   QUERY_REWRITE: "@cf/meta/llama-3.1-8b-instruct-fast",
 
-  /** Embedding model for vector search (1024 dimensions) */
-  EMBEDDING: "@cf/baai/bge-large-en-v1.5",
+  /** Embedding model for vector search (1536 dimensions) - OpenAI */
+  EMBEDDING: "text-embedding-3-small",
 
   /** Cross-encoder model for reranking search results */
   RERANKER: "@cf/baai/bge-reranker-base",
@@ -26,10 +26,11 @@ export const DEFAULT_MODELS = {
 
 /**
  * Embedding configuration
+ * Platform-wide constant - all agents use the same embedding model
  */
 export const EMBEDDING_CONFIG = {
-  /** Dimensions for BGE Large EN v1.5 */
-  DIMENSIONS: 1024,
+  /** Dimensions for OpenAI text-embedding-3-small (native output) */
+  DIMENSIONS: 1536,
 
   /** Cloudflare Vectorize metadata size limit (bytes) with buffer */
   VECTORIZE_METADATA_LIMIT: 2800,

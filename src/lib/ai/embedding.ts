@@ -1,28 +1,125 @@
 import { env } from "cloudflare:workers";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
   MarkdownTextSplitter,
   RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
+import { embedMany } from "ai";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks } from "@/db/schema";
+import { DEFAULT_MODELS, EMBEDDING_CONFIG } from "@/lib/ai/constants";
+import { resolveModelConfig } from "@/lib/ai/helpers";
 
 /**
- * Default embedding model configuration
- * Can be overridden per agent via model alias system
+ * Embedding configuration
+ * Platform-wide: all agents use text-embedding-3-small at 1536 dimensions
  *
  * IMPORTANT: Cloudflare Vectorize has strict limits:
  * - Metadata max size: 3KB per vector
- * - BGE Large EN v1.5: 1024 dimensions
+ * - Max dimensions: 1536
  *
- * NOTE: Vectorize index must be configured with matching dimensions!
+ * NOTE: Vectorize index must be configured with 1536 dimensions!
  */
+
+export interface EmbeddingRequestOptions {
+  model?: string;
+  dimensions?: number;
+  abortSignal?: AbortSignal;
+}
+
+interface ResolvedEmbeddingConfig {
+  modelAlias: string;
+  modelId: string;
+  provider: string;
+  expectedDimensions: number;
+  requestedDimensions?: number;
+  abortSignal?: AbortSignal;
+}
+
+async function resolveEmbeddingConfig(
+  options?: EmbeddingRequestOptions,
+): Promise<ResolvedEmbeddingConfig> {
+  const modelAlias = options?.model || DEFAULT_MODELS.EMBEDDING;
+  const modelConfig = await resolveModelConfig(modelAlias);
+
+  // Platform-wide: always use configured dimensions (1536 for text-embedding-3-small)
+  return {
+    modelAlias,
+    modelId: modelConfig.modelId,
+    provider: modelConfig.provider,
+    expectedDimensions: EMBEDDING_CONFIG.DIMENSIONS,
+    requestedDimensions: EMBEDDING_CONFIG.DIMENSIONS,
+    abortSignal: options?.abortSignal,
+  };
+}
+
+async function runEmbeddingRequest(
+  inputs: string[],
+  config: ResolvedEmbeddingConfig,
+): Promise<number[][]> {
+  switch (config.provider) {
+    case "cloudflare-workers-ai": {
+      if (!env.AI) {
+        throw new Error("Workers AI binding not available");
+      }
+      const aiOptions = env.AI_GATEWAY_ID
+        ? { gateway: { id: env.AI_GATEWAY_ID } }
+        : {};
+      const response = await env.AI.run(
+        config.modelId as keyof AiModels,
+        { text: inputs },
+        aiOptions,
+      );
+      return (response as { data: number[][] }).data;
+    }
+    case "openai": {
+      if (!env.OPENAI_API_KEY) {
+        throw new Error("OPENAI_API_KEY is required for OpenAI embeddings");
+      }
+      const openaiProvider = createOpenAI({ apiKey: env.OPENAI_API_KEY });
+      const model = openaiProvider.embedding(config.modelId);
+      const providerOptions = config.requestedDimensions
+        ? { openai: { dimensions: config.requestedDimensions } }
+        : undefined;
+      const result = await embedMany({
+        model,
+        values: inputs,
+        abortSignal: config.abortSignal,
+        providerOptions,
+      });
+      return result.embeddings as number[][];
+    }
+    default:
+      throw new Error(
+        `Embedding not supported for provider: ${config.provider}`,
+      );
+  }
+}
+
+function assertValidEmbedding(
+  embedding: number[] | undefined,
+  expectedDimensions: number,
+  index?: number,
+): void {
+  const label = index === undefined ? "embedding" : `embedding ${index}`;
+  if (!Array.isArray(embedding) || embedding.length === 0) {
+    throw new Error(
+      `Invalid ${label} response: expected array with ${expectedDimensions} dimensions, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`,
+    );
+  }
+  if (embedding.length !== expectedDimensions) {
+    throw new Error(
+      `Invalid ${label} dimensions: expected ${expectedDimensions}, got ${embedding.length}`,
+    );
+  }
+}
 
 /**
  * Chunking strategy using LangChain's RecursiveCharacterTextSplitter
  * Based on contextual RAG best practices:
  * - Intelligently splits on content boundaries (paragraphs, sentences)
- * - Configurable chunk size (1024 chars) with overlap (200 chars)
+ * - Configurable chunk size with overlap
  * - Respects document structure and maintains context
  * - Filters out very small chunks
  * - Respects Vectorize 3KB metadata limit
@@ -121,44 +218,31 @@ export async function generateChunks(
  *
  * CRITICAL: dimensions MUST match what was used during indexing
  */
-export async function generateEmbedding(value: string): Promise<number[]> {
+export async function generateEmbedding(
+  value: string,
+  options?: EmbeddingRequestOptions,
+): Promise<number[]> {
   const input = value.replaceAll("\n", " ");
 
   if (!input.trim()) {
     throw new Error("Cannot generate embedding for empty text");
   }
 
-  console.log(`Generating embedding for: "${input.substring(0, 50)}..."`);
-
-  // Use AI Gateway for analytics and caching if configured
-  const aiOptions = env.AI_GATEWAY_ID
-    ? { gateway: { id: env.AI_GATEWAY_ID } }
-    : {};
-  const response = await env.AI.run(
-    "@cf/baai/bge-large-en-v1.5",
-    {
-      text: [input],
-    },
-    aiOptions,
+  const config = await resolveEmbeddingConfig(options);
+  console.log(
+    `Generating embedding for: "${input.substring(0, 50)}..." using ${config.modelAlias}`,
   );
-  const embedding = (response as { data: number[][] }).data[0];
 
-  if (!Array.isArray(embedding) || embedding.length === 0) {
+  const embeddings = await runEmbeddingRequest([input], config);
+  if (!Array.isArray(embeddings) || embeddings.length !== 1) {
     throw new Error(
-      `Invalid embedding response: expected array with 1024 dimensions, got ${
-        Array.isArray(embedding) ? embedding.length : "non-array"
-      }`,
+      `Invalid embeddings response: expected 1 embedding, got ${Array.isArray(embeddings) ? embeddings.length : "non-array"}`,
     );
   }
 
-  if (embedding.length !== 1024) {
-    throw new Error(
-      `Invalid embedding dimensions: expected 1024, got ${embedding.length}`,
-    );
-  }
-
+  const embedding = embeddings[0];
+  assertValidEmbedding(embedding, config.expectedDimensions);
   console.log(`Generated embedding with ${embedding.length} dimensions`);
-
   return embedding;
 }
 
@@ -168,6 +252,7 @@ export async function generateEmbedding(value: string): Promise<number[]> {
  */
 export async function generateEmbeddings(
   values: string[],
+  options?: EmbeddingRequestOptions,
 ): Promise<number[][]> {
   const inputs = values.map((value) => value.replaceAll("\n", " ").trim());
 
@@ -179,21 +264,12 @@ export async function generateEmbeddings(
     throw new Error("Cannot generate embeddings for empty text");
   }
 
-  console.log(`Generating embeddings for ${inputs.length} inputs`);
-
-  // Use AI Gateway for analytics and caching if configured
-  const aiOptions = env.AI_GATEWAY_ID
-    ? { gateway: { id: env.AI_GATEWAY_ID } }
-    : {};
-  const response = await env.AI.run(
-    "@cf/baai/bge-large-en-v1.5",
-    {
-      text: inputs,
-    },
-    aiOptions,
+  const config = await resolveEmbeddingConfig(options);
+  console.log(
+    `Generating embeddings for ${inputs.length} inputs using ${config.modelAlias}`,
   );
 
-  const embeddings = (response as { data: number[][] }).data;
+  const embeddings = await runEmbeddingRequest(inputs, config);
 
   if (!Array.isArray(embeddings) || embeddings.length !== inputs.length) {
     throw new Error(
@@ -202,16 +278,7 @@ export async function generateEmbeddings(
   }
 
   embeddings.forEach((embedding, index) => {
-    if (!Array.isArray(embedding) || embedding.length === 0) {
-      throw new Error(
-        `Invalid embedding response at index ${index}: expected array with 1024 dimensions, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`,
-      );
-    }
-    if (embedding.length !== 1024) {
-      throw new Error(
-        `Invalid embedding dimensions at index ${index}: expected 1024, got ${embedding.length}`,
-      );
-    }
+    assertValidEmbedding(embedding, config.expectedDimensions, index);
   });
 
   console.log(

@@ -141,14 +141,12 @@ export function AgentActions({ agent }: AgentActionsProps) {
             Archive
           </DropdownMenuItem>
         )}
-        {agent.status === "archived" && (
-          <DropdownMenuItem
-            onClick={() => setDeleteDialogOpen(true)}
-            className="text-destructive"
-          >
-            Delete Permanently
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuItem
+          onClick={() => setDeleteDialogOpen(true)}
+          className="text-destructive"
+        >
+          Delete Permanently
+        </DropdownMenuItem>
       </DropdownMenuContent>
 
       <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>

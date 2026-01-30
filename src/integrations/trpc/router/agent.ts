@@ -320,12 +320,7 @@ export const agentRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const existing = await requireAgent(input.id);
-
-      // Only allow deletion of archived agents
-      if (existing.status !== "archived") {
-        throw new Error("Only archived agents can be permanently deleted");
-      }
+      await requireAgent(input.id);
 
       await db.delete(agent).where(eq(agent.id, input.id));
 

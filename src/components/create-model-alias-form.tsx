@@ -71,6 +71,8 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
       | "cloudflare-workers-ai",
     modelId: "",
     modelsDevId: "", // Full models.dev ID (e.g., "openai/gpt-4o")
+    modelType: "chat" as "chat" | "embedding" | "reranker",
+    embeddingDimensions: "",
   });
   const [modelSearch, setModelSearch] = useState("");
   const debouncedModelSearch = useDebounce(modelSearch, 300); // 300ms debounce
@@ -89,6 +91,8 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
           provider: "openai",
           modelId: "",
           modelsDevId: "",
+          modelType: "chat",
+          embeddingDimensions: "",
         });
         setModelSearch("");
         setProviderFilter("all");
@@ -121,11 +125,17 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const dimensions = form.embeddingDimensions
+      ? Number.parseInt(form.embeddingDimensions, 10)
+      : undefined;
+
     await createMutation.mutateAsync({
       alias: form.alias,
       provider: form.provider,
       modelId: form.modelId,
       modelsDevId: form.modelsDevId || undefined,
+      modelType: form.modelType,
+      embeddingDimensions: dimensions,
     });
   };
 
@@ -150,6 +160,8 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
       provider: mappedProvider,
       modelId: modelIdToUse,
       modelsDevId: model.id,
+      modelType: "chat", // Default to chat, user can change if needed
+      embeddingDimensions: "",
     });
   };
 
@@ -326,6 +338,53 @@ export function CreateModelAliasForm({ onSuccess }: CreateModelAliasFormProps) {
           The model identifier used by the provider's API
         </p>
       </Field>
+
+      <Field>
+        <Label>Model Type</Label>
+        <Select
+          onValueChange={(v) =>
+            setForm((prev) => ({
+              ...prev,
+              modelType: v as typeof form.modelType,
+              // Clear dimensions if not embedding
+              embeddingDimensions:
+                v !== "embedding" ? "" : prev.embeddingDimensions,
+            }))
+          }
+          value={form.modelType}
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="Model Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="chat">chat</SelectItem>
+            <SelectItem value="embedding">embedding</SelectItem>
+            <SelectItem value="reranker">reranker</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {form.modelType === "embedding" && (
+        <Field>
+          <Label>Embedding Dimensions</Label>
+          <Input
+            type="number"
+            value={form.embeddingDimensions}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...prev,
+                embeddingDimensions: e.target.value,
+              }))
+            }
+            placeholder="e.g., 1536, 1024, 768"
+            required
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Required for embedding models. Common values: 1536 (OpenAI), 1024
+            (Cohere), 768 (BERT-based)
+          </p>
+        </Field>
+      )}
 
       {form.modelsDevId && (
         <div className="text-xs p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded">

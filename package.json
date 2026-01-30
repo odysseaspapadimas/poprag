@@ -27,7 +27,6 @@
     "db:push": "drizzle-kit push",
     "db:rebuild-fts": "wrangler d1 execute poprag --remote --file scripts/rebuild-fts.sql",
     "db:seed": "npx tsx src/db/seed.ts",
-    "db:seed-models": "npx tsx src/db/seed-models.ts > seed-models.sql && wrangler d1 execute poprag --remote --file seed-models.sql && rm seed-models.sql",
     "db:studio": "drizzle-kit studio",
     "dev": "vite dev",
     "format": "npx @biomejs/biome format --write .",

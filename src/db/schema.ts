@@ -179,6 +179,14 @@ export const modelAlias = sqliteTable(
       enum: ["openai", "openrouter", "huggingface", "cloudflare-workers-ai"],
     }).notNull(),
     modelId: text("model_id").notNull(),
+    // Model type classification
+    modelType: text("model_type", {
+      enum: ["chat", "embedding", "reranker"],
+    })
+      .default("chat")
+      .notNull(),
+    // Embedding dimensions (only relevant for embedding models)
+    embeddingDimensions: integer("embedding_dimensions"),
     // Model capabilities from models.dev
     capabilities: text("capabilities", { mode: "json" }).$type<{
       inputModalities?: ("text" | "image" | "audio" | "video" | "pdf")[];

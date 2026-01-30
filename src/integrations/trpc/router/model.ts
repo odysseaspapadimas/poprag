@@ -8,13 +8,20 @@ import {
   publicProcedure,
 } from "@/integrations/trpc/init";
 import {
+  detectModelType,
+  detectModelTypeFromString,
   extractCapabilities,
+  getEmbeddingDimensions,
   getModel,
   getModelsByProvider,
   getProviders,
   type ModelCapabilities,
+  type ModelType,
   searchModels,
 } from "@/lib/ai/models-dev";
+
+// Model type enum for classification
+const modelTypeSchema = z.enum(["chat", "embedding", "reranker"]);
 
 // Zod schema for model capabilities
 const modelCapabilitiesSchema = z.object({
@@ -43,6 +50,16 @@ const SUPPORTED_PROVIDERS = [
 export const modelRouter = createTRPCRouter({
   list: publicProcedure.query(async () => {
     return await db.select().from(modelAlias);
+  }),
+
+  /**
+   * List only embedding models (for embedding model selection dropdowns)
+   */
+  listEmbeddingModels: publicProcedure.query(async () => {
+    return await db
+      .select()
+      .from(modelAlias)
+      .where(eq(modelAlias.modelType, "embedding"));
   }),
 
   /**
@@ -170,6 +187,8 @@ export const modelRouter = createTRPCRouter({
 
   /**
    * Create a new model alias with capabilities from models.dev
+   * Model type and embedding dimensions are auto-detected from models.dev
+   * or inferred from naming conventions
    */
   create: adminProcedure
     .input(
@@ -184,6 +203,10 @@ export const modelRouter = createTRPCRouter({
         modelId: z.string(),
         // Optional: auto-fetch capabilities from models.dev
         modelsDevId: z.string().optional(),
+        // Override model type (auto-detected by default)
+        modelType: modelTypeSchema.optional(),
+        // Override embedding dimensions (auto-detected for embedding models)
+        embeddingDimensions: z.number().optional(),
         // Or provide capabilities manually
         capabilities: modelCapabilitiesSchema.optional(),
       }),
@@ -199,15 +222,34 @@ export const modelRouter = createTRPCRouter({
         throw new Error("Model alias already exists");
       }
 
-      // Try to fetch capabilities from models.dev if modelsDevId provided
+      // Try to fetch from models.dev for auto-detection
       let capabilities: ModelCapabilities | undefined;
+      let detectedType: ModelType = "chat";
+      let detectedDimensions: number | undefined;
+
       if (input.modelsDevId) {
         const modelInfo = await getModel(input.modelsDevId);
         if (modelInfo) {
           capabilities = extractCapabilities(modelInfo);
+          detectedType = detectModelType(modelInfo);
+          detectedDimensions = getEmbeddingDimensions(modelInfo);
         }
       } else if (input.capabilities) {
         capabilities = input.capabilities as ModelCapabilities;
+      }
+
+      // Use provided values or fall back to detected/inferred values
+      const finalModelType =
+        input.modelType ??
+        detectedType ??
+        detectModelTypeFromString(input.modelId);
+      const finalDimensions = input.embeddingDimensions ?? detectedDimensions;
+
+      // Validate embedding models have dimensions
+      if (finalModelType === "embedding" && !finalDimensions) {
+        throw new Error(
+          "Embedding models must have dimensions. Provide embeddingDimensions or use a modelsDevId that includes dimension info.",
+        );
       }
 
       // Insert with capabilities
@@ -215,11 +257,17 @@ export const modelRouter = createTRPCRouter({
         alias: input.alias,
         provider: input.provider,
         modelId: input.modelId,
+        modelType: finalModelType,
+        embeddingDimensions: finalDimensions ?? null,
         capabilities: capabilities ?? null,
         updatedAt: new Date(),
       });
 
-      return { success: true };
+      return {
+        success: true,
+        modelType: finalModelType,
+        embeddingDimensions: finalDimensions,
+      };
     }),
 
   delete: adminProcedure
@@ -243,7 +291,11 @@ export const modelRouter = createTRPCRouter({
           ])
           .optional(),
         modelId: z.string().optional(),
-        // Optional: refresh capabilities from models.dev
+        // Model type classification (auto-detected if modelsDevId provided)
+        modelType: modelTypeSchema.optional(),
+        // Embedding dimensions (auto-detected for embedding models)
+        embeddingDimensions: z.number().optional().nullable(),
+        // Optional: refresh capabilities from models.dev (also refreshes type/dimensions)
         modelsDevId: z.string().optional(),
         // Or update capabilities manually
         capabilities: modelCapabilitiesSchema.optional(),
@@ -251,8 +303,38 @@ export const modelRouter = createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       try {
-        const { alias, newAlias, modelsDevId, capabilities, ...updates } =
-          input;
+        const {
+          alias,
+          newAlias,
+          modelsDevId,
+          capabilities,
+          modelType,
+          embeddingDimensions,
+          ...updates
+        } = input;
+
+        // Fetch capabilities and auto-detect type if modelsDevId provided
+        let capabilitiesToUpdate: ModelCapabilities | undefined;
+        let detectedType: ModelType | undefined;
+        let detectedDimensions: number | undefined;
+
+        if (modelsDevId) {
+          const modelInfo = await getModel(modelsDevId);
+          if (modelInfo) {
+            capabilitiesToUpdate = extractCapabilities(modelInfo);
+            detectedType = detectModelType(modelInfo);
+            detectedDimensions = getEmbeddingDimensions(modelInfo);
+          }
+        } else if (capabilities) {
+          capabilitiesToUpdate = capabilities as ModelCapabilities;
+        }
+
+        // Use provided values or fall back to detected values
+        const finalModelType = modelType ?? detectedType;
+        const finalDimensions =
+          embeddingDimensions !== undefined
+            ? embeddingDimensions
+            : detectedDimensions;
 
         // If changing alias, check if new alias exists
         if (newAlias && newAlias !== alias) {
@@ -264,17 +346,6 @@ export const modelRouter = createTRPCRouter({
           if (existing) {
             throw new Error("Model alias already exists");
           }
-        }
-
-        // Fetch capabilities if modelsDevId provided
-        let capabilitiesToUpdate: ModelCapabilities | undefined;
-        if (modelsDevId) {
-          const modelInfo = await getModel(modelsDevId);
-          if (modelInfo) {
-            capabilitiesToUpdate = extractCapabilities(modelInfo);
-          }
-        } else if (capabilities) {
-          capabilitiesToUpdate = capabilities as ModelCapabilities;
         }
 
         // If changing alias, we need to handle foreign key references
@@ -294,6 +365,8 @@ export const modelRouter = createTRPCRouter({
             alias: newAlias,
             provider: updates.provider ?? current.provider,
             modelId: updates.modelId ?? current.modelId,
+            modelType: finalModelType ?? current.modelType,
+            embeddingDimensions: finalDimensions ?? current.embeddingDimensions,
             capabilities: capabilitiesToUpdate ?? current.capabilities,
             updatedAt: new Date(),
           });
@@ -312,6 +385,14 @@ export const modelRouter = createTRPCRouter({
             ...updates,
             updatedAt: new Date(),
           };
+
+          if (finalModelType !== undefined) {
+            updateData.modelType = finalModelType;
+          }
+
+          if (finalDimensions !== undefined) {
+            updateData.embeddingDimensions = finalDimensions;
+          }
 
           if (capabilitiesToUpdate) {
             updateData.capabilities = capabilitiesToUpdate;
