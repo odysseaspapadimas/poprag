@@ -73,7 +73,7 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
       rerank: agent?.rerank ?? false,
       rerankModel: agent?.rerank ? "@cf/baai/bge-reranker-base" : undefined,
       topK: agent?.topK ?? 5,
-      minSimilarity: agent?.minSimilarity ?? 30,
+      minSimilarity: agent?.minSimilarity ?? 15,
     },
   });
 
@@ -387,8 +387,9 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
                       />
                     </FormControl>
                     <FormDescription>
-                      Filter out results below this similarity threshold (30-40%
-                      for broader recall, 50-70% for precision)
+                      Filter out results below this similarity threshold (15-25%
+                      for broader recall, 30-50% for precision). OpenAI
+                      embeddings produce lower scores than other models.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

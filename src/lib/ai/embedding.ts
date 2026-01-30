@@ -8,7 +8,11 @@ import { embedMany } from "ai";
 import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks } from "@/db/schema";
-import { DEFAULT_MODELS, EMBEDDING_CONFIG } from "@/lib/ai/constants";
+import {
+  DEFAULT_MODELS,
+  EMBEDDING_CONFIG,
+  RAG_CONFIG,
+} from "@/lib/ai/constants";
 import { resolveModelConfig } from "@/lib/ai/helpers";
 
 /**
@@ -301,7 +305,7 @@ export async function findRelevantContentWithEmbedding(
     minSimilarity?: number;
   },
 ) {
-  const { topK = 6, minSimilarity = 0.3 } = options || {};
+  const { topK = 6, minSimilarity = RAG_CONFIG.MIN_SIMILARITY } = options || {};
 
   try {
     // Preprocess query - remove noise and normalize
@@ -374,7 +378,17 @@ export async function findRelevantContentWithEmbedding(
       });
     }
 
-    // Transform and filter results
+    // Transform and filter results using adaptive thresholding
+    // OpenAI embeddings produce lower absolute scores than BGE models,
+    // so we use both absolute and relative thresholds
+    const topScore = results.matches[0]?.score || 0;
+    const relativeThreshold = topScore * RAG_CONFIG.RELATIVE_SCORE_THRESHOLD;
+    const effectiveThreshold = Math.max(minSimilarity, relativeThreshold);
+
+    console.log(
+      `[RAG] Adaptive threshold: absolute=${minSimilarity.toFixed(3)}, relative=${relativeThreshold.toFixed(3)} (top=${topScore.toFixed(3)} * ${RAG_CONFIG.RELATIVE_SCORE_THRESHOLD}), effective=${effectiveThreshold.toFixed(3)}`,
+    );
+
     const matches = results.matches
       .filter((match) => {
         // Validate metadata structure
@@ -397,13 +411,13 @@ export async function findRelevantContentWithEmbedding(
           return false;
         }
 
-        // Check similarity threshold
-        const meetsThreshold = match.score >= minSimilarity;
+        // Check similarity threshold (using effective adaptive threshold)
+        const meetsThreshold = match.score >= effectiveThreshold;
         if (!meetsThreshold) {
           console.debug(
             `[RAG] Match ${match.id} score ${match.score.toFixed(
               3,
-            )} below threshold ${minSimilarity}`,
+            )} below effective threshold ${effectiveThreshold.toFixed(3)}`,
           );
           return false;
         }
@@ -412,9 +426,11 @@ export async function findRelevantContentWithEmbedding(
       })
       .map((match) => {
         const textContent = String(match.metadata?.text || "");
+        // Normalize score to 0-1 range for display (based on top score)
+        const normalizedScore = topScore > 0 ? match.score / topScore : 0;
         return {
           id: match.id,
-          score: match.score,
+          score: normalizedScore, // Normalized for display
           vectorScore: match.score, // Preserve original vector similarity score
           content: textContent,
           metadata: {
@@ -470,16 +486,18 @@ export async function findRelevantContentWithEmbedding(
 
     if (matches.length === 0) {
       console.warn(
-        `[RAG] All ${results.matches.length} results filtered out. Check metadata structure and similarity threshold.`,
+        `[RAG] All ${results.matches.length} results filtered out. Top raw score was ${topScore.toFixed(3)}, effective threshold was ${effectiveThreshold.toFixed(3)}.`,
       );
     } else {
       console.log(
         `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`,
       );
       console.log(
-        `[RAG] Score range: ${matches[0].score.toFixed(3)} to ${matches[
+        `[RAG] Raw score range: ${matches[0].vectorScore.toFixed(3)} to ${matches[
           matches.length - 1
-        ].score.toFixed(3)}`,
+        ].vectorScore.toFixed(
+          3,
+        )} (normalized: ${matches[0].score.toFixed(3)} to ${matches[matches.length - 1].score.toFixed(3)})`,
       );
       console.log(
         `[RAG] Content lengths: ${matches

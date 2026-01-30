@@ -201,11 +201,13 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
 
   const getVectorScoreColor = (score: number) => {
     // Vector similarity scores range from 0-1 (cosine similarity)
-    if (score >= 0.7)
+    // OpenAI text-embedding-3-small produces lower scores than BGE models
+    // Typical relevant results: 0.15-0.40
+    if (score >= 0.35)
       return "bg-green-500/20 text-green-700 dark:text-green-400";
-    if (score >= 0.5)
+    if (score >= 0.25)
       return "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400";
-    if (score >= 0.3)
+    if (score >= 0.15)
       return "bg-orange-500/20 text-orange-700 dark:text-orange-400";
     return "bg-red-500/20 text-red-700 dark:text-red-400";
   };

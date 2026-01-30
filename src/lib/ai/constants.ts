@@ -60,8 +60,19 @@ export const RAG_CONFIG = {
   /** Default number of results to return */
   TOP_K: 6,
 
-  /** Minimum similarity score for vector search results */
-  MIN_SIMILARITY: 0.3,
+  /**
+   * Minimum absolute similarity score for vector search results
+   * OpenAI text-embedding-3-small produces lower scores than BGE models
+   * Typical range: 0.15-0.40 for relevant content
+   */
+  MIN_SIMILARITY: 0.15,
+
+  /**
+   * Relative score threshold - results must be within this ratio of the top score
+   * E.g., 0.6 means results must have score >= topScore * 0.6
+   * This adapts to the query's natural score distribution
+   */
+  RELATIVE_SCORE_THRESHOLD: 0.6,
 
   /** K parameter for reciprocal rank fusion */
   RRF_K: 60,
