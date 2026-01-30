@@ -43,7 +43,7 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
         context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 50 }),
+        context.trpc.agent.getRunMetrics.queryOptions({ agentId, limit: 200 }),
       ),
       context.queryClient.prefetchQuery(
         context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
@@ -77,7 +77,7 @@ function AgentDetailPage() {
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
     queryClient.invalidateQueries({
-      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 50 }),
+      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 200 }),
     });
   };
 

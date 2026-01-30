@@ -253,6 +253,9 @@ function Messages({
 export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: session } = useSuspenseQuery(
+    trpc.auth.getSession.queryOptions(),
+  );
   const { data: agent } = useSuspenseQuery(
     trpc.agent.get.queryOptions({ id: agentId }),
   );
@@ -296,6 +299,7 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       api: `/api/chat/${agent?.slug}`,
       body: {
         conversationId, // Include conversationId in request
+        initiatedBy: session?.user?.id,
       },
     }),
     onFinish: async ({ message }) => {

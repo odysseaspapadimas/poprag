@@ -54,6 +54,7 @@ export interface ChatRequest {
     rerankModel?: string;
   };
   conversationId?: string;
+  initiatedBy?: string;
   languageInstruction?: string; // Explicit language instruction for Flutter app
 }
 
@@ -67,6 +68,8 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
 
   // Keep in outer scope for error metrics
   let agentData: Agent | undefined;
+  let selectedAlias: string | undefined;
+  let resolvedCapabilities: ModelCapabilities | null = null;
 
   try {
     // 1. Resolve agent first (needed for subsequent parallel queries)
@@ -110,16 +113,21 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     }
 
     // 5. Resolve model and capabilities
-    const { model, capabilities, selectedAlias, provider } =
-      await resolveModelForChat(request.modelAlias || policy.modelAlias);
+    const resolved = await resolveModelForChat(
+      request.modelAlias || policy.modelAlias,
+    );
+    const resolvedAlias = resolved.selectedAlias;
+    selectedAlias = resolvedAlias;
+    resolvedCapabilities = resolved.capabilities;
+    const { model, capabilities, provider } = resolved;
 
     // 5b. Add chat model info to debug info
     if (ragDebugInfo.models) {
-      ragDebugInfo.models.chatModel = selectedAlias;
+      ragDebugInfo.models.chatModel = resolvedAlias;
       ragDebugInfo.models.chatProvider = provider;
     } else {
       ragDebugInfo.models = {
-        chatModel: selectedAlias,
+        chatModel: resolvedAlias,
         chatProvider: provider,
       };
     }
@@ -131,7 +139,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         parts: await processMessageParts(
           msg.parts,
           capabilities,
-          selectedAlias,
+          resolvedAlias,
           env,
         ),
       })),
@@ -164,13 +172,22 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           event,
           startTime,
           firstTokenTime,
+          selectedAlias,
+          resolvedCapabilities,
         );
       },
     });
 
     return result;
   } catch (error) {
-    await saveErrorMetric(agentData, runId, startTime, error);
+    await saveErrorMetric(
+      agentData,
+      runId,
+      startTime,
+      error,
+      request,
+      selectedAlias,
+    );
     throw error;
   }
 }
@@ -304,6 +321,56 @@ async function resolveModelForChat(selectedAlias: string) {
 /**
  * Save transcript and metrics after successful completion
  */
+type UsageSummary = {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
+
+function normalizeUsage(
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  } | null,
+): UsageSummary {
+  if (!usage) return {};
+  const promptTokens =
+    typeof usage.inputTokens === "number" ? usage.inputTokens : undefined;
+  let completionTokens =
+    typeof usage.outputTokens === "number" ? usage.outputTokens : undefined;
+  let totalTokens =
+    typeof usage.totalTokens === "number" ? usage.totalTokens : undefined;
+
+  if (totalTokens == null && promptTokens != null && completionTokens != null) {
+    totalTokens = promptTokens + completionTokens;
+  }
+  if (completionTokens == null && totalTokens != null && promptTokens != null) {
+    const diff = totalTokens - promptTokens;
+    completionTokens = diff >= 0 ? diff : undefined;
+  }
+
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+function calculateCostMicrocents(
+  usage: UsageSummary,
+  capabilities: ModelCapabilities | null,
+): number | undefined {
+  const inputRate = capabilities?.costInputPerMillion;
+  const outputRate = capabilities?.costOutputPerMillion;
+  if (typeof inputRate !== "number" && typeof outputRate !== "number") {
+    return undefined;
+  }
+
+  const inputTokens = usage.promptTokens ?? 0;
+  const outputTokens = usage.completionTokens ?? 0;
+  const cost =
+    (inputRate ?? 0) * inputTokens + (outputRate ?? 0) * outputTokens;
+  if (!Number.isFinite(cost)) return undefined;
+  return Math.round(cost);
+}
+
 async function saveTranscriptAndMetrics(
   agentData: Agent,
   runId: string,
@@ -312,20 +379,27 @@ async function saveTranscriptAndMetrics(
   event: StepResult<ToolSet>,
   startTime: number,
   firstTokenTime?: number,
+  modelAlias?: string,
+  capabilities?: ModelCapabilities | null,
 ) {
   const latency = Date.now() - startTime;
   const timeToFirstToken = firstTokenTime
     ? firstTokenTime - startTime
     : undefined;
+  const conversationId = request.conversationId || nanoid();
+  const usage = normalizeUsage(event.usage ?? null);
+  const costMicrocents = calculateCostMicrocents(usage, capabilities ?? null);
 
   // Save transcript with RAG debug info
   await db.insert(transcript).values({
     id: nanoid(),
     agentId: agentData.id,
-    conversationId: request.conversationId || nanoid(),
+    conversationId,
     runId,
+    initiatedBy: request.initiatedBy ?? null,
     request: {
       ...(request as unknown as Record<string, unknown>),
+      conversationId,
       ragDebug: ragDebugInfo,
     },
     response: {
@@ -333,9 +407,9 @@ async function saveTranscriptAndMetrics(
       finishReason: event.finishReason,
     },
     usage: {
-      promptTokens: event.usage.inputTokens,
-      completionTokens: event.usage.totalTokens,
-      totalTokens: event.usage.totalTokens,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
     },
     latencyMs: latency,
     createdAt: new Date(),
@@ -348,7 +422,14 @@ async function saveTranscriptAndMetrics(
       id: metricId,
       agentId: agentData.id,
       runId,
-      tokens: event.usage?.totalTokens,
+      conversationId,
+      initiatedBy: request.initiatedBy ?? null,
+      modelAlias,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      tokens: usage.totalTokens,
+      costMicrocents,
       latencyMs: latency,
       timeToFirstTokenMs: timeToFirstToken,
       createdAt: new Date(),
@@ -369,6 +450,8 @@ async function saveErrorMetric(
   runId: string,
   startTime: number,
   error: unknown,
+  request?: ChatRequest,
+  modelAlias?: string,
 ) {
   const latency = Date.now() - startTime;
 
@@ -380,6 +463,9 @@ async function saveErrorMetric(
       id: metricId,
       agentId: agentData.id,
       runId,
+      conversationId: request?.conversationId ?? null,
+      initiatedBy: request?.initiatedBy ?? null,
+      modelAlias,
       latencyMs: latency,
       errorType: error instanceof Error ? error.name : "UnknownError",
       createdAt: new Date(),

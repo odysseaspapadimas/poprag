@@ -23,6 +23,7 @@ const chatRequestSchema = z.object({
     })
     .optional(),
   conversationId: z.string().optional(),
+  initiatedBy: z.string().optional(),
 });
 
 class BadRequestError extends Error {

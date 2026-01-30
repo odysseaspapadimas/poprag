@@ -13,6 +13,7 @@ import {
   prompt,
   promptVersion,
   runMetric,
+  transcript,
   user,
 } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
@@ -187,7 +188,7 @@ export const agentRouter = createTRPCRouter({
         rerank: input.rerank,
         rerankModel: input.rerankModel,
         topK: input.topK || 5,
-        minSimilarity: input.minSimilarity || 30,
+        minSimilarity: input.minSimilarity || 15,
         createdBy: ctx.session.user.id,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -533,7 +534,7 @@ export const agentRouter = createTRPCRouter({
     .input(
       z.object({
         agentId: z.string(),
-        limit: z.number().min(1).max(100).default(50),
+        limit: z.number().min(1).max(200).default(50),
         sinceMs: z.number().optional(),
       }),
     )
@@ -544,8 +545,40 @@ export const agentRouter = createTRPCRouter({
       }
 
       return await db
-        .select()
+        .select({
+          id: runMetric.id,
+          agentId: runMetric.agentId,
+          runId: runMetric.runId,
+          conversationId: sql<
+            string | null
+          >`coalesce(${runMetric.conversationId}, ${transcript.conversationId})`,
+          initiatedBy: sql<
+            string | null
+          >`coalesce(${runMetric.initiatedBy}, ${transcript.initiatedBy})`,
+          initiatedByName: user.name,
+          initiatedByEmail: user.email,
+          modelAlias: runMetric.modelAlias,
+          promptTokens: runMetric.promptTokens,
+          completionTokens: runMetric.completionTokens,
+          totalTokens: runMetric.totalTokens,
+          tokens: runMetric.tokens,
+          costMicrocents: runMetric.costMicrocents,
+          latencyMs: runMetric.latencyMs,
+          timeToFirstTokenMs: runMetric.timeToFirstTokenMs,
+          errorType: runMetric.errorType,
+          createdAt: runMetric.createdAt,
+          request: transcript.request,
+          response: transcript.response,
+        })
         .from(runMetric)
+        .leftJoin(transcript, eq(transcript.runId, runMetric.runId))
+        .leftJoin(
+          user,
+          or(
+            eq(user.id, runMetric.initiatedBy),
+            eq(user.id, transcript.initiatedBy),
+          ),
+        )
         .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(runMetric.createdAt))
         .limit(input.limit);

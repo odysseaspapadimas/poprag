@@ -162,7 +162,7 @@ export const agent = sqliteTable(
     rerank: integer("rerank", { mode: "boolean" }).default(true).notNull(),
     rerankModel: text("rerank_model"),
     topK: integer("top_k").default(5),
-    minSimilarity: integer("min_similarity").default(30),
+    minSimilarity: integer("min_similarity").default(15),
   },
   (table) => [
     index("agent_slug_idx").on(table.slug),
@@ -439,6 +439,12 @@ export const runMetric = sqliteTable(
       .notNull()
       .references(() => agent.id, { onDelete: "cascade" }),
     runId: text("run_id").notNull(),
+    conversationId: text("conversation_id"),
+    initiatedBy: text("initiated_by").references(() => user.id),
+    modelAlias: text("model_alias"),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    totalTokens: integer("total_tokens"),
     tokens: integer("tokens"),
     costMicrocents: integer("cost_microcents"),
     latencyMs: integer("latency_ms"),
@@ -448,7 +454,12 @@ export const runMetric = sqliteTable(
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
   },
-  (table) => [index("run_metric_agent_idx").on(table.agentId, table.createdAt)],
+  (table) => [
+    index("run_metric_agent_idx").on(table.agentId, table.createdAt),
+    index("run_metric_run_idx").on(table.runId),
+    index("run_metric_conversation_idx").on(table.conversationId),
+    index("run_metric_initiated_by_idx").on(table.initiatedBy),
+  ],
 );
 
 export const chatImage = sqliteTable(
