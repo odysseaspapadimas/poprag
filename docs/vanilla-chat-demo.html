@@ -91,6 +91,12 @@
         border-color: #e9eef5;
         background: #ffffff;
       }
+      .message img {
+        display: block;
+        max-width: 100%;
+        border-radius: 8px;
+        margin-top: 8px;
+      }
       .meta {
         font-size: 12px;
         color: var(--muted);
@@ -152,6 +158,11 @@
           ></textarea>
         </div>
 
+        <div style="margin-top: 12px;">
+          <label for="imageInput">Image (optional)</label>
+          <input id="imageInput" type="file" accept="image/*" />
+        </div>
+
         <div class="row" style="margin-top: 12px;">
           <button id="sendBtn">Send</button>
           <button id="clearBtn" type="button">Clear</button>
@@ -172,6 +183,7 @@
       const baseUrlInput = document.getElementById('baseUrl');
       const agentSlugInput = document.getElementById('agentSlug');
       const messageInput = document.getElementById('messageInput');
+      const imageInput = document.getElementById('imageInput');
       const sendBtn = document.getElementById('sendBtn');
       const clearBtn = document.getElementById('clearBtn');
       const messagesEl = document.getElementById('messages');
@@ -179,8 +191,9 @@
 
       sendBtn.addEventListener('click', () => {
         const text = messageInput.value.trim();
-        if (!text) return;
-        sendMessage(text);
+        const imageFile = getSelectedImageFile();
+        if (!text && !imageFile) return;
+        sendMessage(text, imageFile);
       });
 
       clearBtn.addEventListener('click', () => {
@@ -188,24 +201,31 @@
         state.conversationId = getConversationId();
         messagesEl.innerHTML = '';
         statusEl.textContent = 'Cleared. New conversation started.';
+        if (imageInput) imageInput.value = '';
       });
 
       messageInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           const text = messageInput.value.trim();
-          if (!text) return;
-          sendMessage(text);
+          const imageFile = getSelectedImageFile();
+          if (!text && !imageFile) return;
+          sendMessage(text, imageFile);
         }
       });
 
-      async function sendMessage(text) {
+      async function sendMessage(text, imageFile) {
         setBusy(true, 'Sending...');
         messageInput.value = '';
 
-        const userMessage = createMessage('user', text);
+        const imageDataUrl = imageFile ? await readFileAsDataUrl(imageFile) : null;
+        const finalText = text || (imageDataUrl ? 'Analyze this image' : '');
+
+        const userMessage = createMessage('user', finalText, imageDataUrl);
         state.messages.push(userMessage);
         renderMessage(userMessage);
+
+        if (imageInput) imageInput.value = '';
 
         const baseUrl = (baseUrlInput.value || '').trim().replace(/\/+$/, '');
         const agentSlug = (agentSlugInput.value || 'nescafe-assistant').trim();
@@ -215,7 +235,6 @@
         const requestBody = {
           messages: payloadMessages,
           conversationId: state.conversationId,
-          rag: { topK: 6 },
         };
 
         const assistantMessage = createMessage('assistant', '');
@@ -247,21 +266,57 @@
         }
       }
 
-      function createMessage(role, text) {
+      function createMessage(role, text, imageDataUrl) {
+        const parts = [];
+        if (text && text.trim()) {
+          parts.push({ type: 'text', text });
+        }
+        if (imageDataUrl) {
+          parts.push({ type: 'image', image: imageDataUrl });
+        }
+        if (!parts.length) {
+          parts.push({ type: 'text', text: '' });
+        }
         return {
           id: generateId(),
           role,
-          parts: [{ type: 'text', text }],
+          parts,
         };
       }
 
       function renderMessage(message) {
         const el = document.createElement('div');
         el.className = `message ${message.role}`;
-        el.textContent = message.parts[0]?.text || '';
+        for (const part of message.parts || []) {
+          if (part.type === 'text' && part.text) {
+            const textEl = document.createElement('div');
+            textEl.textContent = part.text;
+            el.appendChild(textEl);
+          } else if (part.type === 'image' && part.image) {
+            const img = document.createElement('img');
+            img.src = part.image;
+            img.alt = message.role === 'user' ? 'User image' : 'Image';
+            el.appendChild(img);
+          }
+        }
         messagesEl.appendChild(el);
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return el;
+      }
+
+      function getSelectedImageFile() {
+        return imageInput && imageInput.files && imageInput.files[0]
+          ? imageInput.files[0]
+          : null;
+      }
+
+      function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
       }
 
       async function streamResponse(stream, onTextDelta) {

@@ -110,7 +110,6 @@ Authentication/authorization middleware should be added to the chat API to enfor
   variables?: Record<string, any>; // Optional: Template variables
   rag?: {                          // Optional: RAG configuration overrides
     topK?: number;                 // Number of context chunks (default: agent setting)
-    query?: string;                // Custom retrieval query
     filters?: Record<string, any>; // Metadata filters
   };
 }
@@ -190,7 +189,6 @@ type MessagePart =
   "messages": [...],
   "rag": {
     "topK": 10,                    // Retrieve more context
-    "query": "coffee brewing tips", // Custom search query
     "filters": { "category": "tutorial" }
   }
 }
@@ -683,7 +681,6 @@ Customize retrieval behavior per request:
   "messages": [...],
   "rag": {
     "topK": 10,              // Retrieve more context chunks
-    "query": "custom query", // Override automatic query extraction
     "filters": {             // Metadata filters
       "category": "documentation",
       "version": "2.0"

@@ -27,13 +27,15 @@ export type ProcessedImagePart = ImagePayload | SkippedImagePayload;
 
 export interface ImagePartInput {
   type: "image";
-  image: {
-    id: string;
-    url: string;
-    fileName: string;
-    mime: string;
-    bytes: number;
-  };
+  image:
+    | string
+    | {
+        id?: string;
+        url?: string;
+        fileName?: string;
+        mime?: string;
+        bytes?: number;
+      };
 }
 
 // ─────────────────────────────────────────────────────
@@ -109,7 +111,24 @@ export async function processImagePart(
     };
   }
 
-  const { dataUrl, mime } = await fetchImageAsBase64(imagePart.image.id, env);
+  const inlineDataUrl = resolveInlineDataUrl(imagePart.image);
+  if (inlineDataUrl) {
+    return {
+      type: "file",
+      mediaType: getMimeFromDataUrl(inlineDataUrl) || "image/png",
+      url: inlineDataUrl,
+    };
+  }
+
+  const imageId = resolveImageId(imagePart.image);
+  if (!imageId) {
+    return {
+      type: "text",
+      text: "[Image attachment skipped - missing image reference]",
+    };
+  }
+
+  const { dataUrl, mime } = await fetchImageAsBase64(imageId, env);
 
   return {
     type: "file",
@@ -126,8 +145,38 @@ export function isImagePart(part: unknown): part is ImagePartInput {
     typeof part === "object" &&
     part !== null &&
     "type" in part &&
+    "image" in part &&
     (part as { type: string }).type === "image"
   );
+}
+
+function resolveInlineDataUrl(image: ImagePartInput["image"]): string | null {
+  if (typeof image === "string") {
+    return isDataUrl(image) ? image : null;
+  }
+
+  if (image && typeof image === "object" && typeof image.url === "string") {
+    return isDataUrl(image.url) ? image.url : null;
+  }
+
+  return null;
+}
+
+function resolveImageId(image: ImagePartInput["image"]): string | null {
+  if (image && typeof image === "object" && typeof image.id === "string") {
+    return image.id;
+  }
+  return null;
+}
+
+function isDataUrl(value: string): boolean {
+  return value.startsWith("data:");
+}
+
+function getMimeFromDataUrl(value: string): string | null {
+  if (!value.startsWith("data:")) return null;
+  const match = /^data:([^;]+);base64,/.exec(value);
+  return match?.[1] ?? null;
 }
 
 /**

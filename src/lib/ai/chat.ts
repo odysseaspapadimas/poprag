@@ -46,7 +46,6 @@ export interface ChatRequest {
   variables?: Record<string, unknown>;
   rag?: {
     enabled?: boolean;
-    query?: string;
     topK?: number;
     filters?: Record<string, unknown>;
     rewriteQuery?: boolean;
@@ -265,13 +264,15 @@ async function loadModelPolicy(agentId: string) {
  * Extract user query from request
  */
 function extractUserQuery(request: ChatRequest): string {
-  if (request.rag?.query) {
-    return request.rag.query;
+  for (let i = request.messages.length - 1; i >= 0; i -= 1) {
+    const message = request.messages[i];
+    if (message?.role !== "user") continue;
+    const textPart = message.parts.find((part) => part.type === "text");
+    if (textPart?.text) return textPart.text as string;
+    return "";
   }
 
-  const lastUserMessage = request.messages[request.messages.length - 1];
-  const textPart = lastUserMessage?.parts.find((p) => p.type === "text");
-  return (textPart?.text as string) || "";
+  return "";
 }
 
 /**

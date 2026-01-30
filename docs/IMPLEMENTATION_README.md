@@ -227,7 +227,6 @@ Request:
   ],
   "variables": { "brand": "Nescafé" },
   "rag": {
-    "query": "coffee capsules catalog",
     "topK": 6
   }
 }

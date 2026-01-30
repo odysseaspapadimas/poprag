@@ -14,7 +14,6 @@ const chatRequestSchema = z.object({
   rag: z
     .object({
       enabled: z.boolean().optional(),
-      query: z.string().optional(),
       topK: z.number().optional(),
       filters: z.record(z.string(), z.unknown()).optional(),
       rewriteQuery: z.boolean().optional(),
@@ -61,17 +60,9 @@ function validateChatPayload(payload: z.infer<typeof chatRequestSchema>) {
       typeof part.image === "string" &&
       part.image.length > 0,
   );
-  const queryOverride =
-    typeof payload.rag?.query === "string" ? payload.rag.query.trim() : "";
 
-  if (payload.rag?.query !== undefined && queryOverride.length === 0) {
-    throw new BadRequestError("rag.query must be a non-empty string.");
-  }
-
-  if (!hasText && !hasImage && queryOverride.length === 0) {
-    throw new BadRequestError(
-      "Last user message must include text or image, or provide rag.query.",
-    );
+  if (!hasText && !hasImage) {
+    throw new BadRequestError("Last user message must include text or image.");
   }
 }
 

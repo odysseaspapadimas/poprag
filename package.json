@@ -1,7 +1,7 @@
 {
-  "name": "kolm-start",
-  "description": "TanStack Start starter with tRPC, Drizzle ORM, better-auth and TailwindCSS",
-  "author": "Jelle Kuipers <info@jellekuipers.com> (https://jellekuipers.com)",
+  "name": "poprag",
+  "description": "",
+  "author": "Odysseas Papadimas <odysseas.papadimas9@gmail.com>",
   "version": "0.7.1",
   "type": "module",
   "pnpm": {

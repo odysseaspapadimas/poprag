@@ -41,7 +41,7 @@ Versioning: Prompt labels are pointers to immutable versions; `AgentModelPolicy`
 2. Worker resolves agent from D1 (cache in KV for 60s). Validate status `active` and optional RBAC.
 3. Fetch active PromptVersion labelled `prod`; load AgentModelPolicy effective now; merge default variables with request overrides (validate via prompt template engine).
 4. Determine generation provider: if request-specified `modelAlias` allowed in policy, otherwise default.
-5. Retrieval gating: if `AgentIndexPin` exists and either `rag.query` provided or prompt metadata demands retrieval (flag in `AgentModelPolicy.enabledTools`), run retrieval:
+5. Retrieval gating: if `AgentIndexPin` exists and prompt metadata demands retrieval (flag in `AgentModelPolicy.enabledTools`), run retrieval:
    - Compose query (explicit query or last user message).
    - Embed via chosen embedding model alias (likely separate alias). Support using Workers AI embedding fallback.
    - Call Vectorize `query` with `topK` (policy default 6). Filter by pinned `indexVersion`.
@@ -100,7 +100,7 @@ Request body:
   "messages": [...],            // AI SDK UIMessage format
   "modelAlias": "gpt4o-primary",// optional, validated
   "variables": { "brand": "Nescafé" },
-  "rag": { "query": "best capsule", "topK": 4, "filters": { "tags": ["coffee"] } },
+  "rag": { "topK": 4, "filters": { "tags": ["coffee"] } },
   "conversationId": "session:abc"
 }
 ```
