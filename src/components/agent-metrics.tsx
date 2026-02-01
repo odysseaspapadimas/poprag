@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   type ColumnDef,
   type ExpandedState,
@@ -828,9 +828,10 @@ export function AgentMetrics({ agentId }: Props) {
     // Only recompute when timePeriod changes, not on every render
   }, [timePeriod]);
 
-  const { data: metrics } = useSuspenseQuery(
-    trpc.agent.getRunMetrics.queryOptions({ agentId, sinceMs }),
-  );
+  const { data: metrics, isFetching: isMetricsFetching } = useQuery({
+    ...trpc.agent.getRunMetrics.queryOptions({ agentId, sinceMs }),
+    placeholderData: (previous) => previous,
+  });
 
   const rows = (metrics ?? []) as RunMetricRow[];
 
@@ -1359,6 +1360,9 @@ export function AgentMetrics({ agentId }: Props) {
               ))}
             </SelectContent>
           </Select>
+          {isMetricsFetching && (
+            <span className="text-xs text-muted-foreground">Updating...</span>
+          )}
         </div>
       </div>
 

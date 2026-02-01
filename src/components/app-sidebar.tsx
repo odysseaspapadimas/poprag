@@ -1,8 +1,5 @@
 "use client";
 
-import { Link } from "@tanstack/react-router";
-import { Bot, BotMessageSquare, SquareTerminal } from "lucide-react";
-import type * as React from "react";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
 import {
@@ -15,6 +12,9 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { Link } from "@tanstack/react-router";
+import { Bot, BotMessageSquare, SquareTerminal } from "lucide-react";
+import type * as React from "react";
 
 // This is sample data.
 const data = {
@@ -64,8 +64,7 @@ export function AppSidebar({
               className="data-[slot=sidebar-menu-button]:p-1.5!"
             >
               <Link to="/">
-                {/* <IconInnerShadowTop className="!size-5" /> */}
-                <span className="text-base font-semibold">Ragbot</span>
+                <span className="text-base font-semibold">PopRag</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

@@ -79,7 +79,8 @@ function AgentDetailPage() {
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
     queryClient.invalidateQueries({
-      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId, limit: 200 }),
+      queryKey: trpc.agent.getRunMetrics.queryKey({ agentId }),
+      exact: false,
     });
   };
 
