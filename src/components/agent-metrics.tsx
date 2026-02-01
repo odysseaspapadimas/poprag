@@ -29,6 +29,11 @@ import {
 import { RAGDebugPanel } from "@/components/rag-debug-panel";
 import { Button } from "@/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -68,6 +73,7 @@ const TIME_PERIOD_MS: Record<TimePeriod, number | undefined> = {
 };
 
 type RagDebugInfo = ComponentProps<typeof RAGDebugPanel>["debugInfo"];
+type RagChunk = NonNullable<NonNullable<RagDebugInfo>["chunks"]>[number];
 
 type RunMetricRow = {
   id: string;
@@ -124,6 +130,11 @@ type UserSummary = {
   runs: RunMetricRow[];
 };
 
+type RagRunInfo = {
+  run: RunMetricRow;
+  debug: RagDebugInfo | null;
+};
+
 const formatCurrency = (microcents?: number | null) => {
   if (typeof microcents !== "number" || Number.isNaN(microcents)) return "-";
   const dollars = microcents / 1_000_000;
@@ -144,6 +155,15 @@ const computeAverage = (values: Array<number | null | undefined>) => {
   if (!filtered.length) return null;
   const total = filtered.reduce((acc, value) => acc + value, 0);
   return Math.round(total / filtered.length);
+};
+
+const computeAverageFloat = (values: Array<number | null | undefined>) => {
+  const filtered = values.filter(
+    (value): value is number => typeof value === "number",
+  );
+  if (!filtered.length) return null;
+  const total = filtered.reduce((acc, value) => acc + value, 0);
+  return total / filtered.length;
 };
 
 const formatUserLabel = (
@@ -172,6 +192,52 @@ const getRagDebugInfo = (
   if (!request) return null;
   const ragDebug = (request as { ragDebug?: RagDebugInfo }).ragDebug;
   return ragDebug ?? null;
+};
+
+const getRagChunks = (debug: RagDebugInfo | null): RagChunk[] => {
+  if (!debug || !Array.isArray(debug.chunks)) return [];
+  return debug.chunks;
+};
+
+const getTopChunkScore = (chunks: RagChunk[]) => {
+  let topScore: number | null = null;
+  for (const chunk of chunks) {
+    if (typeof chunk.score !== "number") continue;
+    if (topScore == null || chunk.score > topScore) {
+      topScore = chunk.score;
+    }
+  }
+  return topScore;
+};
+
+const getTopChunkByScore = (
+  chunks: RagChunk[],
+  key: "vectorScore" | "rerankScore",
+) => {
+  let topChunk: RagChunk | null = null;
+  let topScore: number | null = null;
+  for (const chunk of chunks) {
+    const score = chunk[key];
+    if (typeof score !== "number") continue;
+    if (topScore == null || score > topScore) {
+      topScore = score;
+      topChunk = chunk;
+    }
+  }
+  return topChunk;
+};
+
+const getRerankScoreDeltas = (chunks: RagChunk[]) => {
+  const deltas: number[] = [];
+  for (const chunk of chunks) {
+    if (
+      typeof chunk.vectorScore === "number" &&
+      typeof chunk.rerankScore === "number"
+    ) {
+      deltas.push(chunk.rerankScore - chunk.vectorScore);
+    }
+  }
+  return deltas;
 };
 
 const extractLastUserMessage = (request: Record<string, unknown> | null) => {
@@ -204,6 +270,15 @@ type DailyMetric = {
   cost: number;
   tokens: number;
   runs: number;
+};
+
+type RagDailyMetric = {
+  date: string;
+  dateLabel: string;
+  attempted: number;
+  success: number;
+  noResults: number;
+  skipped: number;
 };
 
 function aggregateByDay(rows: RunMetricRow[]): DailyMetric[] {
@@ -242,12 +317,129 @@ function aggregateByDay(rows: RunMetricRow[]): DailyMetric[] {
   );
 }
 
+function aggregateRagByDay(ragRuns: RagRunInfo[]): RagDailyMetric[] {
+  const grouped = new Map<string, RagDailyMetric>();
+
+  for (const { run, debug } of ragRuns) {
+    if (!debug?.enabled) continue;
+
+    const date = new Date(run.createdAt);
+    const dateKey = date.toISOString().split("T")[0];
+    const dateLabel = date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+
+    const existing = grouped.get(dateKey);
+    const entry = existing ?? {
+      date: dateKey,
+      dateLabel,
+      attempted: 0,
+      success: 0,
+      noResults: 0,
+      skipped: 0,
+    };
+
+    if (debug.skippedByIntent) {
+      entry.skipped += 1;
+    } else {
+      entry.attempted += 1;
+      const chunks = getRagChunks(debug);
+      if (chunks.length > 0) {
+        entry.success += 1;
+      } else {
+        entry.noResults += 1;
+      }
+    }
+
+    if (!existing) {
+      grouped.set(dateKey, entry);
+    }
+  }
+
+  return Array.from(grouped.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+}
+
 // Bright colors that work well on both light and dark backgrounds
 const CHART_COLORS = {
   primary: "#6366f1", // Indigo-500 - vibrant purple/blue
   primaryLight: "#818cf8", // Indigo-400
   secondary: "#22d3ee", // Cyan-400
 };
+
+function RagRetrievalChart({ data }: { data: RagDailyMetric[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+        No RAG data to display
+      </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis
+          dataKey="dateLabel"
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          className="text-muted-foreground"
+        />
+        <YAxis
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          className="text-muted-foreground"
+          width={45}
+        />
+        <Tooltip
+          cursor={false}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const row = payload[0].payload as RagDailyMetric;
+            const attempted = row.attempted;
+            const successRate = attempted
+              ? `${((row.success / attempted) * 100).toFixed(1)}%`
+              : "-";
+            return (
+              <div className="bg-popover border rounded-lg shadow-lg p-2 text-sm">
+                <div className="font-medium">{row.dateLabel}</div>
+                <div className="text-muted-foreground">
+                  Success: {row.success}
+                </div>
+                <div className="text-muted-foreground">
+                  No results: {row.noResults}
+                </div>
+                <div className="text-muted-foreground">
+                  Attempted: {attempted}
+                </div>
+                <div className="text-muted-foreground">
+                  Success rate: {successRate}
+                </div>
+              </div>
+            );
+          }}
+        />
+        <Bar
+          dataKey="success"
+          stackId="rag"
+          fill={CHART_COLORS.primary}
+          radius={[4, 4, 0, 0]}
+        />
+        <Bar
+          dataKey="noResults"
+          stackId="rag"
+          fill={CHART_COLORS.secondary}
+          radius={[4, 4, 0, 0]}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
 
 function CostChart({ data }: { data: DailyMetric[] }) {
   if (data.length === 0) {
@@ -626,6 +818,7 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
 export function AgentMetrics({ agentId }: Props) {
   const trpc = useTRPC();
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
+  const [isRagOpen, setIsRagOpen] = useState(false);
 
   // Compute sinceMs based on time period - "all" = undefined (matches loader prefetch)
   const sinceMs = useMemo(() => {
@@ -640,6 +833,97 @@ export function AgentMetrics({ agentId }: Props) {
   );
 
   const rows = (metrics ?? []) as RunMetricRow[];
+
+  const ragRuns = useMemo<RagRunInfo[]>(
+    () =>
+      rows.map((run) => ({
+        run,
+        debug: getRagDebugInfo(run.request),
+      })),
+    [rows],
+  );
+
+  const ragEnabledRuns = useMemo(
+    () => ragRuns.filter(({ debug }) => debug?.enabled),
+    [ragRuns],
+  );
+  const ragSkippedRuns = useMemo(
+    () => ragEnabledRuns.filter(({ debug }) => debug?.skippedByIntent),
+    [ragEnabledRuns],
+  );
+  const ragAttemptedRuns = useMemo(
+    () => ragEnabledRuns.filter(({ debug }) => !debug?.skippedByIntent),
+    [ragEnabledRuns],
+  );
+  const ragSuccessRuns = useMemo(
+    () =>
+      ragAttemptedRuns.filter(({ debug }) => getRagChunks(debug).length > 0),
+    [ragAttemptedRuns],
+  );
+  const ragNoResultsRuns = useMemo(
+    () =>
+      ragAttemptedRuns.filter(({ debug }) => getRagChunks(debug).length === 0),
+    [ragAttemptedRuns],
+  );
+
+  const ragDebugCoverage = ragRuns.filter(({ debug }) => debug != null).length;
+  const ragAttemptedCount = ragAttemptedRuns.length;
+  const ragSuccessRate = ragAttemptedCount
+    ? `${((ragSuccessRuns.length / ragAttemptedCount) * 100).toFixed(1)}%`
+    : "-";
+  const ragNoResultsRate = ragAttemptedCount
+    ? `${((ragNoResultsRuns.length / ragAttemptedCount) * 100).toFixed(1)}%`
+    : "-";
+
+  const ragAvgTopScore = computeAverageFloat(
+    ragSuccessRuns.map(({ debug }) => getTopChunkScore(getRagChunks(debug))),
+  );
+  const ragAvgRagTime = computeAverage(
+    ragAttemptedRuns.map(({ debug }) => debug?.timing?.totalRagMs ?? null),
+  );
+
+  const rerankRuns = useMemo(
+    () => ragAttemptedRuns.filter(({ debug }) => debug?.rerankEnabled),
+    [ragAttemptedRuns],
+  );
+  const rerankRunsWithScores = useMemo(
+    () =>
+      rerankRuns.filter(({ debug }) => {
+        const chunks = getRagChunks(debug);
+        const hasVector = chunks.some(
+          (chunk) => typeof chunk.vectorScore === "number",
+        );
+        const hasRerank = chunks.some(
+          (chunk) => typeof chunk.rerankScore === "number",
+        );
+        return hasVector && hasRerank;
+      }),
+    [rerankRuns],
+  );
+  const rerankTopChanges = useMemo(
+    () =>
+      rerankRunsWithScores.filter(({ debug }) => {
+        const chunks = getRagChunks(debug);
+        const topVector = getTopChunkByScore(chunks, "vectorScore");
+        const topRerank = getTopChunkByScore(chunks, "rerankScore");
+        if (!topVector || !topRerank) return false;
+        return topVector.id !== topRerank.id;
+      }),
+    [rerankRunsWithScores],
+  );
+  const rerankImpactRate = rerankRunsWithScores.length
+    ? `${(
+        (rerankTopChanges.length / rerankRunsWithScores.length) * 100
+      ).toFixed(1)}%`
+    : "-";
+  const rerankScoreDeltas = useMemo(
+    () =>
+      rerankRunsWithScores.flatMap(({ debug }) =>
+        getRerankScoreDeltas(getRagChunks(debug)),
+      ),
+    [rerankRunsWithScores],
+  );
+  const rerankAvgDelta = computeAverageFloat(rerankScoreDeltas);
 
   const totalRuns = rows.length;
   const totalTokens = rows.reduce(
@@ -686,6 +970,7 @@ export function AgentMetrics({ agentId }: Props) {
 
   // Aggregate data by day for charts
   const dailyData = useMemo(() => aggregateByDay(rows), [rows]);
+  const ragDailyData = useMemo(() => aggregateRagByDay(ragRuns), [ragRuns]);
 
   const [activeView, setActiveView] = useState<
     "runs" | "conversations" | "users"
@@ -1055,24 +1340,26 @@ export function AgentMetrics({ agentId }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Time Period Selector */}
-      <div className="flex items-center justify-end gap-2">
-        <span className="text-sm text-muted-foreground">Time period:</span>
-        <Select
-          value={timePeriod}
-          onValueChange={(value) => setTimePeriod(value as TimePeriod)}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TIME_PERIODS.map((period) => (
-              <SelectItem key={period.value} value={period.value}>
-                {period.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold">Analytics</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Time period:</span>
+          <Select
+            value={timePeriod}
+            onValueChange={(value) => setTimePeriod(value as TimePeriod)}
+          >
+            <SelectTrigger className="w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIME_PERIODS.map((period) => (
+                <SelectItem key={period.value} value={period.value}>
+                  {period.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1121,6 +1408,121 @@ export function AgentMetrics({ agentId }: Props) {
           </div>
         </div>
       </div>
+
+      <Collapsible
+        open={isRagOpen}
+        onOpenChange={setIsRagOpen}
+        className="bg-card border rounded-lg p-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="-ml-2 px-2 gap-2"
+              >
+                {isRagOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <span className="text-lg font-semibold">RAG Quality</span>
+              </Button>
+            </CollapsibleTrigger>
+            <div className="text-xs text-muted-foreground">
+              {ragEnabledRuns.length} runs with RAG enabled •{" "}
+              {ragAttemptedRuns.length} attempted • {ragSkippedRuns.length}{" "}
+              skipped
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Debug data on {ragDebugCoverage} of {totalRuns} runs
+          </div>
+        </div>
+
+        <CollapsibleContent className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">
+                Retrieval Success
+              </div>
+              <div className="text-lg font-semibold">{ragSuccessRate}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {ragSuccessRuns.length} of {ragAttemptedRuns.length} attempts
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">
+                No Results Rate
+              </div>
+              <div className="text-lg font-semibold">{ragNoResultsRate}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {ragNoResultsRuns.length} of {ragAttemptedRuns.length} attempts
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">Avg Top Score</div>
+              <div className="text-lg font-semibold">
+                {ragAvgTopScore != null ? ragAvgTopScore.toFixed(4) : "-"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {ragSuccessRuns.length} runs with results
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">Avg RAG Time</div>
+              <div className="text-lg font-semibold">
+                {ragAvgRagTime != null ? `${ragAvgRagTime} ms` : "-"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Retrieval + rerank pipeline
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">Rerank Impact</div>
+              <div className="text-lg font-semibold">{rerankImpactRate}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {rerankTopChanges.length} of {rerankRunsWithScores.length}{" "}
+                changed top
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-sm text-muted-foreground">
+                Avg Rerank Delta
+              </div>
+              <div className="text-lg font-semibold">
+                {rerankAvgDelta != null ? rerankAvgDelta.toFixed(4) : "-"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Based on {rerankRunsWithScores.length} reranked runs
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-sm font-medium mb-3">Retrieval Outcomes</div>
+            <RagRetrievalChart data={ragDailyData} />
+            <div className="flex items-center gap-4 text-xs text-muted-foreground mt-2">
+              <span className="flex items-center gap-2">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: CHART_COLORS.primary }}
+                />
+                Success
+              </span>
+              <span className="flex items-center gap-2">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: CHART_COLORS.secondary }}
+                />
+                No results
+              </span>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Time-series charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

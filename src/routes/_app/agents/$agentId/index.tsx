@@ -88,23 +88,6 @@ function AgentDetailPage() {
     trpc.agent.get.queryOptions({ id: agentId }),
   );
 
-  if (!agent) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold">Agent not found</h1>
-        <p className="text-muted-foreground mt-2">
-          The agent you are looking for does not exist or you do not have
-          access.
-        </p>
-        <div className="mt-4">
-          <Link to="/agents">
-            <Button variant="outline">Back to Agents</Button>
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   const { data: knowledgeSources } = useSuspenseQuery(
     trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
   );
@@ -124,6 +107,23 @@ function AgentDetailPage() {
   const { data: setupStatus } = useSuspenseQuery(
     trpc.agent.getSetupStatus.queryOptions({ agentId }),
   );
+
+  if (!agent) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold">Agent not found</h1>
+        <p className="text-muted-foreground mt-2">
+          The agent you are looking for does not exist or you do not have
+          access.
+        </p>
+        <div className="mt-4">
+          <Link to="/agents">
+            <Button variant="outline">Back to Agents</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
@@ -545,7 +545,6 @@ function AgentDetailPage() {
 
           {activeTab === "analytics" && (
             <div className="bg-card border rounded-lg p-6">
-              <h2 className="text-xl font-semibold mb-4">Analytics</h2>
               <AgentMetrics agentId={agentId} />
             </div>
           )}
