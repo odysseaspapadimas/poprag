@@ -1,8 +1,3 @@
-import { useTRPC } from "@/integrations/trpc/react";
-import {
-  firebaseTimestampToDate,
-  formatFirebaseTimestamp,
-} from "@/lib/firebase/types";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -12,6 +7,11 @@ import {
   User,
 } from "lucide-react";
 import { useState } from "react";
+import { useTRPC } from "@/integrations/trpc/react";
+import {
+  firebaseTimestampToDate,
+  formatFirebaseTimestamp,
+} from "@/lib/firebase/types";
 import { Badge } from "./ui/badge";
 import {
   Dialog,
@@ -268,54 +268,60 @@ export function UserDetailsModal({
                                               return dateA - dateB;
                                             })
                                             .map((message) => {
-                                              console.log("Rendering message:", message);
-                                              return <div
-                                                key={message.id}
-                                                className={`p-3 rounded-md text-sm ${message.role === "user"
-                                                  ? "bg-primary/10 border-l-2 border-primary"
-                                                  : "bg-muted/50 border-l-2 border-muted-foreground"
+                                              console.log(
+                                                "Rendering message:",
+                                                message,
+                                              );
+                                              return (
+                                                <div
+                                                  key={message.id}
+                                                  className={`p-3 rounded-md text-sm ${
+                                                    message.role === "user"
+                                                      ? "bg-primary/10 border-l-2 border-primary"
+                                                      : "bg-muted/50 border-l-2 border-muted-foreground"
                                                   }`}
-                                              >
-                                                <div className="flex items-center justify-between mb-1">
-                                                  <Badge
-                                                    variant={
-                                                      message.role === "user"
-                                                        ? "default"
-                                                        : "secondary"
-                                                    }
-                                                    className="text-xs"
-                                                  >
-                                                    {message.role}
-                                                  </Badge>
-                                                  <span className="text-xs text-muted-foreground">
-                                                    {formatFirebaseTimestamp(
-                                                      message.timestamp,
-                                                      {
-                                                        hour: "2-digit",
-                                                        minute: "2-digit",
-                                                        month: "short",
-                                                        day: "numeric",
-                                                      },
-                                                    )}
-                                                  </span>
+                                                >
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <Badge
+                                                      variant={
+                                                        message.role === "user"
+                                                          ? "default"
+                                                          : "secondary"
+                                                      }
+                                                      className="text-xs"
+                                                    >
+                                                      {message.role}
+                                                    </Badge>
+                                                    <span className="text-xs text-muted-foreground">
+                                                      {formatFirebaseTimestamp(
+                                                        message.timestamp,
+                                                        {
+                                                          hour: "2-digit",
+                                                          minute: "2-digit",
+                                                          month: "short",
+                                                          day: "numeric",
+                                                        },
+                                                      )}
+                                                    </span>
+                                                  </div>
+                                                  <p className="whitespace-pre-wrap break-words">
+                                                    {message.content}
+                                                  </p>
+                                                  {message.imageUrl && (
+                                                    <img
+                                                      src={message.imageUrl}
+                                                      alt="Message attachment"
+                                                      className="mt-2 rounded max-w-xs max-h-48 object-contain cursor-pointer hover:opacity-80 transition-opacity"
+                                                      onClick={() =>
+                                                        message.imageUrl &&
+                                                        setSelectedImage(
+                                                          message.imageUrl,
+                                                        )
+                                                      }
+                                                    />
+                                                  )}
                                                 </div>
-                                                <p className="whitespace-pre-wrap break-words">
-                                                  {message.content}
-                                                </p>
-                                                {message.imageUrl && (
-                                                  <img
-                                                    src={message.imageUrl}
-                                                    alt="Message attachment"
-                                                    className="mt-2 rounded max-w-xs max-h-48 object-contain cursor-pointer hover:opacity-80 transition-opacity"
-                                                    onClick={() =>
-                                                      message.imageUrl &&
-                                                      setSelectedImage(
-                                                        message.imageUrl,
-                                                      )
-                                                    }
-                                                  />
-                                                )}
-                                              </div>
+                                              );
                                             })}
                                         </div>
                                       )}

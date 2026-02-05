@@ -22,6 +22,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 const VECTORIZE_DELETE_BATCH_SIZE = 100;
+const D1_INSERT_BATCH_SIZE = 10; // D1 has ~100 param limit; 10 chunks * 7 fields = 70 params
 const DEFAULT_RETRY_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 400;
 
@@ -434,7 +435,7 @@ export async function processKnowledgeSource(
     console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
 
     // Process chunks in batches for embedding
-    const BATCH_SIZE = 5; // Reduced batch size for better progress tracking
+    const BATCH_SIZE = 50; // Reduced batch size for better progress tracking
     const chunkBatches = chunkArray(chunks, BATCH_SIZE);
     const vectorizeIds: string[] = [];
     const { env } = await import("cloudflare:workers");
@@ -514,25 +515,34 @@ export async function processKnowledgeSource(
         `Batch ${batchIdx + 1} embedding took ${embeddingTime}ms for ${batch.length} chunks`,
       );
 
-      // Insert chunks into database FIRST to get the IDs
-      const chunkInsertResults = await db
-        .insert(documentChunks)
-        .values(
-          batch.map((chunk, idx) => ({
-            id: ulid(),
-            text: chunk,
-            sessionId: source.agentId,
-            documentId: source.id,
-            chunkIndex: processedChunks + idx,
-            createdAt: new Date(),
-          })),
-        )
-        .returning({ insertedChunkId: documentChunks.id });
+      // Insert chunks into database in smaller batches to respect D1 parameter limits
+      // D1 has a limit of ~100 parameters per query
+      // With 7 fields per chunk, we can safely insert 10 chunks at a time (70 params)
+      const chunkInsertData = batch.map((chunk, idx) => {
+        const chunkId = ulid();
+        return {
+          id: chunkId,
+          text: chunk,
+          sessionId: source.agentId,
+          documentId: source.id,
+          chunkIndex: processedChunks + idx,
+          vectorizeId: chunkId, // Set vectorizeId to the chunk ID (used as vector ID)
+          createdAt: new Date(),
+        };
+      });
 
-      // Extract the inserted chunk IDs
-      const chunkIds = chunkInsertResults.map(
-        (result) => result.insertedChunkId,
-      );
+      const chunkIds: string[] = [];
+      const d1Batches = chunkArray(chunkInsertData, D1_INSERT_BATCH_SIZE);
+
+      for (const d1Batch of d1Batches) {
+        const insertResults = await db
+          .insert(documentChunks)
+          .values(d1Batch)
+          .returning({ insertedChunkId: documentChunks.id });
+
+        chunkIds.push(...insertResults.map((r) => r.insertedChunkId));
+      }
+
       vectorizeIds.push(...chunkIds);
 
       // Insert vectors into VECTORIZE_INDEX with proper metadata

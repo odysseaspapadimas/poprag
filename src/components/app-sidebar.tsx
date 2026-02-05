@@ -1,5 +1,8 @@
 "use client";
 
+import { Link } from "@tanstack/react-router";
+import { Bot, BotMessageSquare, Database, SquareTerminal } from "lucide-react";
+import type * as React from "react";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
 import {
@@ -12,9 +15,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Link } from "@tanstack/react-router";
-import { Bot, BotMessageSquare, SquareTerminal } from "lucide-react";
-import type * as React from "react";
 
 // This is sample data.
 const data = {
@@ -28,6 +28,11 @@ const data = {
       title: "Agents",
       url: "/agents",
       icon: BotMessageSquare,
+    },
+    {
+      title: "Knowledge",
+      url: "/knowledge",
+      icon: Database,
     },
     {
       title: "Models",
