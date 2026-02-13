@@ -79,10 +79,12 @@ ${contextSection}
 ---
 
 **Important guidelines:**
-- Answer naturally using the information above as if it were your own knowledge.
+- Base your answer ONLY on the reference information provided above.
+- If the reference information does not contain sufficient information to answer the question, clearly state that you don't have that information.
+- Do NOT supplement the reference information with your own knowledge unless the user's question is clearly general knowledge that doesn't require specific documents.
 - NEVER mention documents, files, sources, PDFs, or that you retrieved this information.
 - NEVER say things like "According to the document..." or "Based on the file...".
-- If the information doesn't contain the answer, say you don't know.
+- Answer naturally as if the reference information were your own knowledge.
 - If data appears incomplete (e.g., missing numbers or units), acknowledge you don't have that specific detail.
 - Always provide complete answers - do not cut off mid-sentence.
 `;
