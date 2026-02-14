@@ -95,17 +95,19 @@ export async function deleteVectorizeIds(
   },
 ): Promise<void> {
   const batches = chunkArray(ids, VECTORIZE_DELETE_BATCH_SIZE);
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    if (batch.length === 0) continue;
+  // Run deletion batches concurrently - they are independent operations
+  await Promise.all(
+    batches.map(async (batch, i) => {
+      if (batch.length === 0) return;
 
-    const deleteResult = await vectorize.deleteByIds(batch);
-    console.log(
-      `${options?.logPrefix ?? "Vectorize"} deleted batch ${i + 1}/${batches.length} (${batch.length} ids)` +
-        (options?.namespace ? ` in namespace ${options.namespace}` : "") +
-        `, mutationId: ${deleteResult.mutationId}`,
-    );
-  }
+      const deleteResult = await vectorize.deleteByIds(batch);
+      console.log(
+        `${options?.logPrefix ?? "Vectorize"} deleted batch ${i + 1}/${batches.length} (${batch.length} ids)` +
+          (options?.namespace ? ` in namespace ${options.namespace}` : "") +
+          `, mutationId: ${deleteResult.mutationId}`,
+      );
+    }),
+  );
 }
 
 /**
@@ -531,17 +533,20 @@ export async function processKnowledgeSource(
         };
       });
 
-      const chunkIds: string[] = [];
       const d1Batches = chunkArray(chunkInsertData, D1_INSERT_BATCH_SIZE);
 
-      for (const d1Batch of d1Batches) {
-        const insertResults = await db
-          .insert(documentChunks)
-          .values(d1Batch)
-          .returning({ insertedChunkId: documentChunks.id });
-
-        chunkIds.push(...insertResults.map((r) => r.insertedChunkId));
-      }
+      // Run D1 sub-batch inserts concurrently (they are independent writes)
+      const d1InsertResults = await Promise.all(
+        d1Batches.map((d1Batch) =>
+          db
+            .insert(documentChunks)
+            .values(d1Batch)
+            .returning({ insertedChunkId: documentChunks.id }),
+        ),
+      );
+      const chunkIds = d1InsertResults.flatMap((r) =>
+        r.map((row) => row.insertedChunkId),
+      );
 
       vectorizeIds.push(...chunkIds);
 
@@ -602,19 +607,11 @@ export async function processKnowledgeSource(
       );
     }
 
-    // Store vectorize IDs for deletion tracking
+    // Store vectorize IDs and mark as indexed in a single update
     await db
       .update(knowledgeSource)
       .set({
         vectorizeIds: vectorizeIds,
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeSource.id, sourceId));
-
-    // Update source status
-    await db
-      .update(knowledgeSource)
-      .set({
         status: "indexed",
         updatedAt: new Date(),
       })

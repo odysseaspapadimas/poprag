@@ -232,14 +232,8 @@ export const knowledgeRouter = createTRPCRouter({
           abortSignal: ctx.request.signal,
         });
 
-        // Update source status to indexed
-        await db
-          .update(knowledgeSource)
-          .set({
-            status: "indexed",
-            updatedAt: new Date(),
-          })
-          .where(eq(knowledgeSource.id, input.sourceId));
+        // Note: processKnowledgeSource already sets status to "indexed" in D1,
+        // so no additional status update needed here.
 
         // Audit log
         await audit(
@@ -777,13 +771,14 @@ export const knowledgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const results: {
+      const BULK_CONCURRENCY = 3;
+
+      // Process a single source for reindexing
+      async function reindexOne(sourceId: string): Promise<{
         sourceId: string;
         success: boolean;
         error?: string;
-      }[] = [];
-
-      for (const sourceId of input.sourceIds) {
+      }> {
         try {
           const [source] = await db
             .select()
@@ -792,23 +787,13 @@ export const knowledgeRouter = createTRPCRouter({
             .limit(1);
 
           if (!source) {
-            results.push({
-              sourceId,
-              success: false,
-              error: "Source not found",
-            });
-            continue;
+            return { sourceId, success: false, error: "Source not found" };
           }
 
           await requireAgent(source.agentId);
 
           if (!source.r2Key) {
-            results.push({
-              sourceId,
-              success: false,
-              error: "No R2 file found",
-            });
-            continue;
+            return { sourceId, success: false, error: "No R2 file found" };
           }
 
           // Download from R2
@@ -816,12 +801,7 @@ export const knowledgeRouter = createTRPCRouter({
           const r2Object = await env.R2.get(source.r2Key);
 
           if (!r2Object) {
-            results.push({
-              sourceId,
-              success: false,
-              error: "File not found in R2",
-            });
-            continue;
+            return { sourceId, success: false, error: "File not found in R2" };
           }
 
           // Get content based on file type
@@ -833,23 +813,24 @@ export const knowledgeRouter = createTRPCRouter({
             content = await r2Object.text();
           }
 
-          // Delete old vectors
-          if (source.vectorizeIds && source.vectorizeIds.length > 0) {
-            try {
-              const { deleteVectorizeIds } = await import("@/lib/ai/ingestion");
-              await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
-                namespace: source.agentId,
-                logPrefix: "Vectorize",
-              });
-            } catch (error) {
-              console.error("Failed to delete old vectors:", error);
-            }
-          }
-
-          // Delete old chunks from D1 database
-          await db
-            .delete(documentChunks)
-            .where(eq(documentChunks.documentId, sourceId));
+          // Delete old vectors and old chunks concurrently
+          await Promise.all([
+            source.vectorizeIds && source.vectorizeIds.length > 0
+              ? import("@/lib/ai/ingestion")
+                  .then(({ deleteVectorizeIds }) =>
+                    deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds!, {
+                      namespace: source.agentId,
+                      logPrefix: "Vectorize",
+                    }),
+                  )
+                  .catch((error) => {
+                    console.error("Failed to delete old vectors:", error);
+                  })
+              : Promise.resolve(),
+            db
+              .delete(documentChunks)
+              .where(eq(documentChunks.documentId, sourceId)),
+          ]);
 
           // Reset status
           await db
@@ -873,14 +854,23 @@ export const knowledgeRouter = createTRPCRouter({
             { fileName: source.fileName, bulk: true },
           );
 
-          results.push({ sourceId, success: true });
+          return { sourceId, success: true };
         } catch (error) {
-          results.push({
+          return {
             sourceId,
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
-          });
+          };
         }
+      }
+
+      // Process sources with bounded concurrency
+      const results: { sourceId: string; success: boolean; error?: string }[] =
+        [];
+      for (let i = 0; i < input.sourceIds.length; i += BULK_CONCURRENCY) {
+        const batch = input.sourceIds.slice(i, i + BULK_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(reindexOne));
+        results.push(...batchResults);
       }
 
       return {

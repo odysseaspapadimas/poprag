@@ -7,11 +7,11 @@
  * - Result fusion and reranking
  */
 
-import { db } from "@/db";
-import { documentChunks, knowledgeSource } from "@/db/schema";
 import type { LanguageModel } from "ai";
 import { generateText } from "ai";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { documentChunks, knowledgeSource } from "@/db/schema";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -516,8 +516,8 @@ export async function performRAGRetrieval(
     const rewriteStart = Date.now();
     const rewritePromise = config.rewriteQuery
       ? resolveAndCreateModel(rewriteModelId).then((model) =>
-        rewriteQuery(model, userQuery, variationsCount),
-      )
+          rewriteQuery(model, userQuery, variationsCount),
+        )
       : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
 
     const [intentResult, rewriteResult] = await Promise.all([
@@ -667,37 +667,30 @@ async function enrichWithFullText(
   try {
     const chunkIds = matches.map((m) => m.id);
 
-    // Fetch chunks with their source information (including fileName)
-    const dbChunks = await db
+    // Single JOIN query: fetch chunk text + source fileName in one D1 round-trip
+    const dbRows = await db
       .select({
         id: documentChunks.id,
         text: documentChunks.text,
         documentId: documentChunks.documentId,
         chunkIndex: documentChunks.chunkIndex,
-      })
-      .from(documentChunks)
-      .where(inArray(documentChunks.id, chunkIds));
-
-    // Get unique source IDs and fetch their filenames
-    const sourceIds = [...new Set(dbChunks.map((c) => c.documentId))];
-    const sources = await db
-      .select({
-        id: knowledgeSource.id,
         fileName: knowledgeSource.fileName,
       })
-      .from(knowledgeSource)
-      .where(inArray(knowledgeSource.id, sourceIds));
+      .from(documentChunks)
+      .innerJoin(
+        knowledgeSource,
+        eq(documentChunks.documentId, knowledgeSource.id),
+      )
+      .where(inArray(documentChunks.id, chunkIds));
 
-    const sourceMap = new Map(sources.map((s) => [s.id, s.fileName]));
-    const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c]));
+    const dbRowMap = new Map(dbRows.map((r) => [r.id, r]));
 
     let replacedCount = 0;
     const enrichedMatches = matches.map((match) => {
-      const chunkData = dbChunkMap.get(match.id);
-      if (chunkData) {
-        const fullText = chunkData.text;
-        const fileName =
-          sourceMap.get(chunkData.documentId) || "Unknown source";
+      const row = dbRowMap.get(match.id);
+      if (row) {
+        const fullText = row.text;
+        const fileName = row.fileName || "Unknown source";
         const textReplaced =
           fullText && fullText.length > String(match.content).length;
 
@@ -714,9 +707,9 @@ async function enrichWithFullText(
               ? fullText.length
               : String(match.content).length,
             fileName,
-            sourceId: chunkData.documentId,
-            documentId: chunkData.documentId,
-            chunkIndex: chunkData.chunkIndex,
+            sourceId: row.documentId,
+            documentId: row.documentId,
+            chunkIndex: row.chunkIndex,
           },
         };
       }
@@ -755,6 +748,7 @@ async function expandWithNeighborChunks(
 
   type NeighborKey = `${string}:${number}`;
   const baseByKey = new Map<NeighborKey, HybridSearchResult>();
+  const neighborTargetSet = new Set<NeighborKey>();
   const neighborTargets: Array<{ documentId: string; chunkIndex: number }> = [];
 
   baseMatches.forEach((match) => {
@@ -766,28 +760,41 @@ async function expandWithNeighborChunks(
 
     baseByKey.set(`${documentId}:${chunkIndex}`, match);
 
-    if (chunkIndex > 0) {
+    const prevKey: NeighborKey = `${documentId}:${chunkIndex - 1}`;
+    const nextKey: NeighborKey = `${documentId}:${chunkIndex + 1}`;
+
+    if (chunkIndex > 0 && !neighborTargetSet.has(prevKey)) {
+      neighborTargetSet.add(prevKey);
       neighborTargets.push({ documentId, chunkIndex: chunkIndex - 1 });
     }
-    neighborTargets.push({ documentId, chunkIndex: chunkIndex + 1 });
+    if (!neighborTargetSet.has(nextKey)) {
+      neighborTargetSet.add(nextKey);
+      neighborTargets.push({ documentId, chunkIndex: chunkIndex + 1 });
+    }
   });
 
   if (neighborTargets.length === 0) return matches;
 
-  const uniqueTargets = Array.from(
-    new Map(
-      neighborTargets.map((t) => [`${t.documentId}:${t.chunkIndex}`, t]),
-    ).values(),
-  );
+  // Group neighbor targets by documentId to build efficient queries:
+  // SELECT ... WHERE documentId IN (...) AND chunkIndex IN (...)
+  // Then filter in JS. This avoids N individual OR(AND(...)) conditions.
+  const byDocument = new Map<string, number[]>();
+  for (const t of neighborTargets) {
+    const existing = byDocument.get(t.documentId);
+    if (existing) {
+      existing.push(t.chunkIndex);
+    } else {
+      byDocument.set(t.documentId, [t.chunkIndex]);
+    }
+  }
 
-  const conditions = uniqueTargets.map((target) =>
-    and(
-      eq(documentChunks.documentId, target.documentId),
-      eq(documentChunks.chunkIndex, target.chunkIndex),
-    ),
-  );
+  const docIds = [...byDocument.keys()];
+  const allChunkIndices = [
+    ...new Set(neighborTargets.map((t) => t.chunkIndex)),
+  ];
 
-  const neighborRows = await db
+  // Single query: fetch all candidate rows, then filter in JS
+  const candidateRows = await db
     .select({
       id: documentChunks.id,
       text: documentChunks.text,
@@ -795,7 +802,17 @@ async function expandWithNeighborChunks(
       chunkIndex: documentChunks.chunkIndex,
     })
     .from(documentChunks)
-    .where(or(...conditions));
+    .where(
+      and(
+        inArray(documentChunks.documentId, docIds),
+        inArray(documentChunks.chunkIndex, allChunkIndices),
+      ),
+    );
+
+  // Filter to only the exact (documentId, chunkIndex) pairs we need
+  const neighborRows = candidateRows.filter((row) =>
+    neighborTargetSet.has(`${row.documentId}:${row.chunkIndex}`),
+  );
 
   if (neighborRows.length === 0) return matches;
 
