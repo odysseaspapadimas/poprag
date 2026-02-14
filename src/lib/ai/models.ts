@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { createAiGateway } from "ai-gateway-provider";
+import { env } from "cloudflare:workers";
 import { createWorkersAI } from "workers-ai-provider";
 
 export type ProviderType =
@@ -27,8 +27,8 @@ export function createModel(config: ModelConfig): LanguageModel {
   const aigateway =
     env.AI_GATEWAY_ID && env.AI
       ? createAiGateway({
-          binding: env.AI.gateway(env.AI_GATEWAY_ID),
-        })
+        binding: env.AI.gateway(env.AI_GATEWAY_ID),
+      })
       : null;
 
   switch (config.provider) {
@@ -120,33 +120,3 @@ export function createEmbeddingModel(
       );
   }
 }
-
-/**
- * Get default model configurations
- */
-export const DEFAULT_MODELS: Record<string, ModelConfig> = {
-  "gpt-4o": {
-    alias: "gpt-4o",
-    provider: "openai",
-    modelId: "gpt-4o",
-  },
-  "gpt-4o-mini": {
-    alias: "gpt-4o-mini",
-    provider: "openai",
-    modelId: "gpt-4o-mini",
-  },
-  "gpt-3.5-turbo": {
-    alias: "gpt-3.5-turbo",
-    provider: "openai",
-    modelId: "gpt-3.5-turbo",
-  },
-};
-
-/**
- * Get default embedding model
- */
-export const DEFAULT_EMBEDDING_MODEL = {
-  provider: "openai" as const,
-  modelId: "text-embedding-3-small",
-  dimensions: 768,
-};

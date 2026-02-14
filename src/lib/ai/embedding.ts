@@ -1,19 +1,18 @@
-import { env } from "cloudflare:workers";
-import { createOpenAI } from "@ai-sdk/openai";
-import {
-  MarkdownTextSplitter,
-  RecursiveCharacterTextSplitter,
-} from "@langchain/textsplitters";
-import { embedMany } from "ai";
-import { inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { documentChunks } from "@/db/schema";
 import {
   DEFAULT_MODELS,
   EMBEDDING_CONFIG,
   RAG_CONFIG,
 } from "@/lib/ai/constants";
 import { resolveModelConfig } from "@/lib/ai/helpers";
+import { createOpenAI } from "@ai-sdk/openai";
+import {
+  MarkdownTextSplitter,
+  RecursiveCharacterTextSplitter,
+} from "@langchain/textsplitters";
+import { embedMany } from "ai";
+import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
 
 /**
  * Embedding configuration
@@ -151,13 +150,13 @@ export async function generateChunks(
   const splitter =
     contentType === "markdown"
       ? new MarkdownTextSplitter({
-          chunkSize,
-          chunkOverlap,
-        })
+        chunkSize,
+        chunkOverlap,
+      })
       : new RecursiveCharacterTextSplitter({
-          chunkSize,
-          chunkOverlap,
-        });
+        chunkSize,
+        chunkOverlap,
+      });
 
   const chunks = await splitter.splitText(input);
 
@@ -203,12 +202,11 @@ export async function generateChunks(
         ...filteredChunks.map((c) => c.length),
       )}, avg=${Math.floor(
         filteredChunks.reduce((sum, c) => sum + c.length, 0) /
-          filteredChunks.length,
+        filteredChunks.length,
       )}`,
     );
     console.log(
-      `First chunk preview (${
-        filteredChunks[0].length
+      `First chunk preview (${filteredChunks[0].length
       } chars): ${filteredChunks[0].substring(0, 100)}...`,
     );
   }
@@ -402,8 +400,7 @@ export async function findRelevantContentWithEmbedding(
           match.metadata.text && String(match.metadata.text).trim().length > 0;
         if (!hasText) {
           console.warn(
-            `[RAG] Match ${
-              match.id
+            `[RAG] Match ${match.id
             } missing text field in metadata. Available fields: ${Object.keys(
               match.metadata,
             ).join(", ")}`,
