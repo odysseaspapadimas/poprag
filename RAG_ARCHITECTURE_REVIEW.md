@@ -5,7 +5,7 @@
 > **Date**: 2026-02-13
 > **Scope**: Full ingestion + retrieval + generation pipeline
 
----
+--- 
 
 ## Prioritized Action Plan
 
