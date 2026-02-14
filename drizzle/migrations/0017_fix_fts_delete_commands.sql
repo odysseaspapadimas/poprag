@@ -1,18 +1,26 @@
--- Rebuild FTS index for document_chunks
--- Run this if you get SQLITE_CORRUPT errors related to document_chunks_fts
+-- Fix FTS triggers to use proper FTS5 "delete command" syntax for external content tables
 --
--- Uses the FTS5 "delete command" syntax for external content tables.
--- See: https://www.sqlite.org/fts5.html#external_content_tables
+-- The previous triggers used `DELETE FROM document_chunks_fts WHERE rowid = old.rowid`
+-- which is WRONG for external content FTS5 tables (content = 'document_chunks').
+--
+-- With external content tables, FTS5 doesn't store text — it reads it from the content
+-- table on demand. A regular DELETE causes FTS5 to look up the content table row to
+-- determine which index entries to remove. But in an AFTER DELETE trigger, the row is
+-- already gone, so FTS5 silently fails to clean up its index, leaving orphaned entries.
+-- These orphaned entries eventually cause SQLITE_CORRUPT errors.
+--
+-- The correct approach is the FTS5 "delete command": INSERT with the special column name
+-- set to 'delete' and all old values provided explicitly.
 
--- Step 1: Drop the old triggers
+-- Step 1: Drop the broken triggers
 DROP TRIGGER IF EXISTS document_chunks_ai;
 DROP TRIGGER IF EXISTS document_chunks_au;
 DROP TRIGGER IF EXISTS document_chunks_ad;
 
--- Step 2: Drop the existing FTS table
+-- Step 2: Drop the corrupted FTS table
 DROP TABLE IF EXISTS document_chunks_fts;
 
--- Step 3: Recreate the FTS table with correct schema matching document_chunks
+-- Step 3: Recreate the FTS table
 CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
     id UNINDEXED,
     source_id UNINDEXED,
@@ -22,10 +30,7 @@ CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
     content_rowid = 'rowid'
 );
 
--- Step 4: Recreate the triggers using correct FTS5 delete command syntax
--- For external content FTS5 tables, deletions MUST use the "delete command":
---   INSERT INTO fts_table(fts_table, rowid, ...) VALUES('delete', old.rowid, ...)
--- A regular DELETE would try to read the (already-deleted) content table row and fail.
+-- Step 4: Recreate triggers with correct FTS5 delete command syntax
 CREATE TRIGGER document_chunks_ai AFTER INSERT ON document_chunks
 BEGIN
   INSERT INTO document_chunks_fts(rowid, id, source_id, text, agent_id)
@@ -46,7 +51,7 @@ BEGIN
   VALUES('delete', old.rowid, old.id, old.source_id, old.text, old.agent_id);
 END;
 
--- Step 5: Rebuild the index from current data (if any exists)
+-- Step 5: Rebuild the index from current data
 INSERT INTO document_chunks_fts(rowid, id, source_id, text, agent_id)
 SELECT rowid, id, source_id, text, agent_id FROM document_chunks;
 
