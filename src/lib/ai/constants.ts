@@ -16,6 +16,11 @@ export const DEFAULT_MODELS = {
    * and 8B was causing 3-5s latency on Workers AI */
   QUERY_REWRITE: "@cf/meta/llama-3.2-3b-instruct",
 
+  /** Model used for conversational query reformulation (CQR)
+   * Resolves pronouns, references, and ellipsis in follow-up questions
+   * Using 3B model — same as rewrite, simple reformulation task */
+  CONVERSATIONAL_REFORMULATION: "@cf/meta/llama-3.2-3b-instruct",
+
   /** Embedding model for vector search (1536 dimensions) - OpenAI */
   EMBEDDING: "text-embedding-3-small",
 

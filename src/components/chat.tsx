@@ -62,6 +62,8 @@ interface RAGDebugInfo {
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
+  reformulatedQuery?: string;
+  cqrApplied?: boolean;
   rewrittenQueries?: string[];
   keywords?: string[];
   vectorResultsCount?: number;

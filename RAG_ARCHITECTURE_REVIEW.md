@@ -21,7 +21,7 @@ Actions ranked by a composite score of **impact** (accuracy, latency, cost), **d
 | 6 | [Add chunk deduplication on re-upload](#94-no-chunk-deduplication-on-re-upload) | Medium (data quality) | High -- prevents confusing duplicate results | Small | 9.4 |
 | 7 | [Add chunk source metadata to context](#62-no-chunk-metadata-in-the-context) | Medium (accuracy) | Low -- invisible to end users, helps LLM resolve conflicts | Small | 6.2 |
 | 8 | [Enable AI Gateway caching](#111-ai-gateway-caching-is-not-utilized) | High (latency + cost for repeat queries) | High -- instant responses for cached queries | Small | 11.1 |
-| 9 | [Implement conversational query reformulation](#93-no-conversation-history-used-for-rag-queries) | Critical (accuracy) | Critical -- multi-turn conversations actually work | Medium | 9.3 |
+| 9 | ✅ [Implement conversational query reformulation](#93-no-conversation-history-used-for-rag-queries) | Critical (accuracy) | Critical -- multi-turn conversations actually work | Medium | 9.3 |
 | 10 | [Implement token budget for context injection](#64-no-token-budget-for-context) | Medium (accuracy + cost) | Medium -- prevents context overflow, reduces noise | Medium | 6.4 |
 | 11 | [Remove chunk text from Vectorize metadata](#13-storing-chunk-text-in-vectorize-metadata-creates-an-artificial-2000-char-ceiling) | High (accuracy -- removes chunk size ceiling) | Medium -- enables better chunking strategies | Medium | 1.3 |
 | 12 | [Move neighbor expansion before reranking](#34-neighbor-chunk-expansion-should-happen-before-reranking) | Medium (accuracy) | Low -- invisible to users | Medium | 3.4 |
@@ -503,9 +503,26 @@ Covered in [Section 3.2](#32-fts-queries-run-per-keyword-instead-of-compound-mat
 
 **Severity: Critical**
 
+**Status: ✅ IMPLEMENTED** (2026-02-14)
+
 At `rag-pipeline.ts:440`, `performRAGRetrieval` receives only `userQuery` (the latest message). For follow-up questions like "What about the second quarter?" after "Show me revenue figures", the RAG system has no context about what "second quarter" refers to.
 
 **Recommendation**: Before RAG retrieval, synthesize a standalone query from conversation history. Use the last 3-5 messages as context for query rewriting. The rewrite LLM prompt should say: "Given this conversation history, rewrite the latest message as a standalone search query." This is a standard pattern in production RAG systems (called "conversational query reformulation").
+
+**Implementation**: Added Conversational Query Reformulation (CQR) as Step 0 of the RAG pipeline using the standard "condense question" pattern (LangChain/LlamaIndex). Key changes:
+
+1. **`reformulateConversationalQuery()`** in `rag-pipeline.ts` — Takes a model, the current user query, and conversation history. Uses an LLM to rewrite follow-up questions into standalone search queries that resolve pronouns ("it", "that", "there"), references ("the second one"), and ellipsis ("what about Q2?"). Returns the reformulated query with a flag indicating if reformulation occurred.
+2. **`extractConversationHistory()`** in `chat.ts` — Extracts prior user/assistant messages (excluding the current query) as simplified `ConversationMessage[]` objects with role and text content.
+3. **`performRAGRetrieval`** now accepts an optional `conversationHistory` parameter. When present, CQR runs as the first step, producing an `effectiveQuery` that feeds into intent classification, query rewriting, hybrid search, and reranking.
+4. **Debug instrumentation** — `RAGDebugInfo` tracks CQR timing (`conversationalReformulationMs`), the reformulated query, whether CQR was applied, and the model used.
+
+Design decisions:
+- Uses Workers AI `llama-3.2-3b-instruct` (free, fast, same model as query rewriting — simple reformulation task)
+- Last 5 messages used as context, each truncated to 200 chars to keep prompt short
+- 2-second timeout with graceful fallback to original query on failure
+- Plain text output (not JSON) to minimize parsing failures
+- Temperature 0 for deterministic reformulation
+- Sanity check rejects empty or suspiciously long outputs
 
 > Impact: Critical accuracy improvement for multi-turn conversations. Effort: Medium.
 
@@ -533,11 +550,11 @@ The `checksum` field exists on `knowledgeSource` but is never used to prevent du
 
 ## 10. Missing Capabilities
 
-### 10.1 Conversational Query Reformulation
+### 10.1 Conversational Query Reformulation ✅ DONE
 
 **Severity: Critical**
 
-See [Section 9.3](#93-no-conversation-history-used-for-rag-queries). The single highest-ROI missing capability.
+See [Section 9.3](#93-no-conversation-history-used-for-rag-queries). ✅ Implemented — CQR condense-question pattern with Workers AI.
 
 > Effort: Medium. Impact: Critical.
 
@@ -671,4 +688,4 @@ The three highest-impact improvements that require the least effort are:
 2. **Better reranker model** -- single config change for meaningful accuracy gain
 3. ✅ **Fix double D1 fetch** -- removes redundant work, straightforward code change
 
-The single most impactful improvement overall (requiring moderate effort) is **conversational query reformulation** -- without it, any multi-turn conversation with context-dependent queries silently degrades.
+The single most impactful improvement overall (requiring moderate effort) is **conversational query reformulation** -- ✅ now implemented, multi-turn conversations with context-dependent queries work correctly.

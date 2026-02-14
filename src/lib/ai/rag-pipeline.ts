@@ -26,6 +26,12 @@ import { resolveAndCreateModel } from "./helpers";
 // Types
 // ─────────────────────────────────────────────────────
 
+/** A simplified message from conversation history used for CQR */
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface RAGConfig {
   enabled: boolean;
   contextualEmbeddingsEnabled?: boolean;
@@ -46,6 +52,10 @@ export interface RAGDebugInfo {
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
+  /** The reformulated standalone query produced by CQR (only set when CQR ran) */
+  reformulatedQuery?: string;
+  /** Whether CQR was applied (conversation had prior turns) */
+  cqrApplied?: boolean;
   rewrittenQueries?: string[];
   keywords?: string[];
   vectorResultsCount?: number;
@@ -63,6 +73,7 @@ export interface RAGDebugInfo {
   }>;
   // Timing metrics (in milliseconds)
   timing?: {
+    conversationalReformulationMs?: number;
     intentClassificationMs?: number;
     queryRewriteMs?: number;
     vectorSearchMs?: number;
@@ -74,6 +85,7 @@ export interface RAGDebugInfo {
   };
   // Model information
   models?: {
+    conversationalReformulationModel?: string;
     intentModel?: string;
     rewriteModel?: string;
     rerankModel?: string;
@@ -101,6 +113,102 @@ interface MatchMetadata {
   chunkIndex?: number;
   documentId?: string;
   [key: string]: unknown;
+}
+
+// ─────────────────────────────────────────────────────
+// Conversational Query Reformulation (CQR)
+// ─────────────────────────────────────────────────────
+
+/** Maximum number of prior messages to include as conversation context */
+const CQR_MAX_HISTORY_MESSAGES = 5;
+
+/** Maximum characters per message in the conversation context */
+const CQR_MAX_MESSAGE_LENGTH = 200;
+
+/**
+ * Reformulate a follow-up question into a standalone search query using
+ * conversation history context.
+ *
+ * This resolves pronouns ("it", "that", "there"), references ("the second one"),
+ * and ellipsis ("what about Q2?") so the RAG pipeline can retrieve relevant
+ * content without needing conversation state.
+ *
+ * Standard CQR / "condense question" pattern used by LangChain, LlamaIndex,
+ * and production RAG systems (Perplexity, Bing Chat).
+ *
+ * @returns The standalone query and whether reformulation actually occurred
+ */
+export async function reformulateConversationalQuery(
+  model: LanguageModel,
+  userQuery: string,
+  conversationHistory: ConversationMessage[],
+): Promise<{ reformulatedQuery: string; wasReformulated: boolean }> {
+  // Only reformulate if there's meaningful prior conversation
+  if (conversationHistory.length === 0) {
+    return { reformulatedQuery: userQuery, wasReformulated: false };
+  }
+
+  // Take the last N messages, truncate long content
+  const recentHistory = conversationHistory
+    .slice(-CQR_MAX_HISTORY_MESSAGES)
+    .map((msg) => {
+      const truncated =
+        msg.content.length > CQR_MAX_MESSAGE_LENGTH
+          ? `${msg.content.slice(0, CQR_MAX_MESSAGE_LENGTH)}...`
+          : msg.content;
+      return `${msg.role === "user" ? "User" : "Assistant"}: ${truncated}`;
+    })
+    .join("\n");
+
+  try {
+    const { text } = await generateText({
+      model,
+      prompt: `Given the following conversation and a follow-up message, rewrite the follow-up message as a standalone search query that captures the full intent without needing conversation context.
+
+Rules:
+- Resolve all pronouns (it, that, they, there, etc.) and references to specific entities from the conversation
+- If the follow-up is already a standalone query with no references to the conversation, return it unchanged
+- Output ONLY the reformulated query, nothing else — no explanation, no quotes, no prefix
+
+Conversation:
+${recentHistory}
+
+Follow-up message: ${userQuery}
+
+Standalone query:`,
+      temperature: 0,
+      maxOutputTokens: 100,
+      abortSignal: AbortSignal.timeout(2000),
+    });
+
+    const reformulated = text.trim();
+
+    // Sanity check: if the LLM returned empty or something suspiciously long, fall back
+    if (!reformulated || reformulated.length > userQuery.length * 3) {
+      console.warn(
+        "[CQR] Reformulated query failed sanity check, using original",
+      );
+      return { reformulatedQuery: userQuery, wasReformulated: false };
+    }
+
+    const wasReformulated = reformulated !== userQuery;
+
+    console.log(
+      `[CQR] Original: "${userQuery.substring(0, 60)}${userQuery.length > 60 ? "..." : ""}"`,
+    );
+    if (wasReformulated) {
+      console.log(
+        `[CQR] Reformulated: "${reformulated.substring(0, 60)}${reformulated.length > 60 ? "..." : ""}"`,
+      );
+    } else {
+      console.log("[CQR] Query unchanged (already standalone)");
+    }
+
+    return { reformulatedQuery: reformulated, wasReformulated };
+  } catch (error) {
+    console.warn("[CQR] Reformulation failed, using original query:", error);
+    return { reformulatedQuery: userQuery, wasReformulated: false };
+  }
 }
 
 // ─────────────────────────────────────────────────────
@@ -437,15 +545,17 @@ export async function rerankResults(
 /**
  * Execute the full RAG pipeline for a user query
  *
- * @param userQuery - The user's query
+ * @param userQuery - The user's latest query
  * @param agentId - The agent ID for namespace isolation
  * @param config - RAG configuration from agent settings
+ * @param conversationHistory - Prior conversation messages for CQR (optional)
  * @returns RAG context and debug info
  */
 export async function performRAGRetrieval(
   userQuery: string,
   agentId: string,
   config: RAGConfig,
+  conversationHistory?: ConversationMessage[],
 ): Promise<RAGResult> {
   const ragStartTime = Date.now();
   const debugInfo: RAGDebugInfo = {
@@ -467,10 +577,40 @@ export async function performRAGRetrieval(
 
   debugInfo.originalQuery = userQuery;
 
+  // Step 0: Conversational Query Reformulation (CQR)
+  // Resolves pronouns and references in follow-up questions using conversation history
+  let effectiveQuery = userQuery;
+  if (conversationHistory && conversationHistory.length > 0) {
+    const cqrModelId = DEFAULT_MODELS.CONVERSATIONAL_REFORMULATION;
+    debugInfo.models!.conversationalReformulationModel = cqrModelId;
+
+    const cqrStart = Date.now();
+    const cqrModel = await resolveAndCreateModel(cqrModelId);
+    const cqrResult = await reformulateConversationalQuery(
+      cqrModel,
+      userQuery,
+      conversationHistory,
+    );
+    debugInfo.timing!.conversationalReformulationMs = Date.now() - cqrStart;
+    debugInfo.cqrApplied = cqrResult.wasReformulated;
+
+    if (cqrResult.wasReformulated) {
+      effectiveQuery = cqrResult.reformulatedQuery;
+      debugInfo.reformulatedQuery = effectiveQuery;
+      console.log(
+        `[RAG Pipeline] CQR reformulated query in ${debugInfo.timing!.conversationalReformulationMs}ms`,
+      );
+    } else {
+      console.log(
+        `[RAG Pipeline] CQR: query unchanged (${debugInfo.timing!.conversationalReformulationMs}ms)`,
+      );
+    }
+  }
+
   const rewriteModelId = config.rewriteModel || DEFAULT_MODELS.QUERY_REWRITE;
   const variationsCount = config.queryVariationsCount || 3;
 
-  let queries = [userQuery];
+  let queries = [effectiveQuery];
   let keywords: string[] = [];
 
   if (config.skipIntentClassification) {
@@ -483,7 +623,7 @@ export async function performRAGRetrieval(
       const model = await resolveAndCreateModel(rewriteModelId);
       const rewriteResult = await rewriteQuery(
         model,
-        userQuery,
+        effectiveQuery,
         variationsCount,
       );
       debugInfo.timing!.queryRewriteMs = Date.now() - rewriteStart;
@@ -510,15 +650,18 @@ export async function performRAGRetrieval(
 
     const intentStart = Date.now();
     const intentPromise = resolveAndCreateModel(intentModelId).then((model) =>
-      classifyQueryIntent(model, userQuery),
+      classifyQueryIntent(model, effectiveQuery),
     );
 
     const rewriteStart = Date.now();
     const rewritePromise = config.rewriteQuery
       ? resolveAndCreateModel(rewriteModelId).then((model) =>
-          rewriteQuery(model, userQuery, variationsCount),
+          rewriteQuery(model, effectiveQuery, variationsCount),
         )
-      : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
+      : Promise.resolve({
+          queries: [effectiveQuery],
+          keywords: [] as string[],
+        });
 
     const [intentResult, rewriteResult] = await Promise.all([
       intentPromise.then((result) => {
@@ -588,7 +731,7 @@ export async function performRAGRetrieval(
 
     const rerankStart = Date.now();
     topMatches = await rerankResults(
-      userQuery,
+      effectiveQuery,
       topMatches,
       topK,
       rerankModelId,

@@ -31,6 +31,7 @@ import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 import type { ModelCapabilities } from "./helpers";
 import { processMessageParts } from "./image-service";
 import {
+  type ConversationMessage,
   performRAGRetrieval,
   type RAGConfig,
   type RAGDebugInfo,
@@ -84,6 +85,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
 
     // 3. RAG retrieval (using extracted pipeline)
     const userQuery = extractUserQuery(request);
+    const conversationHistory = extractConversationHistory(request);
     const ragConfig: RAGConfig = {
       enabled: agentData.ragEnabled,
       contextualEmbeddingsEnabled:
@@ -100,7 +102,12 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     };
 
     const { context: ragContext, debugInfo: ragDebugInfo } =
-      await performRAGRetrieval(userQuery, agentData.id, ragConfig);
+      await performRAGRetrieval(
+        userQuery,
+        agentData.id,
+        ragConfig,
+        conversationHistory,
+      );
 
     // 4. Build final system prompt with RAG context
     let systemPrompt = basePrompt;
@@ -291,6 +298,48 @@ function extractUserQuery(request: ChatRequest): string {
   }
 
   return "";
+}
+
+/**
+ * Extract conversation history for CQR (conversational query reformulation).
+ * Returns all messages EXCEPT the last user message (which is the current query).
+ * Only includes user and assistant messages with text content.
+ */
+function extractConversationHistory(
+  request: ChatRequest,
+): ConversationMessage[] {
+  const messages = request.messages;
+  if (messages.length < 2) return [];
+
+  // Find the index of the last user message (current query) to exclude it
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+
+  // If no prior messages before the last user message, no history to use
+  if (lastUserIndex <= 0) return [];
+
+  const history: ConversationMessage[] = [];
+  // Extract text content from messages before the current user query
+  for (let i = 0; i < lastUserIndex; i += 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user" && msg?.role !== "assistant") continue;
+
+    const textPart = msg.parts.find((part) => part.type === "text");
+    const content = textPart?.text;
+    if (!content) continue;
+
+    history.push({
+      role: msg.role as "user" | "assistant",
+      content: content as string,
+    });
+  }
+
+  return history;
 }
 
 /**

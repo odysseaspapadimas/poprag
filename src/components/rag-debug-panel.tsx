@@ -23,6 +23,8 @@ interface RAGDebugInfo {
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
+  reformulatedQuery?: string; // CQR: standalone query after conversational reformulation
+  cqrApplied?: boolean; // CQR: whether reformulation was applied
   rewrittenQueries?: string[];
   keywords?: string[];
   vectorResultsCount?: number;
@@ -40,6 +42,7 @@ interface RAGDebugInfo {
   }>;
   // Timing metrics (in milliseconds)
   timing?: {
+    conversationalReformulationMs?: number;
     intentClassificationMs?: number;
     queryRewriteMs?: number;
     vectorSearchMs?: number;
@@ -51,6 +54,7 @@ interface RAGDebugInfo {
   };
   // Model information
   models?: {
+    conversationalReformulationModel?: string;
     intentModel?: string;
     rewriteModel?: string;
     embeddingModel?: string;
@@ -287,6 +291,24 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             )}
+            {debugInfo.cqrApplied && debugInfo.reformulatedQuery && (
+              <div className="pl-6 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">
+                    Reformulated Query (CQR):
+                  </span>
+                  <Badge
+                    variant="secondary"
+                    className="bg-blue-500/20 text-blue-700 dark:text-blue-400 text-[10px]"
+                  >
+                    Multi-turn
+                  </Badge>
+                </div>
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded p-2 font-mono text-xs break-words">
+                  {debugInfo.reformulatedQuery}
+                </div>
+              </div>
+            )}
             {debugInfo.rewrittenQueries &&
               debugInfo.rewrittenQueries.length > 0 && (
                 <div className="pl-6 space-y-1">
@@ -373,6 +395,21 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 <span>Models Used</span>
               </div>
               <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {debugInfo.models.conversationalReformulationModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">
+                      CQR (Reformulation)
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.conversationalReformulationModel}
+                    >
+                      {formatModelName(
+                        debugInfo.models.conversationalReformulationModel,
+                      )}
+                    </div>
+                  </div>
+                )}
                 {debugInfo.models.chatModel && (
                   <div className="bg-background border rounded p-2">
                     <div className="text-xs text-muted-foreground">
@@ -466,6 +503,18 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               </div>
               <div className="pl-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {debugInfo.timing.conversationalReformulationMs !==
+                    undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">CQR</div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.conversationalReformulationMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {debugInfo.timing.intentClassificationMs !== undefined && (
                     <div className="bg-background border rounded p-2">
                       <div className="text-xs text-muted-foreground">
