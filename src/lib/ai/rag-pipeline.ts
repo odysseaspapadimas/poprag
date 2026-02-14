@@ -7,11 +7,11 @@
  * - Result fusion and reranking
  */
 
+import { db } from "@/db";
+import { documentChunks, knowledgeSource } from "@/db/schema";
 import type { LanguageModel } from "ai";
 import { generateText } from "ai";
 import { and, eq, inArray, or } from "drizzle-orm";
-import { db } from "@/db";
-import { documentChunks, knowledgeSource } from "@/db/schema";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -324,8 +324,8 @@ export async function hybridSearch(
       ? Math.max(...allVectorMatches.map((m) => m.score))
       : 0;
 
-  const HIGH_CONFIDENCE_THRESHOLD = 0.85;
-  const skipFTS = false;
+  const HIGH_CONFIDENCE_THRESHOLD = 0.95;
+  const skipFTS = topVectorScore >= HIGH_CONFIDENCE_THRESHOLD;
 
   let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
   let ftsSearchMs = 0;
@@ -516,8 +516,8 @@ export async function performRAGRetrieval(
     const rewriteStart = Date.now();
     const rewritePromise = config.rewriteQuery
       ? resolveAndCreateModel(rewriteModelId).then((model) =>
-          rewriteQuery(model, userQuery, variationsCount),
-        )
+        rewriteQuery(model, userQuery, variationsCount),
+      )
       : Promise.resolve({ queries: [userQuery], keywords: [] as string[] });
 
     const [intentResult, rewriteResult] = await Promise.all([
