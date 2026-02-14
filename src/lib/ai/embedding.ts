@@ -447,42 +447,8 @@ export async function findRelevantContentWithEmbedding(
       // Take only topK after filtering
       .slice(0, topK);
 
-    // Fetch full text from database to avoid Vectorize metadata truncation
-    if (matches.length > 0) {
-      try {
-        const chunkIds = matches.map((m) => m.id);
-        const dbChunks = await db
-          .select({
-            id: documentChunks.id,
-            text: documentChunks.text,
-          })
-          .from(documentChunks)
-          .where(inArray(documentChunks.id, chunkIds));
-
-        const dbChunkMap = new Map(dbChunks.map((c) => [c.id, c.text]));
-
-        let replacedCount = 0;
-        matches.forEach((match) => {
-          const fullText = dbChunkMap.get(match.id);
-          if (fullText && fullText.length > match.content.length) {
-            match.content = fullText;
-            match.metadata.contentLength = fullText.length;
-            replacedCount++;
-          }
-        });
-
-        if (replacedCount > 0) {
-          console.log(
-            `[RAG] Replaced ${replacedCount} chunks with full text from DB`,
-          );
-        }
-      } catch (error) {
-        console.warn(
-          "[RAG] Failed to fetch full text from DB, using Vectorize metadata:",
-          error,
-        );
-      }
-    }
+    // Note: Full text enrichment is handled by enrichWithFullText() in rag-pipeline.ts
+    // to avoid double D1 fetches (see RAG_ARCHITECTURE_REVIEW.md section 9.1)
 
     if (matches.length === 0) {
       console.warn(
@@ -541,51 +507,51 @@ export async function searchDocumentChunksFTS(
   const { limit = 5 } = options || {};
 
   try {
-    // Build FTS queries for each search term
-    const queries = searchTerms
+    // Sanitize and filter search terms, then combine into a single compound OR query
+    // This reduces N D1 round trips to 1 for better FTS latency
+    const sanitizedTerms = searchTerms
       .filter(Boolean)
-      .map((term) => {
-        // Sanitize term - remove special characters that could break FTS
-        const sanitizedTerm = term.trim().replace(/[^\w\s]/g, "");
-        if (!sanitizedTerm) return null;
-        console.log(sanitizedTerm, "", agentId, " ", limit);
-        return sql`
-					SELECT document_chunks.id, document_chunks.text, document_chunks_fts.rank
-					FROM document_chunks_fts
-					JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
-					WHERE document_chunks_fts MATCH ${sanitizedTerm}
-					  AND document_chunks.agent_id = ${agentId}
-          ORDER BY rank ASC
-					LIMIT ${limit}
-				`;
-      })
-      .filter(Boolean);
+      .map((term) =>
+        term
+          .trim()
+          .replace(/[^\w\s]/g, "")
+          .trim(),
+      )
+      .filter((term) => term.length > 0);
 
-    if (queries.length === 0) {
+    if (sanitizedTerms.length === 0) {
       return [];
     }
 
-    // Execute all queries in parallel
-    const results = await Promise.all(
-      queries.map(async (query) => {
-        if (!query) return [];
-        const result = await db.run(query);
-        return (result.results || []) as Array<{
-          id: string;
-          text: string;
-          rank: number;
-        }>;
-      }),
+    // Build compound FTS5 MATCH expression: "term1 OR term2 OR term3"
+    // Each term is double-quoted to handle multi-word terms safely
+    const compoundMatch = sanitizedTerms
+      .map((term) => `"${term}"`)
+      .join(" OR ");
+
+    console.log(
+      `[FTS] Compound query: ${compoundMatch} for agent ${agentId}, limit ${limit}`,
     );
 
-    // Flatten and deduplicate results
-    const allResults = results.flat();
-    const uniqueResults = Array.from(
-      new Map(allResults.map((r) => [r.id, r])).values(),
-    );
+    const query = sql`
+      SELECT document_chunks.id, document_chunks.text, document_chunks_fts.rank
+      FROM document_chunks_fts
+      JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
+      WHERE document_chunks_fts MATCH ${compoundMatch}
+        AND document_chunks.agent_id = ${agentId}
+      ORDER BY rank ASC
+      LIMIT ${limit * 2}
+    `;
 
-    // Sort by rank and limit
-    return uniqueResults.sort((a, b) => b.rank - a.rank).slice(0, limit * 2); // Return more for fusion
+    const result = await db.run(query);
+    const results = (result.results || []) as Array<{
+      id: string;
+      text: string;
+      rank: number;
+    }>;
+
+    // Sort by rank (FTS5 rank is negative, lower = better match)
+    return results.sort((a, b) => b.rank - a.rank).slice(0, limit * 2); // Return more for fusion
   } catch (error) {
     console.error("[FTS] Error searching document chunks:", error);
     console.warn(

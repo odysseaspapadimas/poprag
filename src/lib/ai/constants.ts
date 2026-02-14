@@ -11,8 +11,10 @@ export const DEFAULT_MODELS = {
   /** Model used for intent classification (determining if RAG is needed) */
   INTENT_CLASSIFICATION: "@cf/meta/llama-3.1-8b-instruct-fast",
 
-  /** Model used for query rewriting to improve search coverage */
-  QUERY_REWRITE: "@cf/meta/llama-3.1-8b-instruct-fast",
+  /** Model used for query rewriting to improve search coverage
+   * Using 3B model since rewriting is a simple task (rephrasing + keyword extraction)
+   * and 8B was causing 3-5s latency on Workers AI */
+  QUERY_REWRITE: "@cf/meta/llama-3.2-3b-instruct",
 
   /** Embedding model for vector search (1536 dimensions) - OpenAI */
   EMBEDDING: "text-embedding-3-small",

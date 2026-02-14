@@ -138,10 +138,15 @@ Respond ONLY with valid JSON in this exact format:
 {"requiresRAG": true/false, "reason": "your explanation"}`,
       temperature: 0,
       maxOutputTokens: 120,
+      abortSignal: AbortSignal.timeout(2000),
     });
 
-    // Parse JSON response
-    const parsed = JSON.parse(text.trim());
+    // Parse JSON response — strip markdown code fences that smaller models often add
+    const jsonStr = text
+      .trim()
+      .replace(/^```(?:json)?\s*\n?/i, "")
+      .replace(/\n?\s*```$/i, "");
+    const parsed = JSON.parse(jsonStr);
     const output = {
       requiresRAG: Boolean(parsed.requiresRAG),
       reason: String(parsed.reason || "No reason provided"),
@@ -188,17 +193,12 @@ export async function rewriteQuery(
     };
   }
 
-  const maxOutputTokens = Math.min(512, 80 + variationsCount * 60);
-  const promptText = `Given the following user message, rewrite it into ${variationsCount} distinct queries that could be used to search for relevant information, and provide additional keywords related to the query.
-
-Each query should focus on different aspects or potential interpretations of the original message.
-Each keyword should be derived from an interpretation of the provided user message.
-Keep each query under 12 words and provide at most 6 keywords total.
+  const maxOutputTokens = Math.min(256, 60 + variationsCount * 40);
+  const promptText = `Rewrite this user message into ${variationsCount} distinct search queries (each under 12 words) and extract up to 6 keywords.
 
 User message: ${query}
 
-Respond ONLY with valid JSON in this exact format:
-{"queries": ["query1", "query2", "query3"], "keywords": ["keyword1", "keyword2"]}`;
+Respond ONLY with JSON: {"queries": ["q1", "q2", "q3"], "keywords": ["k1", "k2"]}`;
 
   try {
     const { text } = await generateText({
@@ -206,10 +206,15 @@ Respond ONLY with valid JSON in this exact format:
       prompt: promptText,
       temperature: 0.2,
       maxOutputTokens,
+      abortSignal: AbortSignal.timeout(2000), // 2s hard cap — falls back to original query on timeout
     });
 
-    // Parse JSON response
-    const parsed = JSON.parse(text.trim());
+    // Parse JSON response — strip markdown code fences that smaller models often add
+    const jsonStr = text
+      .trim()
+      .replace(/^```(?:json)?\s*\n?/i, "")
+      .replace(/\n?\s*```$/i, "");
+    const parsed = JSON.parse(jsonStr);
     const output = {
       queries: Array.isArray(parsed.queries) ? parsed.queries : [query],
       keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
@@ -320,7 +325,7 @@ export async function hybridSearch(
       : 0;
 
   const HIGH_CONFIDENCE_THRESHOLD = 0.85;
-  const skipFTS = topVectorScore >= HIGH_CONFIDENCE_THRESHOLD;
+  const skipFTS = false;
 
   let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
   let ftsSearchMs = 0;

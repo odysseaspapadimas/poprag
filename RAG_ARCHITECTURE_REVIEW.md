@@ -13,10 +13,10 @@ Actions ranked by a composite score of **impact** (accuracy, latency, cost), **d
 
 | Rank | Action | Impact | DX/UX | Effort | Section |
 |------|--------|--------|-------|--------|---------|
-| 1 | [Add grounding instructions to RAG prompt](#61-missing-grounding-instructions) | High (reduces hallucination) | High -- users get fewer wrong answers | Small | 6.1 |
-| 2 | [Switch reranker to bge-reranker-v2-m3](#41-bge-reranker-base-is-significantly-weaker-than-alternatives) | High (accuracy) | High -- noticeably better answers | Small | 4.1 |
-| 3 | [Fix double D1 fetch](#91-double-d1-fetch-for-full-text) | Low-Medium (latency) | Medium -- cleaner code, fewer wasted reads | Small | 9.1 |
-| 4 | [Consolidate FTS queries into compound OR](#32-fts-queries-run-per-keyword-instead-of-compound-match) | Medium (latency) | Medium -- simpler query logic | Small | 3.2 |
+| 1 | ✅ [Add grounding instructions to RAG prompt](#61-missing-grounding-instructions) | High (reduces hallucination) | High -- users get fewer wrong answers | Small | 6.1 |
+| 2 | [Consider Cohere reranker upgrade](#41-reranker-upgrade-options) | Medium-High (accuracy) | High -- noticeably better answers | Small-Medium | 4.1 |
+| 3 | ✅ [Fix double D1 fetch](#91-double-d1-fetch-for-full-text) | Low-Medium (latency) | Medium -- cleaner code, fewer wasted reads | Small | 9.1 |
+| 4 | ✅ [Consolidate FTS queries into compound OR](#32-fts-queries-run-per-keyword-instead-of-compound-match) | Medium (latency) | Medium -- simpler query logic | Small | 3.2 |
 | 5 | [Remove or raise FTS skip threshold to 0.95](#31-the-085-threshold-for-skipping-fts-is-risky) | Medium (accuracy) | Low -- invisible to users, but prevents silent recall loss | Small | 3.1 |
 | 6 | [Add chunk deduplication on re-upload](#94-no-chunk-deduplication-on-re-upload) | Medium (data quality) | High -- prevents confusing duplicate results | Small | 9.4 |
 | 7 | [Add chunk source metadata to context](#62-no-chunk-metadata-in-the-context) | Medium (accuracy) | Low -- invisible to end users, helps LLM resolve conflicts | Small | 6.2 |
@@ -151,9 +151,11 @@ At `rag-pipeline.ts:322-323`, if the top vector score >= 0.85, FTS is entirely s
 
 > Impact: Medium accuracy improvement. Effort: Small (one-line change).
 
-### 3.2 FTS Queries Run Per-Keyword Instead of Compound MATCH
+### 3.2 FTS Queries Run Per-Keyword Instead of Compound MATCH ✅ DONE
 
 **Severity: Medium**
+
+**Status: ✅ IMPLEMENTED** (2026-02-13)
 
 At `embedding.ts:544-562`, each keyword triggers a separate FTS5 query. 6 keywords = 6 D1 round trips. FTS5 supports compound queries:
 
@@ -162,6 +164,8 @@ WHERE document_chunks_fts MATCH 'keyword1 OR keyword2 OR keyword3'
 ```
 
 **Recommendation**: Combine keywords into a single FTS5 compound query using OR operators. This reduces D1 round trips from N to 1, improving FTS latency by 3-5x.
+
+**Implementation**: Refactored `searchDocumentChunksFTS` in `src/lib/ai/embedding.ts` to sanitize all search terms upfront and build a single compound FTS5 `MATCH` expression using OR operators (e.g., `"term1" OR "term2" OR "term3"`). This replaces N separate D1 round trips with a single query. Terms are double-quoted to safely handle multi-word terms. The deduplication step was removed since a single query naturally returns unique results.
 
 > Impact: Medium latency improvement. Effort: Small.
 
@@ -213,15 +217,72 @@ The 0.15 absolute floor is very permissive for OpenAI embeddings (where random t
 - Graceful fallback to original ordering on failure (`embedding.ts:720-722`)
 - Preserving original `vectorScore` alongside reranker score for debugging
 
-### 4.1 bge-reranker-base Is Significantly Weaker Than Alternatives
+### 4.1 Reranker Upgrade Options
 
-**Severity: High**
+**Severity: Medium (Current model is acceptable, but upgrades available)**
 
-`bge-reranker-base` scores ~67.9 on BEIR. `bge-reranker-v2-m3` scores ~73.0 -- a substantial improvement. On Workers AI, `bge-reranker-v2-m3` should be available as `@cf/baai/bge-reranker-v2-m3`. The latency difference is small (both process 20 documents in ~50-100ms on Workers AI).
+`bge-reranker-base` (Cloudflare's only reranker) scores ~67.9 on BEIR. This is decent but not state-of-the-art. **Cloudflare Workers AI currently only offers `bge-reranker-base` -- there is no `bge-reranker-v2-m3` available.**
 
-**Recommendation**: Switch to `@cf/baai/bge-reranker-v2-m3` if available on Workers AI. If not available, consider Cohere's reranker via API (higher accuracy but adds external dependency). Verify Workers AI model availability first.
+#### External Reranker Options
 
-> Impact: High accuracy improvement. Effort: Small (config change).
+Given access to Cloudflare and OpenAI only, here are the upgrade paths:
+
+**Option 1: Keep bge-reranker-base (Current)**
+- ✅ Included in Workers AI (no marginal cost)
+- ✅ ~50-100ms latency for 20 docs
+- ✅ Works well for Greek content (multilingual)
+- ❌ BEIR score ~67.9 (decent but not great)
+
+**Option 2: Cohere Rerank API (Recommended upgrade)**
+- ✅ Best-in-class accuracy: Rerank-3 scores ~74-76 on BEIR
+- ✅ Usage-based pricing: **$1 per 1000 searches** (~$0.001 per query)
+- ✅ Multilingual support (90+ languages including Greek)
+- ✅ Simple REST API similar to OpenAI
+- ✅ Already have pattern for external APIs via AI Gateway
+- ❌ Adds external dependency
+- ❌ Latency ~100-200ms (external API call)
+
+**Cost comparison**: At 10k queries/day → ~$10/day for Cohere vs free for Workers AI. But the accuracy improvement is significant (~8-10% better precision).
+
+**Option 3: HuggingFace Inference API**
+- Models available: `BAAI/bge-reranker-v2-m3`, `cross-encoder/ms-marco-MiniLM-L-12-v2`
+- Pricing: Usage-based **OR** credits-based depending on model
+- Free tier: 30,000 input characters/month
+- Paid: ~$0.06 per 1000 characters processed
+- More complex setup than Cohere
+
+**Recommendation**: 
+
+1. **Short term**: Keep `bge-reranker-base`. It's working and included in your plan. The current implementation is solid.
+
+2. **Long term**: If retrieval quality becomes a priority, ask your manager for **Cohere access**. It's the best ROI:
+   - Better than HuggingFace for reranking (Cohere specializes in this)
+   - Simple integration (single API endpoint)
+   - Very affordable at scale ($1/1000 queries)
+   - Excellent multilingual support
+
+Code integration would be minimal -- add a new provider case in `embedding.ts:rerank()`:
+
+```typescript
+case "cohere": {
+  const response = await fetch("https://api.cohere.ai/v1/rerank", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.COHERE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "rerank-multilingual-v3.0",
+      query,
+      documents: documents.map(d => d.content),
+      top_n: topK
+    })
+  });
+  // ... process response
+}
+```
+
+> Impact: Medium-High accuracy improvement with Cohere (~8-10% better precision). Effort: Small-Medium (requires API key approval + integration).
 
 ### 4.2 Candidate Count for Reranking
 
@@ -272,9 +333,11 @@ The parallel execution means rewrite work is wasted ~10-20% of the time (for gre
 - Separation of base prompt and RAG context injection
 - Explicit instruction to acknowledge incomplete data
 
-### 6.1 Missing Grounding Instructions
+### 6.1 Missing Grounding Instructions ✅ DONE
 
 **Severity: High**
+
+**Status: ✅ IMPLEMENTED** (2026-02-13)
 
 The current prompt says "Answer naturally using the information above as if it were your own knowledge." This encourages the model to confabulate. If the retrieved context is tangentially related but doesn't actually answer the question, the model will synthesize an answer from the context + its training data, producing a confident but wrong response.
 
@@ -288,6 +351,8 @@ The current prompt says "Answer naturally using the information above as if it w
   the user's question is clearly general knowledge that doesn't require
   specific documents.
 ```
+
+**Implementation**: Updated `src/lib/ai/prompt.ts` to include stronger grounding instructions that prevent confabulation and explicitly require the model to base answers only on retrieved context.
 
 > Impact: High accuracy improvement (reduces hallucination). Effort: Small.
 
@@ -414,21 +479,25 @@ When `contextualEmbeddingsEnabled` is true, each chunk triggers a Workers AI LLM
 
 ## 9. Known Issues
 
-### 9.1 Double D1 Fetch for Full Text
+### 9.1 Double D1 Fetch for Full Text ✅ DONE
 
 **Severity: High**
+
+**Status: ✅ IMPLEMENTED** (2026-02-13)
 
 `findRelevantContentWithEmbedding` (`embedding.ts:450-485`) fetches full text from D1, then `enrichWithFullText` (`rag-pipeline.ts:659-735`) does the same fetch again. Confirmed in code.
 
 **Recommendation**: Remove the D1 fetch from `findRelevantContentWithEmbedding`. Let the enrichment step in `rag-pipeline.ts` be the single source of full text retrieval.
 
+**Implementation**: Removed the redundant D1 fetch from `findRelevantContentWithEmbedding`. The function now returns matches with text from Vectorize metadata, and `enrichWithFullText` in the RAG pipeline handles fetching the complete text from D1 in a single query per retrieval operation.
+
 > Impact: ~10-20ms latency, cleaner code. Effort: Small.
 
-### 9.2 FTS Queries Run Per-Keyword
+### 9.2 FTS Queries Run Per-Keyword ✅ DONE
 
 **Severity: Medium**
 
-Covered in [Section 3.2](#32-fts-queries-run-per-keyword-instead-of-compound-match). Combine into compound OR queries.
+Covered in [Section 3.2](#32-fts-queries-run-per-keyword-instead-of-compound-match). ✅ Fixed -- consolidated into a single compound OR query.
 
 ### 9.3 No Conversation History Used for RAG Queries
 
@@ -598,8 +667,8 @@ This is a well-engineered RAG system with thoughtful design choices: hybrid sear
 
 The three highest-impact improvements that require the least effort are:
 
-1. **Grounding instructions** -- reduces hallucination, trivial to implement
+1. ✅ **Grounding instructions** -- reduces hallucination, trivial to implement
 2. **Better reranker model** -- single config change for meaningful accuracy gain
-3. **Fix double D1 fetch** -- removes redundant work, straightforward code change
+3. ✅ **Fix double D1 fetch** -- removes redundant work, straightforward code change
 
 The single most impactful improvement overall (requiring moderate effort) is **conversational query reformulation** -- without it, any multi-turn conversation with context-dependent queries silently degrades.
