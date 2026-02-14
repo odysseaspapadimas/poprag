@@ -148,5 +148,5 @@ export const DEFAULT_MODELS: Record<string, ModelConfig> = {
 export const DEFAULT_EMBEDDING_MODEL = {
   provider: "openai" as const,
   modelId: "text-embedding-3-small",
-  dimensions: 1536,
+  dimensions: 768,
 };

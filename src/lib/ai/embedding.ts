@@ -17,13 +17,13 @@ import { resolveModelConfig } from "@/lib/ai/helpers";
 
 /**
  * Embedding configuration
- * Platform-wide: all agents use text-embedding-3-small at 1536 dimensions
+ * Platform-wide: all agents use text-embedding-3-small at 768 Matryoshka dimensions
  *
  * IMPORTANT: Cloudflare Vectorize has strict limits:
  * - Metadata max size: 3KB per vector
- * - Max dimensions: 1536
+ * - Max dimensions: 1536 (we use 768 for faster queries)
  *
- * NOTE: Vectorize index must be configured with 1536 dimensions!
+ * NOTE: Vectorize index must be configured with 768 dimensions!
  */
 
 export interface EmbeddingRequestOptions {
@@ -47,7 +47,7 @@ async function resolveEmbeddingConfig(
   const modelAlias = options?.model || DEFAULT_MODELS.EMBEDDING;
   const modelConfig = await resolveModelConfig(modelAlias);
 
-  // Platform-wide: always use configured dimensions (1536 for text-embedding-3-small)
+  // Platform-wide: always use configured dimensions (768 Matryoshka for text-embedding-3-small)
   return {
     modelAlias,
     modelId: modelConfig.modelId,

@@ -25,7 +25,7 @@ Actions ranked by a composite score of **impact** (accuracy, latency, cost), **d
 | 10 | [Implement token budget for context injection](#64-no-token-budget-for-context) | Medium (accuracy + cost) | Medium -- prevents context overflow, reduces noise | Medium | 6.4 |
 | 11 | [Remove chunk text from Vectorize metadata](#13-storing-chunk-text-in-vectorize-metadata-creates-an-artificial-2000-char-ceiling) | High (accuracy -- removes chunk size ceiling) | Medium -- enables better chunking strategies | Medium | 1.3 |
 | 12 | [Move neighbor expansion before reranking](#34-neighbor-chunk-expansion-should-happen-before-reranking) | Medium (accuracy) | Low -- invisible to users | Medium | 3.4 |
-| 13 | [Test Matryoshka 768 dimensions](#21-consider-matryoshka-dimensionality-reduction) | Medium (latency) | Low -- invisible to users | Medium | 2.1 |
+| 13 | ✅ [Test Matryoshka 768 dimensions](#21-consider-matryoshka-dimensionality-reduction) | Medium (latency) | Low -- invisible to users | Medium | 2.1 |
 | 14 | [Add KV caching for embeddings](#112-cloudflare-kv-not-used-for-any-caching) | Medium (latency) | Medium -- faster repeat queries | Medium | 11.2 |
 | 15 | [Implement evaluation framework](#103-evaluation-framework) | High (enables all future optimization) | High -- data-driven decisions instead of guessing | Large | 10.3 |
 | 16 | [Add query routing / metadata filtering](#102-query-routing--metadata-filtering) | High (accuracy for diverse knowledge bases) | High -- agents with mixed content work better | Medium | 10.2 |
@@ -99,15 +99,24 @@ However, the 8000-char document truncation means large documents lose context fo
 - Dimension validation via `assertValidEmbedding()` prevents silent corruption
 - Newline replacement before embedding (`embedding.ts:229`) is good practice
 
-### 2.1 Consider Matryoshka Dimensionality Reduction
+### 2.1 Consider Matryoshka Dimensionality Reduction ✅ DONE
 
 **Severity: Medium**
+
+**Status: ✅ IMPLEMENTED** (2026-02-14)
 
 `text-embedding-3-small` at native 1536 dimensions scores ~62.3 on MTEB. At 512 dimensions (Matryoshka), it scores ~61.6 -- only ~1% accuracy loss. At 768 dimensions, loss is negligible (<0.5%).
 
 Vectorize query latency scales with dimensionality. Reducing from 1536 to 768 dimensions would approximately halve vector comparison computation, improving query speed by 20-40% depending on index size.
 
 **Recommendation**: Test 768 dimensions on actual data. If accuracy holds (measure with a small eval set), the speed gain is significant. This requires re-indexing all vectors. `text-embedding-3-small` natively supports Matryoshka -- just pass `dimensions: 768` via provider options, which the code already supports (`embedding.ts:86-88`).
+
+**Implementation**: Changed `EMBEDDING_CONFIG.DIMENSIONS` from 1536 to 768 in `constants.ts`. Updated `DEFAULT_EMBEDDING_MODEL.dimensions` in `models.ts`. OpenAI's `text-embedding-3-small` natively supports Matryoshka -- the `dimensions: 768` parameter is passed via provider options in `runEmbeddingRequest()`.
+
+**Migration steps (required before deploy):**
+1. Delete and recreate the Vectorize index: `wrangler vectorize delete rag && wrangler vectorize create rag --dimensions=768 --metric=cosine`
+2. Deploy the updated code
+3. Bulk re-index ALL knowledge sources via the Knowledge Health page (select all per agent, then "Re-index Selected")
 
 > Impact: Medium latency improvement, negligible accuracy loss. Effort: Medium (re-index required).
 

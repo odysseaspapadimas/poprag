@@ -21,7 +21,7 @@ export const DEFAULT_MODELS = {
    * Using 3B model — same as rewrite, simple reformulation task */
   CONVERSATIONAL_REFORMULATION: "@cf/meta/llama-3.2-3b-instruct",
 
-  /** Embedding model for vector search (1536 dimensions) - OpenAI */
+  /** Embedding model for vector search (768 Matryoshka dimensions) - OpenAI */
   EMBEDDING: "text-embedding-3-small",
 
   /** Cross-encoder model for reranking search results */
@@ -36,8 +36,12 @@ export const DEFAULT_MODELS = {
  * Platform-wide constant - all agents use the same embedding model
  */
 export const EMBEDDING_CONFIG = {
-  /** Dimensions for OpenAI text-embedding-3-small (native output) */
-  DIMENSIONS: 1536,
+  /**
+   * Dimensions for OpenAI text-embedding-3-small (Matryoshka reduction)
+   * Native: 1536, reduced to 768 for ~20-40% faster Vectorize queries
+   * with <0.5% accuracy loss on MTEB (62.3 -> ~62.0)
+   */
+  DIMENSIONS: 768,
 
   /** Cloudflare Vectorize metadata size limit (bytes) with buffer */
   VECTORIZE_METADATA_LIMIT: 2800,

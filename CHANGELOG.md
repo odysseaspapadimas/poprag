@@ -9,6 +9,7 @@ All notable changes to PopRAG will be documented in this file.
 - **Chunk deduplication on re-upload**: SHA-256 checksums computed client-side and checked server-side to automatically delete old versions when the same file is re-uploaded to an agent (`knowledge-upload-dialog.tsx`, `knowledge.ts`)
 
 ### Changed (2026-02-14)
+- **Matryoshka 768 dimensionality reduction**: Reduced embedding dimensions from 1536 to 768 using OpenAI's native Matryoshka support. ~20-40% faster Vectorize queries with <0.5% accuracy loss. **Requires Vectorize index recreation and full re-index before deploy** (`constants.ts`, `models.ts`, `embedding.ts`)
 - **Removed FTS skip threshold optimization**: FTS now always runs when keywords are available. The previous 0.95 threshold was ineffective due to normalized scores, causing FTS to be skipped in all cases and degrading hybrid search recall. ~5-15ms latency cost for meaningful accuracy improvement (`rag-pipeline.ts`)
 - **AI Gateway caching enabled**: Configured via Cloudflare dashboard for instant responses on cached queries (no code changes required)
 
