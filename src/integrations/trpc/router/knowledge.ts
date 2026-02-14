@@ -109,6 +109,31 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Source not found");
       }
 
+      // Deduplication: if checksum provided, check for existing source with same checksum + agentId
+      if (input.checksum) {
+        const [existing] = await db
+          .select({
+            id: knowledgeSource.id,
+            fileName: knowledgeSource.fileName,
+          })
+          .from(knowledgeSource)
+          .where(
+            and(
+              eq(knowledgeSource.agentId, source.agentId),
+              eq(knowledgeSource.checksum, input.checksum),
+              sql`${knowledgeSource.id} != ${input.sourceId}`,
+            ),
+          )
+          .limit(1);
+
+        if (existing) {
+          console.log(
+            `[Knowledge] Duplicate detected: "${source.fileName}" matches existing source "${existing.fileName}" (${existing.id}). Deleting old source.`,
+          );
+          await deleteKnowledgeSource(existing.id);
+        }
+      }
+
       // Update status to uploaded and checksum if provided
       await db
         .update(knowledgeSource)

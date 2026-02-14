@@ -88,12 +88,13 @@ const mutation = useMutation(trpc.agent.create.mutationOptions());
 ### Chat API Flow
 1. POST `/api/chat/$agentSlug` with messages
 2. Intent classification skips RAG for trivial messages (greetings, etc.)
-3. Query rewriting expands user query into variations
-4. Hybrid search: Vector (Vectorize) + FTS (D1)
-5. Reciprocal rank fusion merges results
-6. Optional reranking with cross-encoder
-7. RAG context injected into system prompt
-8. Streamed response via AI SDK
+3. Conversational query reformulation (condense-question pattern with context)
+4. Query rewriting expands user query into variations
+5. Hybrid search: Vector (Vectorize) + FTS (D1) with no skip threshold
+6. Reciprocal rank fusion merges results
+7. Optional reranking with cross-encoder
+8. RAG context injected into system prompt with source metadata
+9. Streamed response via AI SDK
 
 ### RAG Configuration (per agent)
 - `ragEnabled` - Enable/disable knowledge retrieval

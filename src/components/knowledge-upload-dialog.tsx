@@ -92,8 +92,19 @@ export function KnowledgeUploadDialog({
         });
 
         // Step 3: Confirm upload (sets status to 'uploaded')
+        // Compute SHA-256 checksum for deduplication
+        const hashBuffer = await crypto.subtle.digest(
+          "SHA-256",
+          await file.arrayBuffer(),
+        );
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const checksum = hashArray
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+
         await uploadConfirm.mutateAsync({
           sourceId: uploadResult.sourceId,
+          checksum,
         });
 
         setUploadProgress({

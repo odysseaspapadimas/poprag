@@ -425,25 +425,13 @@ export async function hybridSearch(
     `[Hybrid Search] Vector search: ${totalVectorResults} results (${topKPerQuery} per query) in ${vectorSearchMs}ms`,
   );
 
-  // Step 2: Check if vector results are high-confidence - skip FTS if so
-  const allVectorMatches = vectorResults.flatMap((r) => r.matches);
-  const topVectorScore =
-    allVectorMatches.length > 0
-      ? Math.max(...allVectorMatches.map((m) => m.score))
-      : 0;
-
-  const HIGH_CONFIDENCE_THRESHOLD = 0.95;
-  const skipFTS = topVectorScore >= HIGH_CONFIDENCE_THRESHOLD;
-
+  // Step 2: Always run FTS when keywords are available
+  // FTS adds ~5-15ms latency but improves recall by surfacing exact keyword matches
+  // that vector search may miss. The cost is negligible compared to the accuracy benefit.
   let ftsResults: Array<{ id: string; text: string; rank: number }> = [];
   let ftsSearchMs = 0;
 
-  if (skipFTS) {
-    console.log(
-      `[Hybrid Search] High-confidence vector match (${topVectorScore.toFixed(3)}), skipping FTS`,
-    );
-  } else if (keywords.length > 0) {
-    // Step 3: Perform FTS search for keywords (with graceful degradation)
+  if (keywords.length > 0) {
     const ftsSearchStart = Date.now();
     try {
       ftsResults = await searchDocumentChunksFTS(keywords, agentId, {
@@ -458,7 +446,7 @@ export async function hybridSearch(
       console.warn("[Hybrid Search] FTS unavailable, using vector search only");
     }
 
-    if (keywords.length > 0 && ftsResults.length === 0) {
+    if (ftsResults.length === 0) {
       console.warn(
         "[Hybrid Search] FTS search returned no results despite having keywords. FTS index may need rebuilding.",
       );

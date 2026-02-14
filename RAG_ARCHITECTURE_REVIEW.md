@@ -17,10 +17,10 @@ Actions ranked by a composite score of **impact** (accuracy, latency, cost), **d
 | 2 | [Consider Cohere reranker upgrade](#41-reranker-upgrade-options) | Medium-High (accuracy) | High -- noticeably better answers | Small-Medium | 4.1 |
 | 3 | ✅ [Fix double D1 fetch](#91-double-d1-fetch-for-full-text) | Low-Medium (latency) | Medium -- cleaner code, fewer wasted reads | Small | 9.1 |
 | 4 | ✅ [Consolidate FTS queries into compound OR](#32-fts-queries-run-per-keyword-instead-of-compound-match) | Medium (latency) | Medium -- simpler query logic | Small | 3.2 |
-| 5 | [Remove or raise FTS skip threshold to 0.95](#31-the-085-threshold-for-skipping-fts-is-risky) | Medium (accuracy) | Low -- invisible to users, but prevents silent recall loss | Small | 3.1 |
-| 6 | [Add chunk deduplication on re-upload](#94-no-chunk-deduplication-on-re-upload) | Medium (data quality) | High -- prevents confusing duplicate results | Small | 9.4 |
-| 7 | [Add chunk source metadata to context](#62-no-chunk-metadata-in-the-context) | Medium (accuracy) | Low -- invisible to end users, helps LLM resolve conflicts | Small | 6.2 |
-| 8 | [Enable AI Gateway caching](#111-ai-gateway-caching-is-not-utilized) | High (latency + cost for repeat queries) | High -- instant responses for cached queries | Small | 11.1 |
+| 5 | ✅ [Remove or raise FTS skip threshold to 0.95](#31-the-085-threshold-for-skipping-fts-is-risky) | Medium (accuracy) | Low -- invisible to users, but prevents silent recall loss | Small | 3.1 |
+| 6 | ✅ [Add chunk deduplication on re-upload](#94-no-chunk-deduplication-on-re-upload) | Medium (data quality) | High -- prevents confusing duplicate results | Small | 9.4 |
+| 7 | ✅ [Add chunk source metadata to context](#62-no-chunk-metadata-in-the-context) | Medium (accuracy) | Low -- invisible to end users, helps LLM resolve conflicts | Small | 6.2 |
+| 8 | ✅ [Enable AI Gateway caching](#111-ai-gateway-caching-is-not-utilized) | High (latency + cost for repeat queries) | High -- instant responses for cached queries | Small | 11.1 |
 | 9 | ✅ [Implement conversational query reformulation](#93-no-conversation-history-used-for-rag-queries) | Critical (accuracy) | Critical -- multi-turn conversations actually work | Medium | 9.3 |
 | 10 | [Implement token budget for context injection](#64-no-token-budget-for-context) | Medium (accuracy + cost) | Medium -- prevents context overflow, reduces noise | Medium | 6.4 |
 | 11 | [Remove chunk text from Vectorize metadata](#13-storing-chunk-text-in-vectorize-metadata-creates-an-artificial-2000-char-ceiling) | High (accuracy -- removes chunk size ceiling) | Medium -- enables better chunking strategies | Medium | 1.3 |
@@ -137,9 +137,11 @@ OpenAI's embedding API accepts up to 2048 inputs per request. 50 is conservative
 - Adaptive threshold that considers both absolute floor and relative-to-top-score (`embedding.ts:384-386`)
 - Graceful degradation throughout (FTS failure falls back to vector-only, etc.)
 
-### 3.1 The 0.85 Threshold for Skipping FTS Is Risky
+### 3.1 The 0.85 Threshold for Skipping FTS Is Risky ✅ DONE
 
 **Severity: High**
+
+**Status: ✅ IMPLEMENTED** (2026-02-14)
 
 At `rag-pipeline.ts:322-323`, if the top vector score >= 0.85, FTS is entirely skipped. This is dangerous because:
 
@@ -148,6 +150,8 @@ At `rag-pipeline.ts:322-323`, if the top vector score >= 0.85, FTS is entirely s
 3. FTS queries against D1 are fast (~5-15ms). The latency savings from skipping are minimal compared to the accuracy risk.
 
 **Recommendation**: Remove the FTS skip optimization, or raise the threshold to 0.95. The latency savings (~10ms) are not worth the potential recall loss. If keeping it, log when FTS is skipped and monitor whether those queries have lower user satisfaction.
+
+**Implementation**: Removed the FTS skip optimization entirely from `hybridSearch()` in `rag-pipeline.ts`. The threshold was already set to 0.95 but was ineffective because normalized scores always made the top match 1.0, meaning FTS was always skipped when any vector results existed. FTS now always runs when keywords are available.
 
 > Impact: Medium accuracy improvement. Effort: Small (one-line change).
 
@@ -356,9 +360,11 @@ The current prompt says "Answer naturally using the information above as if it w
 
 > Impact: High accuracy improvement (reduces hallucination). Effort: Small.
 
-### 6.2 No Chunk Metadata in the Context
+### 6.2 No Chunk Metadata in the Context ✅ DONE
 
 **Severity: Medium**
+
+**Status: ✅ IMPLEMENTED** (2026-02-14)
 
 The system prompt joins chunk content with `---` separators but doesn't indicate which source each chunk came from, its position in the document, or its relevance score (`prompt.ts:67-69`). This makes it harder for the LLM to weigh conflicting information or understand document structure.
 
@@ -370,6 +376,8 @@ The system prompt joins chunk content with `---` separators but doesn't indicate
 ```
 
 This helps the LLM resolve conflicts (newer source wins) and understand context better. Don't expose scores -- the LLM shouldn't be making decisions about retrieval quality.
+
+**Implementation**: Updated `buildSystemPrompt()` in `prompt.ts` to prepend `[Source: fileName, Excerpt N of M]` headers to each chunk. The `fileName` metadata was already flowing through the pipeline from `enrichWithFullText()`. Also updated the system prompt guidelines to instruct the model to use source metadata for conflict resolution while not exposing raw filenames to users.
 
 > Impact: Medium accuracy improvement. Effort: Small.
 
@@ -526,13 +534,17 @@ Design decisions:
 
 > Impact: Critical accuracy improvement for multi-turn conversations. Effort: Medium.
 
-### 9.4 No Chunk Deduplication on Re-Upload
+### 9.4 No Chunk Deduplication on Re-Upload ✅ DONE
 
 **Severity: Medium**
+
+**Status: ✅ IMPLEMENTED** (2026-02-14)
 
 The `checksum` field exists on `knowledgeSource` but is never used to prevent duplicate uploads. Re-uploading the same file creates duplicate chunks in both D1 and Vectorize.
 
 **Recommendation**: On upload confirmation, check if a source with the same `checksum` AND `agentId` already exists. If so, either skip re-indexing or delete the old source first.
+
+**Implementation**: Two changes: (1) Client-side (`knowledge-upload-dialog.tsx`) now computes a SHA-256 hash of the file content using the Web Crypto API and sends it as the `checksum` parameter in the confirm step. (2) Server-side (`knowledge.ts` confirm procedure) checks for an existing `knowledgeSource` with matching `checksum` + `agentId`. If found, the old source is deleted (including its D1 chunks, R2 object, and Vectorize vectors) before the new source proceeds to indexing.
 
 > Impact: Medium data quality improvement. Effort: Small.
 
@@ -626,13 +638,17 @@ Would improve multi-hop reasoning but is a massive engineering effort and doesn'
 - R2 for document storage is correct
 - AI Gateway wrapping for external providers (OpenAI, OpenRouter)
 
-### 11.1 AI Gateway Caching Is Not Utilized
+### 11.1 AI Gateway Caching Is Not Utilized ✅ DONE
 
 **Severity: High**
+
+**Status: ✅ IMPLEMENTED** (2026-02-14)
 
 AI Gateway supports built-in response caching for identical requests. This is currently not configured for caching. For repeated queries (common in customer support bots), this could eliminate generation latency entirely.
 
 **Recommendation**: Enable AI Gateway caching with a TTL appropriate for each agent's use case. Requires configuring the AI Gateway in the Cloudflare dashboard -- no code changes needed.
+
+**Implementation**: Enabled AI Gateway caching from the Cloudflare dashboard. No code changes required.
 
 > Impact: High latency and cost reduction for repetitive queries. Effort: Small.
 

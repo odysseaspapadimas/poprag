@@ -65,7 +65,16 @@ export function buildSystemPrompt(
   const sortedChunks = [...ragContext.chunks].sort((a, b) => b.score - a.score);
 
   const contextSection = sortedChunks
-    .map((chunk) => chunk.content)
+    .map((chunk, index) => {
+      const fileName = chunk.metadata?.fileName
+        ? String(chunk.metadata.fileName)
+        : undefined;
+      const totalChunks = sortedChunks.length;
+      const header = fileName
+        ? `[Source: ${fileName}, Excerpt ${index + 1} of ${totalChunks}]`
+        : `[Excerpt ${index + 1} of ${totalChunks}]`;
+      return `${header}\n${chunk.content}`;
+    })
     .join("\n\n---\n\n");
 
   return `${basePrompt}
@@ -82,9 +91,9 @@ ${contextSection}
 - Base your answer ONLY on the reference information provided above.
 - If the reference information does not contain sufficient information to answer the question, clearly state that you don't have that information.
 - Do NOT supplement the reference information with your own knowledge unless the user's question is clearly general knowledge that doesn't require specific documents.
-- NEVER mention documents, files, sources, PDFs, or that you retrieved this information.
+- Use the source metadata (e.g., [Source: ...]) to resolve conflicts between excerpts -- prefer more specific or authoritative sources.
+- Do NOT expose raw file names, source labels, or excerpt numbers to the user. Answer naturally as if the reference information were your own knowledge.
 - NEVER say things like "According to the document..." or "Based on the file...".
-- Answer naturally as if the reference information were your own knowledge.
 - If data appears incomplete (e.g., missing numbers or units), acknowledge you don't have that specific detail.
 - Always provide complete answers - do not cut off mid-sentence.
 `;
