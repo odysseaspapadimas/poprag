@@ -30,7 +30,6 @@ import { useTRPC } from "@/integrations/trpc/react";
 
 const ragSettingsSchema = z.object({
   ragEnabled: z.boolean(),
-  contextualEmbeddingsEnabled: z.boolean(),
   skipIntentClassification: z.boolean(),
   rewriteQuery: z.boolean(),
   rewriteModel: z.string().optional(),
@@ -64,7 +63,6 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
     resolver: zodResolver(ragSettingsSchema),
     defaultValues: {
       ragEnabled: agent?.ragEnabled ?? true,
-      contextualEmbeddingsEnabled: agent?.contextualEmbeddingsEnabled ?? false,
       skipIntentClassification: agent?.skipIntentClassification ?? false,
       rewriteQuery: agent?.rewriteQuery ?? false,
       rewriteModel: agent?.rewriteModel || undefined,
@@ -134,30 +132,6 @@ export function RAGSettings({ agentId }: RAGSettingsProps) {
 
         {form.watch("ragEnabled") && (
           <>
-            <FormField
-              control={form.control}
-              name="contextualEmbeddingsEnabled"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">
-                      Contextual Embeddings
-                    </FormLabel>
-                    <FormDescription>
-                      Prepend short chunk context during ingestion to improve
-                      retrieval quality (adds ingestion latency)
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-
             <FormField
               control={form.control}
               name="skipIntentClassification"

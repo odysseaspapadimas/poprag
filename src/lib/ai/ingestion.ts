@@ -2,7 +2,6 @@ import { eq } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { db } from "@/db";
 import {
-  agent,
   documentChunks,
   type InsertKnowledgeSource,
   knowledgeSource,
@@ -171,58 +170,6 @@ export interface ParsedDocument {
   }>;
 }
 
-const CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS = 8000;
-const CONTEXTUAL_EMBEDDINGS_MAX_OUTPUT_TOKENS = 120;
-
-async function generateContextualEmbeddingText(
-  documentText: string,
-  chunkText: string,
-  modelId: keyof AiModels,
-  abortSignal?: AbortSignal,
-): Promise<{
-  contextualizedText: string;
-  contextLength: number;
-  truncatedDocument: boolean;
-  durationMs: number;
-}> {
-  const { env } = await import("cloudflare:workers");
-  const startTime = Date.now();
-  const trimmedDocument = documentText.trim();
-  assertNotAborted(abortSignal);
-
-  let docForContext = trimmedDocument;
-  let truncatedDocument = false;
-  if (docForContext.length > CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS) {
-    docForContext = `${docForContext.slice(0, CONTEXTUAL_EMBEDDINGS_MAX_DOC_CHARS)}\n\n[...truncated...]`;
-    truncatedDocument = true;
-  }
-
-  const prompt = `<document>\n${docForContext}\n</document>\nHere is the chunk we want to situate within the whole document:\n<chunk>\n${chunkText}\n</chunk>\nPlease give a short, succinct context (1-2 sentences) to situate this chunk within the overall document for retrieval. Answer only with the context and nothing else.`;
-
-  const response = (await withRetry(
-    () =>
-      env.AI.run(modelId, {
-        prompt,
-        max_tokens: CONTEXTUAL_EMBEDDINGS_MAX_OUTPUT_TOKENS,
-        temperature: 0,
-      }),
-    {
-      label: "contextual embedding",
-      abortSignal,
-    },
-  )) as { response?: string };
-
-  const context = response.response?.trim() || "";
-  const contextualizedText = context ? `${context}\n\n${chunkText}` : chunkText;
-
-  return {
-    contextualizedText,
-    contextLength: context.length,
-    truncatedDocument,
-    durationMs: Date.now() - startTime,
-  };
-}
-
 /**
  * Parse text content from uploaded file
  * Handles plain text, markdown, and various document formats using Cloudflare's toMarkdown service
@@ -386,16 +333,6 @@ export async function processKnowledgeSource(
     throw new Error(`Knowledge source ${sourceId} not found`);
   }
 
-  const [agentData] = await db
-    .select()
-    .from(agent)
-    .where(eq(agent.id, source.agentId))
-    .limit(1);
-
-  const contextualEmbeddingsEnabled =
-    agentData?.contextualEmbeddingsEnabled ?? false;
-  const contextualEmbeddingModel =
-    DEFAULT_MODELS.CONTEXTUAL_EMBEDDING as keyof AiModels;
   // Platform-wide embedding model - no per-agent override
   const embeddingModel = DEFAULT_MODELS.EMBEDDING;
 
@@ -442,67 +379,17 @@ export async function processKnowledgeSource(
     const vectorizeIds: string[] = [];
     const { env } = await import("cloudflare:workers");
     let processedChunks = 0;
-    let contextualizedChunks = 0;
-    let totalContextualizationMs = 0;
 
     // Process each batch
     for (let batchIdx = 0; batchIdx < chunkBatches.length; batchIdx++) {
       const batch = chunkBatches[batchIdx];
       assertNotAborted(abortSignal);
 
-      let embeddingInputs = batch;
-      let contextualizationDetails: Array<{
-        contextLength: number;
-        truncatedDocument: boolean;
-        durationMs: number;
-      }> = [];
-
-      if (contextualEmbeddingsEnabled) {
-        const contextualized = await Promise.all(
-          batch.map(async (chunk) => {
-            try {
-              return await generateContextualEmbeddingText(
-                parsed.content,
-                chunk,
-                contextualEmbeddingModel,
-                abortSignal,
-              );
-            } catch (error) {
-              console.warn(
-                "[Ingestion] Contextualization failed, using raw chunk:",
-                error,
-              );
-              return {
-                contextualizedText: chunk,
-                contextLength: 0,
-                truncatedDocument: false,
-                durationMs: 0,
-              };
-            }
-          }),
-        );
-
-        embeddingInputs = contextualized.map((item) => item.contextualizedText);
-        contextualizationDetails = contextualized.map((item) => ({
-          contextLength: item.contextLength,
-          truncatedDocument: item.truncatedDocument,
-          durationMs: item.durationMs,
-        }));
-
-        contextualizedChunks += contextualized.filter(
-          (item) => item.contextLength > 0,
-        ).length;
-        totalContextualizationMs += contextualized.reduce(
-          (sum, item) => sum + item.durationMs,
-          0,
-        );
-      }
-
       // Generate embeddings for this batch using platform-wide model
       const startTime = Date.now();
       const embeddingBatch: number[][] = await withRetry(
         () =>
-          generateEmbeddings(embeddingInputs, {
+          generateEmbeddings(batch, {
             model: embeddingModel,
             abortSignal,
           }),
@@ -566,17 +453,6 @@ export async function processKnowledgeSource(
                 chunkId: chunkIds[index],
                 fileName: source.fileName || "Unknown source",
                 text: batch[index],
-                contextualized: contextualEmbeddingsEnabled,
-                ...(contextualEmbeddingsEnabled &&
-                contextualizationDetails[index]
-                  ? {
-                      contextualModel: contextualEmbeddingModel,
-                      contextualSummaryLength:
-                        contextualizationDetails[index].contextLength,
-                      contextualDocTruncated:
-                        contextualizationDetails[index].truncatedDocument,
-                    }
-                  : {}),
               },
             })),
           ),
@@ -596,10 +472,6 @@ export async function processKnowledgeSource(
       await streamResponse({
         message: `Embedding... (${progressPercent.toFixed(1)}%)`,
         progress: progressPercent,
-        contextualEmbeddingsEnabled,
-        contextualizationMs: contextualEmbeddingsEnabled
-          ? totalContextualizationMs
-          : 0,
       });
 
       console.log(
@@ -621,11 +493,6 @@ export async function processKnowledgeSource(
       message: "Inserted vectors into database",
       chunksProcessed: processedChunks,
       vectorsInserted: vectorizeIds.length,
-      contextualEmbeddingsEnabled,
-      contextualizedChunks,
-      contextualizationMs: contextualEmbeddingsEnabled
-        ? totalContextualizationMs
-        : 0,
     });
 
     return {

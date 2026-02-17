@@ -143,11 +143,6 @@ export const agent = sqliteTable(
     ragEnabled: integer("rag_enabled", { mode: "boolean" })
       .default(true)
       .notNull(),
-    contextualEmbeddingsEnabled: integer("contextual_embeddings_enabled", {
-      mode: "boolean",
-    })
-      .default(false)
-      .notNull(),
     rewriteQuery: integer("rewrite_query", { mode: "boolean" })
       .default(true)
       .notNull(),

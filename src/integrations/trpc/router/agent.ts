@@ -130,7 +130,6 @@ export const agentRouter = createTRPCRouter({
         modelAlias: z.string(),
         systemPrompt: z.string().optional(),
         ragEnabled: z.boolean().default(true),
-        contextualEmbeddingsEnabled: z.boolean().default(false),
         skipIntentClassification: z.boolean().default(true),
         rewriteQuery: z.boolean().default(false),
         rewriteModel: z.string().optional(),
@@ -179,7 +178,6 @@ export const agentRouter = createTRPCRouter({
         visibility: input.visibility,
         status: "draft",
         ragEnabled: input.ragEnabled,
-        contextualEmbeddingsEnabled: input.contextualEmbeddingsEnabled,
         skipIntentClassification: input.skipIntentClassification,
         rewriteQuery: input.rewriteQuery,
         rewriteModel: input.rewriteModel,
@@ -253,7 +251,6 @@ export const agentRouter = createTRPCRouter({
         status: z.enum(["draft", "active", "archived"]).optional(),
         visibility: z.enum(["private", "public"]).optional(),
         ragEnabled: z.boolean().optional(),
-        contextualEmbeddingsEnabled: z.boolean().optional(),
         skipIntentClassification: z.boolean().optional(),
         rewriteQuery: z.boolean().optional(),
         rewriteModel: z.string().optional(),
@@ -278,8 +275,6 @@ export const agentRouter = createTRPCRouter({
       if (input.status) updates.status = input.status;
       if (input.visibility) updates.visibility = input.visibility;
       if (input.ragEnabled !== undefined) updates.ragEnabled = input.ragEnabled;
-      if (input.contextualEmbeddingsEnabled !== undefined)
-        updates.contextualEmbeddingsEnabled = input.contextualEmbeddingsEnabled;
       if (input.skipIntentClassification !== undefined)
         updates.skipIntentClassification = input.skipIntentClassification;
       if (input.rewriteQuery !== undefined)

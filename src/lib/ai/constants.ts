@@ -26,9 +26,6 @@ export const DEFAULT_MODELS = {
 
   /** Cross-encoder model for reranking search results */
   RERANKER: "@cf/baai/bge-reranker-base",
-
-  /** Model used to generate contextual embeddings during ingestion */
-  CONTEXTUAL_EMBEDDING: "@cf/meta/llama-3.1-8b-instruct-fast",
 } as const;
 
 /**

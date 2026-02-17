@@ -88,8 +88,6 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     const conversationHistory = extractConversationHistory(request);
     const ragConfig: RAGConfig = {
       enabled: agentData.ragEnabled,
-      contextualEmbeddingsEnabled:
-        agentData.contextualEmbeddingsEnabled ?? false,
       skipIntentClassification: agentData.skipIntentClassification ?? false,
       rewriteQuery: agentData.rewriteQuery,
       rewriteModel: agentData.rewriteModel || undefined,

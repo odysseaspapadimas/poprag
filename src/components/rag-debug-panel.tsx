@@ -19,7 +19,6 @@ import {
 
 interface RAGDebugInfo {
   enabled: boolean;
-  contextualEmbeddingsEnabled?: boolean;
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
@@ -363,16 +362,6 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             </div>
-            {debugInfo.contextualEmbeddingsEnabled !== undefined && (
-              <div className="pl-6">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">
-                    Contextual Embeddings:{" "}
-                    {debugInfo.contextualEmbeddingsEnabled ? "On" : "Off"}
-                  </Badge>
-                </div>
-              </div>
-            )}
             {debugInfo.rerankEnabled && (
               <div className="pl-6">
                 <div className="flex items-center gap-2">

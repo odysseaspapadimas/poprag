@@ -34,7 +34,6 @@ export interface ConversationMessage {
 
 export interface RAGConfig {
   enabled: boolean;
-  contextualEmbeddingsEnabled?: boolean;
   skipIntentClassification?: boolean;
   rewriteQuery: boolean;
   rewriteModel?: string;
@@ -48,7 +47,6 @@ export interface RAGConfig {
 
 export interface RAGDebugInfo {
   enabled: boolean;
-  contextualEmbeddingsEnabled?: boolean;
   skippedByIntent?: boolean;
   intentReason?: string;
   originalQuery?: string;
@@ -548,7 +546,6 @@ export async function performRAGRetrieval(
   const ragStartTime = Date.now();
   const debugInfo: RAGDebugInfo = {
     enabled: config.enabled,
-    contextualEmbeddingsEnabled: config.contextualEmbeddingsEnabled ?? false,
     timing: {},
     models: {},
   };

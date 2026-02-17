@@ -127,6 +127,13 @@
       "when": 1771027200000,
       "tag": "0017_fix_fts_delete_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1771360389763,
+      "tag": "0018_sour_secret_warriors",
+      "breakpoints": true
     }
   ]
 }
