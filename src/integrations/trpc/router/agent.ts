@@ -131,7 +131,7 @@ export const agentRouter = createTRPCRouter({
         systemPrompt: z.string().optional(),
         ragEnabled: z.boolean().default(true),
         contextualEmbeddingsEnabled: z.boolean().default(false),
-        skipIntentClassification: z.boolean().default(false),
+        skipIntentClassification: z.boolean().default(true),
         rewriteQuery: z.boolean().default(false),
         rewriteModel: z.string().optional(),
         intentModel: z.string().optional(),
@@ -221,8 +221,9 @@ export const agentRouter = createTRPCRouter({
         id: policyId,
         agentId: agentId,
         modelAlias: input.modelAlias,
-        temperature: 0.7,
-        topP: 1,
+        temperature: 0.2,
+        topP: 0.8,
+        maxTokens: 4096,
         effectiveFrom: new Date(),
       });
 
