@@ -159,12 +159,19 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     // 8. Stream response
     let firstTokenTime: number | undefined;
 
+    // Reasoning models don't support temperature/topP — omit to avoid AI SDK warnings
+    const isReasoningModel = capabilities?.reasoning === true;
+
     const result = streamText({
       model,
       system: systemPrompt,
       messages: modelMessages,
-      temperature: policy.temperature || 0.7,
-      topP: policy.topP || 1,
+      ...(isReasoningModel
+        ? {}
+        : {
+            temperature: policy.temperature || 0.7,
+            topP: policy.topP || 1,
+          }),
       maxOutputTokens: policy.maxTokens || 4096,
       onChunk: (event) => {
         if (!firstTokenTime && event.chunk.type === "text-delta") {

@@ -16,6 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTRPC } from "@/integrations/trpc/react";
 
 interface ModelPolicyEditorProps {
@@ -59,6 +64,16 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
       setFormState((s) => ({ ...s, modelAlias: modelAliases[0].alias }));
     }
   }, [modelAliases]);
+
+  // Check if selected model is a reasoning model (derived from already-loaded modelAliases)
+  const selectedModel = modelAliases?.find(
+    (m) => m.alias === formState.modelAlias,
+  );
+  const selectedCapabilities = selectedModel?.capabilities as
+    | { reasoning?: boolean }
+    | null
+    | undefined;
+  const isReasoningModel = selectedCapabilities?.reasoning === true;
 
   const queryClient = useQueryClient();
   const updatePolicy = useMutation(
@@ -117,34 +132,66 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
 
       <div className="grid grid-cols-2 gap-4">
         <Field>
-          <Label>Temperature</Label>
-          <Input
-            type="number"
-            min={0}
-            max={2}
-            step={0.1}
-            value={String(formState.temperature)}
-            onChange={(e) =>
-              setFormState({
-                ...formState,
-                temperature: Number(e.target.value),
-              })
-            }
-          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Label
+                  className={isReasoningModel ? "text-muted-foreground" : ""}
+                >
+                  Temperature
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={String(formState.temperature)}
+                  disabled={isReasoningModel}
+                  onChange={(e) =>
+                    setFormState({
+                      ...formState,
+                      temperature: Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
+            </TooltipTrigger>
+            {isReasoningModel && (
+              <TooltipContent>
+                Temperature is not supported for reasoning models
+              </TooltipContent>
+            )}
+          </Tooltip>
         </Field>
 
         <Field>
-          <Label>Top P</Label>
-          <Input
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={String(formState.topP)}
-            onChange={(e) =>
-              setFormState({ ...formState, topP: Number(e.target.value) })
-            }
-          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Label
+                  className={isReasoningModel ? "text-muted-foreground" : ""}
+                >
+                  Top P
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={String(formState.topP)}
+                  disabled={isReasoningModel}
+                  onChange={(e) =>
+                    setFormState({ ...formState, topP: Number(e.target.value) })
+                  }
+                />
+              </div>
+            </TooltipTrigger>
+            {isReasoningModel && (
+              <TooltipContent>
+                Top P is not supported for reasoning models
+              </TooltipContent>
+            )}
+          </Tooltip>
         </Field>
       </div>
 
