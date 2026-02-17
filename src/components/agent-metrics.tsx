@@ -49,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTRPC } from "@/integrations/trpc/react";
+import { formatDateTime, formatNumber } from "@/lib/utils";
 
 interface Props {
   agentId: string;
@@ -140,13 +141,6 @@ const formatCurrency = (microcents?: number | null) => {
   const dollars = microcents / 1_000_000;
   return `$${dollars.toFixed(4)}`;
 };
-
-const formatNumber = (value?: number | null) => {
-  if (typeof value !== "number" || Number.isNaN(value)) return "-";
-  return value.toLocaleString();
-};
-
-const formatDate = (value: number | Date) => new Date(value).toLocaleString();
 
 const computeAverage = (values: Array<number | null | undefined>) => {
   const filtered = values.filter(
@@ -497,7 +491,7 @@ function CostChart({ data }: { data: DailyMetric[] }) {
                   Cost: ${data.cost.toFixed(4)}
                 </div>
                 <div className="text-muted-foreground">
-                  Tokens: {data.tokens.toLocaleString()}
+                  Tokens: {formatNumber(data.tokens)}
                 </div>
                 <div className="text-muted-foreground">Runs: {data.runs}</div>
               </div>
@@ -555,7 +549,7 @@ function TokensChart({ data }: { data: DailyMetric[] }) {
               <div className="bg-popover border rounded-lg shadow-lg p-2 text-sm">
                 <div className="font-medium">{data.dateLabel}</div>
                 <div className="text-muted-foreground">
-                  Tokens: {data.tokens.toLocaleString()}
+                  Tokens: {formatNumber(data.tokens)}
                 </div>
                 <div className="text-muted-foreground">Runs: {data.runs}</div>
               </div>
@@ -789,7 +783,7 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
           <TableBody>
             {rows.map((run) => (
               <TableRow key={run.id}>
-                <TableCell>{formatDate(run.createdAt)}</TableCell>
+                <TableCell>{formatDateTime(run.createdAt)}</TableCell>
                 <TableCell>{formatNumber(getRunTotalTokens(run))}</TableCell>
                 <TableCell>{formatCurrency(run.costMicrocents)}</TableCell>
                 <TableCell>
@@ -1106,7 +1100,7 @@ export function AgentMetrics({ agentId }: Props) {
       {
         accessorKey: "createdAt",
         header: "Date",
-        cell: ({ row }) => formatDate(row.original.createdAt),
+        cell: ({ row }) => formatDateTime(row.original.createdAt),
       },
       {
         id: "user",
@@ -1213,7 +1207,7 @@ export function AgentMetrics({ agentId }: Props) {
       {
         accessorKey: "lastSeen",
         header: "Last Seen",
-        cell: ({ row }) => formatDate(row.original.lastSeen),
+        cell: ({ row }) => formatDateTime(row.original.lastSeen),
       },
       {
         accessorKey: "errorCount",
@@ -1271,7 +1265,7 @@ export function AgentMetrics({ agentId }: Props) {
       {
         accessorKey: "lastSeen",
         header: "Last Seen",
-        cell: ({ row }) => formatDate(row.original.lastSeen),
+        cell: ({ row }) => formatDateTime(row.original.lastSeen),
       },
       {
         accessorKey: "errorCount",

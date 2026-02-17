@@ -5,6 +5,24 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// ── Locale-safe formatting helpers ──────────────────────────────────
+// Change this single constant to switch every formatted date/number in the app.
+const LOCALE = "el-GR";
+
+/** Format a date+time string (e.g. "17/2/2026, 4:52:49 μ.μ.") */
+export const formatDateTime = (value: number | Date) =>
+  new Date(value).toLocaleString(LOCALE);
+
+/** Format a date-only string (e.g. "17/2/2026") */
+export const formatDate = (value: number | Date) =>
+  new Date(value).toLocaleDateString(LOCALE);
+
+/** Format a number with locale grouping (e.g. "1.234") */
+export const formatNumber = (value?: number | null) => {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return value.toLocaleString(LOCALE);
+};
+
 /**
  * Reciprocal Rank Fusion (RRF) for merging search results from multiple sources
  * Combines rankings from different search methods into a unified ranking

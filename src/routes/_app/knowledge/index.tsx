@@ -46,6 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTRPC } from "@/integrations/trpc/react";
+import { formatNumber } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/knowledge/")({
   component: KnowledgeHealthPage,
@@ -226,7 +227,7 @@ function KnowledgeHealthPage() {
               </span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {healthData.totalChunks.toLocaleString()} chunks total
+              {formatNumber(healthData.totalChunks)} chunks total
             </p>
           </CardContent>
         </Card>

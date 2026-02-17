@@ -4,6 +4,7 @@ import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/db/schema";
+import { formatDate } from "@/lib/utils";
 import AgentActions from "../agent-actions";
 
 export const columns: ColumnDef<Agent>[] = [
@@ -100,7 +101,7 @@ export const columns: ColumnDef<Agent>[] = [
       const createdAt = row.getValue("createdAt") as Date;
       return (
         <div className="text-sm text-muted-foreground">
-          {new Date(createdAt).toLocaleDateString()}
+          {formatDate(createdAt)}
         </div>
       );
     },

@@ -14,6 +14,7 @@ import { RAGSettings } from "@/components/rag-settings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
+import { formatDate, formatDateTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,
@@ -321,17 +322,13 @@ function AgentDetailPage() {
                     <dt className="text-sm font-medium text-muted-foreground">
                       Created
                     </dt>
-                    <dd className="text-sm">
-                      {new Date(agent.createdAt).toLocaleDateString()}
-                    </dd>
+                    <dd className="text-sm">{formatDate(agent.createdAt)}</dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-muted-foreground">
                       Last Updated
                     </dt>
-                    <dd className="text-sm">
-                      {new Date(agent.updatedAt).toLocaleDateString()}
-                    </dd>
+                    <dd className="text-sm">{formatDate(agent.updatedAt)}</dd>
                   </div>
                   {(() => {
                     const lastUpdateLog = auditLog.find(
@@ -438,7 +435,7 @@ function AgentDetailPage() {
                             </p>
                           </div>
                           <div className="text-xs text-muted-foreground shrink-0">
-                            {new Date(log.createdAt).toLocaleString()}
+                            {formatDateTime(log.createdAt)}
                           </div>
                         </div>
                       </div>
@@ -500,7 +497,7 @@ function AgentDetailPage() {
                       <p className="text-sm text-muted-foreground">
                         {source.mime} •{" "}
                         {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
-                        {new Date(source.createdAt).toLocaleDateString()}
+                        {formatDate(source.createdAt)}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -568,7 +565,7 @@ function AgentDetailPage() {
                         </p>
                       </div>
                       <div className="text-xs text-muted-foreground shrink-0">
-                        {new Date(log.createdAt).toLocaleString()}
+                        {formatDateTime(log.createdAt)}
                       </div>
                     </div>
                     {log.diff && (
