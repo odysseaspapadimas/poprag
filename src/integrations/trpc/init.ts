@@ -24,12 +24,16 @@ export const createTRPCContext = async ({
   };
 };
 
-// Context for server-side calls (no request/response needed)
-export const createServerSideContext = async (headers?: Headers) => {
+// Context for server-side calls (no full request/response needed)
+export const createServerSideContext = async (
+  headers?: Headers,
+  url?: string,
+) => {
+  const reqHeaders = headers ?? new Headers();
   const session = headers ? await auth.api.getSession({ headers }) : null;
 
   return {
-    request: null as unknown as Request,
+    request: new Request(url ?? "http://localhost", { headers: reqHeaders }),
     db,
     session,
     responseHeaders: new Headers(),

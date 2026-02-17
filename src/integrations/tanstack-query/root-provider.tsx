@@ -49,7 +49,11 @@ const createServerDirectLink = createIsomorphicFn().server(
                 ]);
 
               const headers = getHeaders();
-              const ctx = await createServerSideContext(new Headers(headers));
+              const url = getUrl();
+              const ctx = await createServerSideContext(
+                new Headers(headers),
+                url,
+              );
               const caller = createCaller(ctx);
 
               // Navigate to the procedure using typed path traversal
