@@ -178,7 +178,7 @@ export function EditPromptVersionDialog({
               onChange={(e) => setContent(e.target.value)}
               placeholder="Enter your prompt content here..."
               rows={10}
-              className="font-mono text-sm"
+              className="font-mono text-sm max-h-[400px] overflow-y-auto"
             />
           </div>
 
