@@ -18,9 +18,10 @@ import { resolveModelConfig } from "@/lib/ai/helpers";
  * Embedding configuration
  * Platform-wide: all agents use text-embedding-3-small at 768 Matryoshka dimensions
  *
- * IMPORTANT: Cloudflare Vectorize has strict limits:
- * - Metadata max size: 3KB per vector
+ * IMPORTANT: Cloudflare Vectorize limits:
+ * - Metadata max size: 3KB per vector (we store only lightweight fields, not chunk text)
  * - Max dimensions: 1536 (we use 768 for faster queries)
+ * - Chunk text is stored exclusively in D1 and fetched by enrichWithFullText()
  *
  * NOTE: Vectorize index must be configured with 768 dimensions!
  */
@@ -125,7 +126,6 @@ function assertValidEmbedding(
  * - Configurable chunk size with overlap
  * - Respects document structure and maintains context
  * - Filters out very small chunks
- * - Respects Vectorize 3KB metadata limit
  */
 
 export async function generateChunks(
@@ -134,7 +134,7 @@ export async function generateChunks(
     chunkSize?: number;
     chunkOverlap?: number;
     minChunkSize?: number;
-    maxChunkSize?: number; // Hard limit for metadata
+    maxChunkSize?: number; // Safety net for oversized chunks
     contentType?: "markdown" | "text";
   },
 ): Promise<string[]> {
@@ -142,7 +142,7 @@ export async function generateChunks(
     chunkSize = 1024, // Optimized for semantic coherence
     chunkOverlap = 200, // Helps maintain context across chunks
     minChunkSize = 100,
-    maxChunkSize = 2000, // Hard cap for Vectorize metadata
+    maxChunkSize = 4000, // Safety net — no longer constrained by Vectorize metadata (text stored only in D1)
     contentType = "text",
   } = options || {};
 
@@ -184,7 +184,7 @@ export async function generateChunks(
     normalizedChunks.push(...subChunks);
   }
 
-  // Filter and enforce size constraints for Vectorize metadata limits
+  // Filter tiny fragments and enforce max size safety net
   const filteredChunks = normalizedChunks
     .filter((chunk) => chunk.length >= minChunkSize)
     .map((chunk) =>
@@ -364,13 +364,6 @@ export async function findRelevantContentWithEmbedding(
         id: firstMatch.id,
         score: firstMatch.score,
         hasMetadata: !!firstMatch.metadata,
-        hasText: !!firstMatch.metadata?.text,
-        textLength: firstMatch.metadata?.text
-          ? String(firstMatch.metadata.text).length
-          : 0,
-        textPreview: firstMatch.metadata?.text
-          ? String(firstMatch.metadata.text).substring(0, 100)
-          : "N/A",
         metadataKeys: firstMatch.metadata
           ? Object.keys(firstMatch.metadata)
           : [],
@@ -396,20 +389,6 @@ export async function findRelevantContentWithEmbedding(
           return false;
         }
 
-        // Check for text content
-        const hasText =
-          match.metadata.text && String(match.metadata.text).trim().length > 0;
-        if (!hasText) {
-          console.warn(
-            `[RAG] Match ${
-              match.id
-            } missing text field in metadata. Available fields: ${Object.keys(
-              match.metadata,
-            ).join(", ")}`,
-          );
-          return false;
-        }
-
         // Check similarity threshold (using effective adaptive threshold)
         const meetsThreshold = match.score >= effectiveThreshold;
         if (!meetsThreshold) {
@@ -424,20 +403,20 @@ export async function findRelevantContentWithEmbedding(
         return true;
       })
       .map((match) => {
-        const textContent = String(match.metadata?.text || "");
         // Normalize score to 0-1 range for display (based on top score)
         const normalizedScore = topScore > 0 ? match.score / topScore : 0;
+        // Content is populated later by enrichWithFullText() from D1
+        // Vectorize metadata no longer stores chunk text (only lightweight fields)
         return {
           id: match.id,
           score: normalizedScore, // Normalized for display
           vectorScore: match.score, // Preserve original vector similarity score
-          content: textContent,
+          content: "", // Populated by enrichWithFullText() from D1
           metadata: {
             ...match.metadata,
             fileName: match.metadata?.fileName || "Unknown source",
             sourceId: match.metadata?.sourceId,
             chunkIndex: match.metadata?.chunkIndex,
-            contentLength: textContent.length,
           },
         };
       })
@@ -446,8 +425,9 @@ export async function findRelevantContentWithEmbedding(
       // Take only topK after filtering
       .slice(0, topK);
 
-    // Note: Full text enrichment is handled by enrichWithFullText() in rag-pipeline.ts
-    // to avoid double D1 fetches (see RAG_ARCHITECTURE_REVIEW.md section 9.1)
+    // Note: Full text is fetched by enrichWithFullText() in rag-pipeline.ts
+    // Vectorize metadata stores only lightweight fields (sourceId, fileName, etc.)
+    // to avoid the 3KB metadata limit constraining chunk sizes
 
     if (matches.length === 0) {
       console.warn(
@@ -463,11 +443,6 @@ export async function findRelevantContentWithEmbedding(
         ].vectorScore.toFixed(
           3,
         )} (normalized: ${matches[0].score.toFixed(3)} to ${matches[matches.length - 1].score.toFixed(3)})`,
-      );
-      console.log(
-        `[RAG] Content lengths: ${matches
-          .map((m) => m.metadata.contentLength)
-          .join(", ")}`,
       );
     }
 
@@ -508,12 +483,14 @@ export async function searchDocumentChunksFTS(
   try {
     // Sanitize and filter search terms, then combine into a single compound OR query
     // This reduces N D1 round trips to 1 for better FTS latency
+    // NOTE: Use Unicode-aware regex (\p{L}) to preserve non-ASCII characters (Greek, Cyrillic, etc.)
+    // The old /[^\w\s]/g only matched ASCII [a-zA-Z0-9_], stripping all non-Latin text
     const sanitizedTerms = searchTerms
       .filter(Boolean)
       .map((term) =>
         term
           .trim()
-          .replace(/[^\w\s]/g, "")
+          .replace(/[^\p{L}\p{N}\s]/gu, "")
           .trim(),
       )
       .filter((term) => term.length > 0);

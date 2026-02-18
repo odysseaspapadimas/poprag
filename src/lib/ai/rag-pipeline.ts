@@ -54,6 +54,8 @@ export interface RAGDebugInfo {
   reformulatedQuery?: string;
   /** Whether CQR was applied (conversation had prior turns) */
   cqrApplied?: boolean;
+  /** Whether CQR was attempted but failed (e.g. timeout) */
+  cqrFailed?: boolean;
   rewrittenQueries?: string[];
   keywords?: string[];
   vectorResultsCount?: number;
@@ -134,13 +136,17 @@ const CQR_MAX_MESSAGE_LENGTH = 200;
  * Standard CQR / "condense question" pattern used by LangChain, LlamaIndex,
  * and production RAG systems (Perplexity, Bing Chat).
  *
- * @returns The standalone query and whether reformulation actually occurred
+ * @returns The standalone query, whether reformulation occurred, and whether it failed
  */
 export async function reformulateConversationalQuery(
   model: LanguageModel,
   userQuery: string,
   conversationHistory: ConversationMessage[],
-): Promise<{ reformulatedQuery: string; wasReformulated: boolean }> {
+): Promise<{
+  reformulatedQuery: string;
+  wasReformulated: boolean;
+  failed?: boolean;
+}> {
   // Only reformulate if there's meaningful prior conversation
   if (conversationHistory.length === 0) {
     return { reformulatedQuery: userQuery, wasReformulated: false };
@@ -166,6 +172,7 @@ export async function reformulateConversationalQuery(
 Rules:
 - Resolve all pronouns (it, that, they, there, etc.) and references to specific entities from the conversation
 - If the follow-up is already a standalone query with no references to the conversation, return it unchanged
+- IMPORTANT: Preserve the original language of the query. If the user writes in Greek, output in Greek. Never translate.
 - Output ONLY the reformulated query, nothing else — no explanation, no quotes, no prefix
 
 Conversation:
@@ -204,8 +211,17 @@ Standalone query:`,
 
     return { reformulatedQuery: reformulated, wasReformulated };
   } catch (error) {
-    console.warn("[CQR] Reformulation failed, using original query:", error);
-    return { reformulatedQuery: userQuery, wasReformulated: false };
+    const isTimeout =
+      error instanceof DOMException && error.name === "AbortError";
+    console.warn(
+      `[CQR] Reformulation ${isTimeout ? "timed out" : "failed"}, using original query:`,
+      error,
+    );
+    return {
+      reformulatedQuery: userQuery,
+      wasReformulated: false,
+      failed: true,
+    };
   }
 }
 
@@ -301,6 +317,7 @@ export async function rewriteQuery(
 
   const maxOutputTokens = Math.min(256, 60 + variationsCount * 40);
   const promptText = `Rewrite this user message into ${variationsCount} distinct search queries (each under 12 words) and extract up to 6 keywords.
+IMPORTANT: Preserve the original language. If the message is in Greek, write queries and keywords in Greek. Never translate.
 
 User message: ${query}
 
@@ -343,6 +360,49 @@ Respond ONLY with JSON: {"queries": ["q1", "q2", "q3"], "keywords": ["k1", "k2"]
       keywords: [],
     };
   }
+}
+
+// ─────────────────────────────────────────────────────
+// Lightweight Keyword Extraction (no LLM)
+// ─────────────────────────────────────────────────────
+
+/**
+ * Extract basic keywords from a query using simple tokenization.
+ * Used as a fallback when query rewriting is disabled so that FTS
+ * always has terms to search with.
+ *
+ * Strategy: split on whitespace/punctuation, keep tokens ≥ 3 chars,
+ * deduplicate, sort by length descending (longer words are more
+ * distinctive in any language), return up to `maxKeywords` terms.
+ * Works with any language (Greek, English, etc.) since it relies
+ * on Unicode word boundaries, not a language-specific stemmer.
+ */
+function extractBasicKeywords(
+  query: string,
+  maxKeywords: number = 10,
+): string[] {
+  // Split on whitespace + common punctuation, keep Unicode word chars
+  const tokens = query
+    .split(/[\s,;:!?()[\]{}"«»\-–—]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3); // Drop very short words (articles, etc.)
+
+  // Deduplicate case-insensitively, preserve original casing of first occurrence
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      unique.push(token);
+    }
+  }
+
+  // Sort by length descending — longer words are more distinctive and
+  // produce better FTS results than short common function words
+  unique.sort((a, b) => b.length - a.length);
+
+  return unique.slice(0, maxKeywords);
 }
 
 // ─────────────────────────────────────────────────────
@@ -578,8 +638,13 @@ export async function performRAGRetrieval(
     );
     debugInfo.timing!.conversationalReformulationMs = Date.now() - cqrStart;
     debugInfo.cqrApplied = cqrResult.wasReformulated;
+    debugInfo.cqrFailed = cqrResult.failed ?? false;
 
-    if (cqrResult.wasReformulated) {
+    if (cqrResult.failed) {
+      console.warn(
+        `[RAG Pipeline] CQR failed after ${debugInfo.timing!.conversationalReformulationMs}ms, proceeding with original query`,
+      );
+    } else if (cqrResult.wasReformulated) {
       effectiveQuery = cqrResult.reformulatedQuery;
       debugInfo.reformulatedQuery = effectiveQuery;
       console.log(
@@ -687,6 +752,19 @@ export async function performRAGRetrieval(
     }
   }
 
+  // Fallback keyword extraction: when query rewriting is disabled (or failed),
+  // keywords[] is empty and FTS never runs. Extract basic keywords from the
+  // effective query so FTS always participates in hybrid search.
+  if (keywords.length === 0) {
+    keywords = extractBasicKeywords(effectiveQuery);
+    if (keywords.length > 0) {
+      debugInfo.keywords = keywords;
+      console.log(
+        `[RAG Pipeline] Extracted ${keywords.length} fallback keywords for FTS: ${keywords.join(", ")}`,
+      );
+    }
+  }
+
   // Step 3: Hybrid search (uses platform-wide embedding model)
   const topK = config.topK || RAG_CONFIG.TOP_K;
   const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
@@ -705,10 +783,19 @@ export async function performRAGRetrieval(
   debugInfo.vectorResultsCount = searchResult.vectorCount;
   debugInfo.ftsResultsCount = searchResult.ftsCount;
 
-  // Step 4: Reranking (if enabled)
+  // Step 4: Enrich with full text from D1 BEFORE reranking
+  // Vector results have empty content (Vectorize metadata no longer stores text)
+  // The reranker needs actual text content to score, so enrichment must come first
   let topMatches = searchResult.results.slice(0, 20); // Candidates for reranking
   debugInfo.rerankEnabled = config.rerank;
 
+  if (topMatches.length > 0) {
+    const enrichmentStart = Date.now();
+    topMatches = await enrichWithFullText(topMatches);
+    debugInfo.timing!.enrichmentMs = Date.now() - enrichmentStart;
+  }
+
+  // Step 5: Reranking (if enabled) — now has full text from D1
   if (config.rerank && topMatches.length > 0) {
     const rerankModelId = config.rerankModel || DEFAULT_MODELS.RERANKER;
     debugInfo.rerankModel = rerankModelId;
@@ -727,15 +814,29 @@ export async function performRAGRetrieval(
     topMatches = topMatches.slice(0, topK);
   }
 
-  // Step 5: Fetch full text from database to avoid Vectorize metadata truncation
+  // Step 6: Expand with neighbor chunks
   if (topMatches.length > 0) {
-    const enrichmentStart = Date.now();
-    topMatches = await enrichWithFullText(topMatches);
+    const neighborStart = Date.now();
     topMatches = await expandWithNeighborChunks(topMatches, topK);
-    debugInfo.timing!.enrichmentMs = Date.now() - enrichmentStart;
+    // Include neighbor expansion time in enrichment timing
+    debugInfo.timing!.enrichmentMs =
+      (debugInfo.timing!.enrichmentMs || 0) + (Date.now() - neighborStart);
   }
 
-  // Step 6: Build result
+  // Step 7: Filter out empty-content chunks
+  // Chunks may have empty content if D1 enrichment failed (DB error, orphaned Vectorize entry)
+  // Empty strings waste context slots and confuse the model
+  const preFilterCount = topMatches.length;
+  topMatches = topMatches.filter(
+    (m) => typeof m.content === "string" && m.content.trim().length > 0,
+  );
+  if (preFilterCount !== topMatches.length) {
+    console.warn(
+      `[RAG Pipeline] Filtered out ${preFilterCount - topMatches.length} empty-content chunks`,
+    );
+  }
+
+  // Step 8: Build result
   if (topMatches.length === 0) {
     console.log("[RAG Pipeline] No relevant chunks found");
     debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
@@ -787,7 +888,8 @@ export async function performRAGRetrieval(
 
 /**
  * Enrich search results with full text and source metadata from database
- * This avoids truncation from Vectorize metadata limits and ensures fileName is available
+ * Vectorize metadata no longer stores chunk text — D1 is the sole source of truth
+ * This function is called BEFORE reranking so the reranker has actual text to score
  */
 async function enrichWithFullText(
   matches: HybridSearchResult[],
@@ -813,42 +915,35 @@ async function enrichWithFullText(
 
     const dbRowMap = new Map(dbRows.map((r) => [r.id, r]));
 
-    let replacedCount = 0;
+    let enrichedCount = 0;
+    let missingCount = 0;
     const enrichedMatches = matches.map((match) => {
       const row = dbRowMap.get(match.id);
       if (row) {
-        const fullText = row.text;
-        const fileName = row.fileName || "Unknown source";
-        const textReplaced =
-          fullText && fullText.length > String(match.content).length;
-
-        if (textReplaced) {
-          replacedCount++;
-        }
-
+        enrichedCount++;
         return {
           ...match,
-          content: textReplaced ? fullText : match.content,
+          content: row.text,
           metadata: {
             ...match.metadata,
-            contentLength: textReplaced
-              ? fullText.length
-              : String(match.content).length,
-            fileName,
+            contentLength: row.text.length,
+            fileName: row.fileName || "Unknown source",
             sourceId: row.documentId,
             documentId: row.documentId,
             chunkIndex: row.chunkIndex,
           },
         };
       }
+      missingCount++;
+      console.warn(
+        `[RAG Pipeline] Chunk ${match.id} not found in D1 (orphaned Vectorize entry?)`,
+      );
       return match;
     });
 
-    if (replacedCount > 0) {
-      console.log(
-        `[RAG Pipeline] Replaced ${replacedCount} chunks with full text from DB`,
-      );
-    }
+    console.log(
+      `[RAG Pipeline] Enriched ${enrichedCount}/${matches.length} chunks with text from DB${missingCount > 0 ? ` (${missingCount} missing)` : ""}`,
+    );
 
     return enrichedMatches;
   } catch (error) {

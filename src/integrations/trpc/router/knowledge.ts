@@ -335,11 +335,22 @@ export const knowledgeRouter = createTRPCRouter({
         returnMetadata: true,
       });
 
+      // Fetch chunk text from D1 (Vectorize metadata no longer stores text)
+      const chunkIds = results.matches.map((m) => m.id);
+      const dbRows =
+        chunkIds.length > 0
+          ? await db
+              .select({ id: documentChunks.id, text: documentChunks.text })
+              .from(documentChunks)
+              .where(inArray(documentChunks.id, chunkIds))
+          : [];
+      const textMap = new Map(dbRows.map((r) => [r.id, r.text]));
+
       return {
         matches: results.matches.map((match) => ({
           id: match.id,
           score: match.score,
-          text: match.metadata?.text as string,
+          text: textMap.get(match.id) || "",
           fileName: match.metadata?.fileName as string,
           sourceId: match.metadata?.sourceId as string,
         })),

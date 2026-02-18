@@ -12,14 +12,14 @@ export const DEFAULT_MODELS = {
   INTENT_CLASSIFICATION: "@cf/meta/llama-3.1-8b-instruct-fast",
 
   /** Model used for query rewriting to improve search coverage
-   * Using 3B model since rewriting is a simple task (rephrasing + keyword extraction)
-   * and 8B was causing 3-5s latency on Workers AI */
-  QUERY_REWRITE: "@cf/meta/llama-3.2-3b-instruct",
+   * Using 8B model for better multilingual support (3B was producing
+   * garbage English output for Greek queries) */
+  QUERY_REWRITE: "@cf/meta/llama-3.1-8b-instruct-fast",
 
   /** Model used for conversational query reformulation (CQR)
    * Resolves pronouns, references, and ellipsis in follow-up questions
-   * Using 3B model — same as rewrite, simple reformulation task */
-  CONVERSATIONAL_REFORMULATION: "@cf/meta/llama-3.2-3b-instruct",
+   * Using 8B model — same as rewrite, good multilingual support */
+  CONVERSATIONAL_REFORMULATION: "@cf/meta/llama-3.1-8b-instruct-fast",
 
   /** Embedding model for vector search (768 Matryoshka dimensions) - OpenAI */
   EMBEDDING: "text-embedding-3-small",
@@ -39,9 +39,6 @@ export const EMBEDDING_CONFIG = {
    * with <0.5% accuracy loss on MTEB (62.3 -> ~62.0)
    */
   DIMENSIONS: 768,
-
-  /** Cloudflare Vectorize metadata size limit (bytes) with buffer */
-  VECTORIZE_METADATA_LIMIT: 2800,
 } as const;
 
 /**
@@ -56,9 +53,6 @@ export const CHUNKING_CONFIG = {
 
   /** Minimum chunk size to filter out tiny fragments */
   MIN_CHUNK_SIZE: 100,
-
-  /** Maximum chunk size for Vectorize metadata limits */
-  MAX_CHUNK_SIZE: 2000,
 } as const;
 
 /**

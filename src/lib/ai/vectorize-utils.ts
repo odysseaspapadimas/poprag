@@ -81,11 +81,9 @@ export async function testVectorizeQuery(
         ? {
             id: results.matches[0].id,
             score: results.matches[0].score,
-            hasText: !!results.matches[0].metadata?.text,
-            textPreview: results.matches[0].metadata?.text
-              ? String(results.matches[0].metadata.text).substring(0, 100)
-              : "NO TEXT",
             metadataKeys: Object.keys(results.matches[0].metadata || {}),
+            sourceId: results.matches[0].metadata?.sourceId,
+            fileName: results.matches[0].metadata?.fileName,
           }
         : null,
     };
@@ -150,8 +148,6 @@ export async function listNamespaceVectors(namespace: string, limit = 10) {
         results.matches?.map((m) => ({
           id: m.id,
           hasMetadata: !!m.metadata,
-          hasText: !!m.metadata?.text,
-          textLength: m.metadata?.text ? String(m.metadata.text).length : 0,
           sourceId: m.metadata?.sourceId,
           fileName: m.metadata?.fileName,
         })) || [],

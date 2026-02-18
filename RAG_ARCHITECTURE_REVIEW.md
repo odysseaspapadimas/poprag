@@ -23,7 +23,7 @@ Actions ranked by a composite score of **impact** (accuracy, latency, cost), **d
 | 8 | ✅ [Enable AI Gateway caching](#111-ai-gateway-caching-is-not-utilized) | High (latency + cost for repeat queries) | High -- instant responses for cached queries | Small | 11.1 |
 | 9 | ✅ [Implement conversational query reformulation](#93-no-conversation-history-used-for-rag-queries) | Critical (accuracy) | Critical -- multi-turn conversations actually work | Medium | 9.3 |
 | 10 | [Implement token budget for context injection](#64-no-token-budget-for-context) | Medium (accuracy + cost) | Medium -- prevents context overflow, reduces noise | Medium | 6.4 |
-| 11 | [Remove chunk text from Vectorize metadata](#13-storing-chunk-text-in-vectorize-metadata-creates-an-artificial-2000-char-ceiling) | High (accuracy -- removes chunk size ceiling) | Medium -- enables better chunking strategies | Medium | 1.3 |
+| 11 | ✅ [Remove chunk text from Vectorize metadata](#13-storing-chunk-text-in-vectorize-metadata-creates-an-artificial-2000-char-ceiling) | High (accuracy -- removes chunk size ceiling) | Medium -- enables better chunking strategies | Medium | 1.3 |
 | 12 | [Move neighbor expansion before reranking](#34-neighbor-chunk-expansion-should-happen-before-reranking) | Medium (accuracy) | Low -- invisible to users | Medium | 3.4 |
 | 13 | ✅ [Test Matryoshka 768 dimensions](#21-consider-matryoshka-dimensionality-reduction) | Medium (latency) | Low -- invisible to users | Medium | 2.1 |
 | 14 | [Add KV caching for embeddings](#112-cloudflare-kv-not-used-for-any-caching) | Medium (latency) | Medium -- faster repeat queries | Medium | 11.2 |
@@ -66,13 +66,28 @@ For markdown content (which is most of the parsed output from `toMarkdown()`), t
 
 > Impact: Low-medium accuracy improvement. Effort: Large.
 
-### 1.3 Storing Chunk Text in Vectorize Metadata Creates an Artificial 2000-Char Ceiling
+### 1.3 Storing Chunk Text in Vectorize Metadata Creates an Artificial 2000-Char Ceiling ✅ DONE
 
 **Severity: High**
 
-The `MAX_CHUNK_SIZE: 2000` constraint exists solely because of Vectorize's 3KB metadata limit (`constants.ts:53`). Full text is already stored in D1 and fetched during retrieval (`embedding.ts:450-485`). Storing text in Vectorize metadata is redundant given the enrichment step.
+**Status: ✅ IMPLEMENTED** (2026-02-17)
+
+The `MAX_CHUNK_SIZE: 2000` constraint existed solely because of Vectorize's 3KB metadata limit (`constants.ts:53`). Full text is already stored in D1 and fetched during retrieval (`embedding.ts:450-485`). Storing text in Vectorize metadata was redundant given the enrichment step.
 
 **Recommendation**: Store only lightweight metadata in Vectorize (sourceId, chunkIndex, fileName -- ~200 bytes). Remove the 2000-char max constraint. This enables optimal chunk sizes (up to 4000+ chars for long-form content) and eliminates the double-storage problem. The D1 fetch in `findRelevantContentWithEmbedding` already handles this; it would just always fetch from D1 instead of conditionally.
+
+**Implementation**: Removed chunk text from Vectorize metadata and the artificial 2000-char ceiling. Key changes:
+
+1. **`constants.ts`** — Removed `VECTORIZE_METADATA_LIMIT: 2800` and `MAX_CHUNK_SIZE: 2000` constants. These existed solely to fit text within Vectorize's 3KB metadata limit.
+2. **`ingestion.ts`** — Vectorize metadata now stores only lightweight fields (`sourceId`, `chunkId`, `fileName` — ~200 bytes). Removed `text` from metadata and `maxChunkSize: 2000` from `generateChunks()` call.
+3. **`embedding.ts`** — `generateChunks()` default `maxChunkSize` raised from 2000 to 4000 (safety net only, no longer a Vectorize constraint). `findRelevantContentWithEmbedding()` no longer filters on `metadata.text` presence or reads text from metadata — returns empty content that gets populated by D1 enrichment.
+4. **`rag-pipeline.ts`** — **Moved `enrichWithFullText()` BEFORE reranking** (was after). Since vector results no longer carry text, the reranker needs D1-enriched content to score. `enrichWithFullText()` now always uses D1 text (previously only replaced when D1 text was longer). Pipeline order: hybrid search → D1 enrichment → reranking → neighbor expansion.
+5. **`vectorize-utils.ts`** — Removed `hasText`/`textLength`/`textPreview` from diagnostic functions (text no longer in metadata).
+6. **`knowledge.ts`** — `query` procedure now fetches chunk text from D1 instead of Vectorize metadata.
+
+**Migration steps (required before deploy):**
+1. Re-index ALL knowledge sources via the Knowledge Health page (select all per agent, then "Re-index Selected"). New vectors will have lightweight metadata only.
+2. Existing vectors with text in metadata will still work — `enrichWithFullText()` always fetches from D1 regardless, and the retrieval code no longer reads `metadata.text`.
 
 > Impact: High accuracy improvement (larger chunks where appropriate). Effort: Medium (migration needed to re-index existing vectors).
 
@@ -182,11 +197,27 @@ WHERE document_chunks_fts MATCH 'keyword1 OR keyword2 OR keyword3'
 
 > Impact: Medium latency improvement. Effort: Small.
 
+#### ✅ DONE — FTS Dead When Query Rewriting Disabled
+
+**Bug**: When `rewriteQuery` is `false`, the `keywords` array stayed empty (`[]`). In `hybridSearch()`, FTS only runs when `keywords.length > 0`, so FTS was completely skipped. The system relied entirely on vector search, which struggles with exact text matches when the query contains meta-language (e.g., "where is this sentence found?").
+
+**Fix**: Added `extractBasicKeywords()` — a lightweight, zero-LLM fallback that tokenizes the effective query (split on whitespace/punctuation, keep tokens ≥ 3 chars, deduplicate, cap at 6). Runs automatically when `keywords` is empty after all extraction paths. This ensures FTS always participates in hybrid search regardless of the `rewriteQuery` setting.
+
+> Impact: High accuracy improvement (FTS was completely dead for agents with query rewriting off). Effort: Small.
+
 ### 3.3 RRF with k=60 Is Standard
 
 **Severity: Low**
 
 The RRF implementation (`utils.ts:15-42`) is correct. k=60 is the standard value from the original paper and is widely used (Azure Cognitive Search, Elasticsearch). No change needed.
+
+#### ✅ DONE — RRF Score Propagation Bug Fix
+
+The original RRF implementation computed fused scores correctly for sorting but returned items with their **original** `.score` field — the fused score was discarded on the `.map(({ item }) => item)` line. This meant downstream consumers (debug info, reranker thresholds, logging) saw misleading scores. Fixed by spreading the fused score back: `.map(({ item, fusedScore }) => ({ ...item, score: fusedScore }))`.
+
+#### ✅ DONE — Empty Content Safety Filter
+
+Added a filter in `rag-pipeline.ts` (after enrichment + reranking, before context build) that removes chunks with empty/whitespace-only content. This prevents wasted context slots when D1 enrichment fails (DB error, orphaned Vectorize entry). Improved `enrichWithFullText` logging to identify which specific chunk IDs are missing from D1.
 
 ### 3.4 Neighbor Chunk Expansion Should Happen Before Reranking
 

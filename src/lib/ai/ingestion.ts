@@ -366,7 +366,6 @@ export async function processKnowledgeSource(
       chunkSize: options?.chunkSize || 1024,
       chunkOverlap: 200,
       minChunkSize: 100,
-      maxChunkSize: 2000,
       contentType,
     });
     await streamResponse({ message: `Split into ${chunks.length} chunks` });
@@ -437,7 +436,10 @@ export async function processKnowledgeSource(
 
       vectorizeIds.push(...chunkIds);
 
-      // Insert vectors into VECTORIZE_INDEX with proper metadata
+      // Insert vectors into VECTORIZE_INDEX with lightweight metadata only
+      // Full chunk text is stored in D1 (documentChunks table) and fetched during retrieval
+      // by enrichWithFullText() — keeping Vectorize metadata small avoids the 3KB limit
+      // and removes the artificial chunk size ceiling
       const vectorizeStartTime = Date.now();
       await withRetry(
         () =>
@@ -447,12 +449,9 @@ export async function processKnowledgeSource(
               values: embedding,
               namespace: source.agentId, // Use agentId for namespace isolation
               metadata: {
-                sessionId: source.agentId,
-                documentId: source.id,
                 sourceId: source.id,
                 chunkId: chunkIds[index],
                 fileName: source.fileName || "Unknown source",
-                text: batch[index],
               },
             })),
           ),

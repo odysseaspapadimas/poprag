@@ -53,10 +53,10 @@ export function reciprocalRankFusion<T extends { id: string; score: number }>(
     });
   }
 
-  // Sort by fused score descending
+  // Sort by fused score descending and propagate fused score to items
   return Array.from(scores.values())
     .sort((a, b) => b.fusedScore - a.fusedScore)
-    .map(({ item }) => item);
+    .map(({ item, fusedScore }) => ({ ...item, score: fusedScore }));
 }
 
 /**
