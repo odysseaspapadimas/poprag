@@ -62,9 +62,10 @@ export function KnowledgeUploadDialog({
 
       pollIntervalRef.current = setInterval(async () => {
         try {
-          const source = await queryClient.fetchQuery(
-            trpc.knowledge.status.queryOptions({ sourceId }),
-          );
+          const source = await queryClient.fetchQuery({
+            ...trpc.knowledge.status.queryOptions({ sourceId }),
+            staleTime: 0, // Always fetch fresh data — bypass the global 5-minute cache
+          });
 
           if (source.status === "processing") {
             setUploadProgress({
