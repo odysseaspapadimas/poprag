@@ -43,6 +43,8 @@ export interface RAGConfig {
   rerankModel?: string;
   topK?: number;
   minSimilarity?: number;
+  /** When set, restrict RAG to these knowledge source IDs (experience filtering) */
+  experienceKnowledgeIds?: string[];
 }
 
 export interface RAGDebugInfo {
@@ -431,6 +433,7 @@ export async function hybridSearch(
   agentId: string,
   topK: number = RAG_CONFIG.TOP_K,
   minSimilarity: number = RAG_CONFIG.MIN_SIMILARITY,
+  experienceKnowledgeIds?: string[],
 ): Promise<{
   results: HybridSearchResult[];
   vectorCount: number;
@@ -474,6 +477,22 @@ export async function hybridSearch(
   const vectorResults = await Promise.all(vectorSearchPromises);
   const vectorSearchMs = Date.now() - vectorSearchStart;
 
+  // Post-filter vector results by experience knowledge source IDs
+  // Vector search returns results with metadata.sourceId, which maps to knowledgeSource.id
+  if (experienceKnowledgeIds && experienceKnowledgeIds.length > 0) {
+    const allowedIds = new Set(experienceKnowledgeIds);
+    for (const result of vectorResults) {
+      result.matches = result.matches.filter((match) => {
+        const sourceId = (match.metadata as Record<string, unknown>)
+          ?.sourceId as string | undefined;
+        return sourceId && allowedIds.has(sourceId);
+      });
+    }
+    console.log(
+      `[Hybrid Search] Filtered vector results to experience knowledge sources (${experienceKnowledgeIds.length} allowed)`,
+    );
+  }
+
   const totalVectorResults = vectorResults.reduce(
     (sum, r) => sum + r.matches.length,
     0,
@@ -494,6 +513,7 @@ export async function hybridSearch(
     try {
       ftsResults = await searchDocumentChunksFTS(keywords, agentId, {
         limit: topKPerQuery,
+        knowledgeSourceIds: experienceKnowledgeIds,
       });
       ftsSearchMs = Date.now() - ftsSearchStart;
       console.log(
@@ -775,6 +795,7 @@ export async function performRAGRetrieval(
     agentId,
     topK,
     minSimilarity,
+    config.experienceKnowledgeIds,
   );
   debugInfo.timing!.hybridSearchMs = Date.now() - hybridSearchStart;
   debugInfo.timing!.vectorSearchMs = searchResult.timing.vectorSearchMs;

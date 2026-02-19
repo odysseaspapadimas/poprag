@@ -476,9 +476,10 @@ export async function searchDocumentChunksFTS(
   agentId: string,
   options?: {
     limit?: number;
+    knowledgeSourceIds?: string[];
   },
 ): Promise<Array<{ id: string; text: string; rank: number }>> {
-  const { limit = 5 } = options || {};
+  const { limit = 5, knowledgeSourceIds } = options || {};
 
   try {
     // Sanitize and filter search terms, then combine into a single compound OR query
@@ -506,8 +507,18 @@ export async function searchDocumentChunksFTS(
       .join(" OR ");
 
     console.log(
-      `[FTS] Compound query: ${compoundMatch} for agent ${agentId}, limit ${limit}`,
+      `[FTS] Compound query: ${compoundMatch} for agent ${agentId}, limit ${limit}${knowledgeSourceIds ? `, filtered to ${knowledgeSourceIds.length} knowledge sources` : ""}`,
     );
+
+    // Build query with optional knowledge source filtering
+    // When knowledgeSourceIds is provided, restrict FTS to chunks from those sources
+    const sourceFilter =
+      knowledgeSourceIds && knowledgeSourceIds.length > 0
+        ? sql`AND document_chunks.source_id IN (${sql.join(
+            knowledgeSourceIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})`
+        : sql``;
 
     const query = sql`
       SELECT document_chunks.id, document_chunks.text, document_chunks_fts.rank
@@ -515,6 +526,7 @@ export async function searchDocumentChunksFTS(
       JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
       WHERE document_chunks_fts MATCH ${compoundMatch}
         AND document_chunks.agent_id = ${agentId}
+        ${sourceFilter}
       ORDER BY rank ASC
       LIMIT ${limit * 2}
     `;

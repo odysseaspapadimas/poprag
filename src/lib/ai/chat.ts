@@ -17,6 +17,8 @@ import { db } from "@/db";
 import {
   type Agent,
   agent,
+  agentExperience,
+  agentExperienceKnowledge,
   agentModelPolicy,
   modelAlias,
   prompt,
@@ -42,6 +44,7 @@ export { classifyQueryIntent, rewriteQuery } from "./rag-pipeline";
 
 export interface ChatRequest {
   agentSlug: string;
+  experienceSlug?: string | null; // Filter RAG to specific experience
   messages: UIMessage[];
   modelAlias?: string;
   variables?: Record<string, unknown>;
@@ -78,10 +81,12 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
     agentData = await resolveAgent(request.agentSlug);
 
     // 2. Load prompt config and model policy in PARALLEL for speed
-    const [{ basePrompt, mergedVariables }, policy] = await Promise.all([
-      loadPromptConfig(agentData.id, request.variables),
-      loadModelPolicy(agentData.id),
-    ]);
+    const [{ basePrompt, mergedVariables }, policy, experienceKnowledgeIds] =
+      await Promise.all([
+        loadPromptConfig(agentData.id, request.variables),
+        loadModelPolicy(agentData.id),
+        resolveExperienceKnowledge(agentData.id, request.experienceSlug),
+      ]);
 
     // 3. RAG retrieval (using extracted pipeline)
     const userQuery = extractUserQuery(request);
@@ -97,6 +102,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
       rerankModel: agentData.rerankModel || undefined,
       topK: request.rag?.topK ?? agentData.topK ?? undefined,
       minSimilarity: agentData.minSimilarity ?? undefined,
+      experienceKnowledgeIds,
     };
 
     const { context: ragContext, debugInfo: ragDebugInfo } =
@@ -208,6 +214,58 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
 // ─────────────────────────────────────────────────────
 // Helper Functions (extracted from handleChatRequest)
 // ─────────────────────────────────────────────────────
+
+/**
+ * Resolve experience knowledge source IDs for filtering RAG queries.
+ * Returns undefined when no experience is specified (search all knowledge).
+ * Returns the list of knowledge source IDs assigned to the experience.
+ */
+async function resolveExperienceKnowledge(
+  agentId: string,
+  experienceSlug?: string | null,
+): Promise<string[] | undefined> {
+  if (!experienceSlug) return undefined;
+
+  // Look up experience by agent + slug
+  const [experience] = await db
+    .select()
+    .from(agentExperience)
+    .where(
+      and(
+        eq(agentExperience.agentId, agentId),
+        eq(agentExperience.slug, experienceSlug),
+        eq(agentExperience.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  if (!experience) {
+    console.warn(
+      `[Chat] Experience '${experienceSlug}' not found for agent '${agentId}', searching all knowledge`,
+    );
+    return undefined;
+  }
+
+  // Get assigned knowledge source IDs
+  const knowledgeLinks = await db
+    .select({ knowledgeSourceId: agentExperienceKnowledge.knowledgeSourceId })
+    .from(agentExperienceKnowledge)
+    .where(eq(agentExperienceKnowledge.experienceId, experience.id));
+
+  const ids = knowledgeLinks.map((link) => link.knowledgeSourceId);
+
+  if (ids.length === 0) {
+    console.warn(
+      `[Chat] Experience '${experienceSlug}' has no knowledge sources assigned`,
+    );
+    return undefined;
+  }
+
+  console.log(
+    `[Chat] Experience '${experienceSlug}' resolved to ${ids.length} knowledge source(s)`,
+  );
+  return ids;
+}
 
 /**
  * Resolve agent by slug and validate it's active

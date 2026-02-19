@@ -9,7 +9,7 @@ import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { ImageIcon, Send, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -17,6 +17,13 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { RAGDebugPanel } from "@/components/rag-debug-panel";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useTRPC } from "@/integrations/trpc/react";
 
@@ -282,6 +289,20 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     setupStatus?.hasProdPrompt &&
     setupStatus?.isActive;
 
+  // Fetch experiences for this agent (for experience selector)
+  const { data: experiences } = useQuery({
+    ...trpc.experience.list.queryOptions({ agentId }),
+  });
+
+  const activeExperiences = useMemo(
+    () => (experiences ?? []).filter((e) => e.isActive),
+    [experiences],
+  );
+
+  const [selectedExperienceSlug, setSelectedExperienceSlug] = useState<
+    string | null
+  >(null);
+
   // Mutations for image upload
   const uploadImageStart = useMutation(
     trpc.chat.uploadImageStart.mutationOptions(),
@@ -428,7 +449,30 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   return (
     <div className="relative flex flex-col h-full">
       {/* Chat Header */}
-      <div className="flex justify-end p-2.5 border-b border-border/50 gap-2">
+      <div className="flex justify-between items-center p-2.5 border-b border-border/50 gap-2">
+        {/* Experience Selector - only shown when agent has experiences */}
+        <div className="flex-1 min-w-0">
+          {activeExperiences.length > 0 && (
+            <Select
+              value={selectedExperienceSlug ?? "__all__"}
+              onValueChange={(value) =>
+                setSelectedExperienceSlug(value === "__all__" ? null : value)
+              }
+            >
+              <SelectTrigger className="w-[200px] h-8 text-xs">
+                <SelectValue placeholder="All knowledge" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All knowledge</SelectItem>
+                {activeExperiences.map((exp) => (
+                  <SelectItem key={exp.id} value={exp.slug}>
+                    {exp.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -477,7 +521,16 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                 }
 
                 if (parts.length > 0) {
-                  sendMessage({ parts });
+                  sendMessage(
+                    { parts },
+                    selectedExperienceSlug
+                      ? {
+                          body: {
+                            experienceSlug: selectedExperienceSlug,
+                          },
+                        }
+                      : undefined,
+                  );
                   setInput("");
                   setAttachedImages([]);
                 }
@@ -541,7 +594,16 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                       }
 
                       if (parts.length > 0) {
-                        sendMessage({ parts });
+                        sendMessage(
+                          { parts },
+                          selectedExperienceSlug
+                            ? {
+                                body: {
+                                  experienceSlug: selectedExperienceSlug,
+                                },
+                              }
+                            : undefined,
+                        );
                         setInput("");
                         setAttachedImages([]);
                       }

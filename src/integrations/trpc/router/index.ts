@@ -6,6 +6,7 @@ import { userRouter } from "@/integrations/trpc/router/user";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
 import { chatRouter } from "./chat";
+import { experienceRouter } from "./experience";
 import { knowledgeRouter } from "./knowledge";
 import { modelRouter } from "./model";
 import { promptRouter } from "./prompt";
@@ -18,6 +19,7 @@ export const appRouter = createTRPCRouter({
   knowledge: knowledgeRouter,
   model: modelRouter,
   chat: chatRouter,
+  experience: experienceRouter,
 });
 
 export type AppRouter = typeof appRouter;

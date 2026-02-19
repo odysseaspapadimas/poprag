@@ -49,6 +49,14 @@ import { useTRPC } from "@/integrations/trpc/react";
 
 const editAgentSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
+  slug: z
+    .string()
+    .min(1, "Slug is required")
+    .max(50)
+    .regex(
+      /^[a-z0-9-]+$/,
+      "Slug must contain only lowercase letters, numbers, and hyphens",
+    ),
   description: z.string().optional(),
   status: z.enum(["draft", "active", "archived"]),
   visibility: z.enum(["private", "public"]),
@@ -74,6 +82,7 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
     resolver: zodResolver(editAgentSchema),
     defaultValues: {
       name: agent.name,
+      slug: agent.slug,
       description: agent.description || "",
       status: agent.status,
       visibility: agent.visibility,
@@ -174,6 +183,23 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
                   <FormControl>
                     <Input placeholder="My Support Agent" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="slug"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Slug</FormLabel>
+                  <FormControl>
+                    <Input placeholder="my-support-agent" {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    URL-safe identifier using lowercase letters, numbers, and
+                    hyphens. Changing this will update the chat endpoint URL.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

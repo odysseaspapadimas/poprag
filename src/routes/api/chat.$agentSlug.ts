@@ -35,7 +35,43 @@ const chatRequestSchema = z.object({
     .optional(),
   conversationId: z.string().optional(),
   initiatedBy: z.string().optional(),
+  experienceSlug: z.string().optional(),
 });
+
+/**
+ * Resolve Firebase user from request Authorization header.
+ * Verifies the Bearer token and upserts the user for tracking.
+ * Returns null if no token is present or verification fails.
+ */
+async function resolveFirebaseUser(
+  request: Request,
+): Promise<VerifiedFirebaseUser | null> {
+  const token = extractBearerToken(request.headers.get("Authorization"));
+  if (!token) return null;
+
+  const serviceAccountData = process.env.SERVICE_ACCOUNT_DATA;
+  if (!serviceAccountData) return null;
+
+  try {
+    const decoded = Buffer.from(serviceAccountData, "base64").toString("utf-8");
+    const { project_id } = JSON.parse(decoded) as { project_id: string };
+    const userData = await verifyFirebaseToken(token, project_id);
+
+    if (!userData) {
+      console.warn("[Chat API] Invalid Firebase token provided");
+      return null;
+    }
+
+    upsertFirebaseUser(userData).catch((err) => {
+      console.error("[Chat API] Background user upsert failed:", err);
+    });
+
+    return userData;
+  } catch (err) {
+    console.error("[Chat API] Failed to verify Firebase token:", err);
+    return null;
+  }
+}
 
 /**
  * Upsert Firebase user in the database
@@ -164,51 +200,21 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
           const { env } = await import("cloudflare:workers");
 
           // Verify Firebase ID token if provided
-          let firebaseUserData: VerifiedFirebaseUser | null = null;
-          const authHeader = request.headers.get("Authorization");
-          const token = extractBearerToken(authHeader);
-
-          if (token) {
-            // Get Firebase project ID from service account
-            const serviceAccountData = process.env.SERVICE_ACCOUNT_DATA;
-            if (serviceAccountData) {
-              try {
-                const decoded = Buffer.from(
-                  serviceAccountData,
-                  "base64",
-                ).toString("utf-8");
-                const serviceAccount = JSON.parse(decoded) as {
-                  project_id: string;
-                };
-                firebaseUserData = await verifyFirebaseToken(
-                  token,
-                  serviceAccount.project_id,
-                );
-
-                if (firebaseUserData) {
-                  // Upsert user for tracking (don't await to avoid blocking)
-                  upsertFirebaseUser(firebaseUserData).catch((err) => {
-                    console.error(
-                      "[Chat API] Background user upsert failed:",
-                      err,
-                    );
-                  });
-                } else {
-                  console.warn("[Chat API] Invalid Firebase token provided");
-                }
-              } catch (err) {
-                console.error(
-                  "[Chat API] Failed to verify Firebase token:",
-                  err,
-                );
-              }
-            }
-          }
+          const firebaseUserData = await resolveFirebaseUser(request);
 
           // Handle chat request
+          // Experience slug: prefer body (from sendMessage per-request options)
+          // with URL param fallback (for external API consumers)
+          const url = new URL(request.url);
+          const experienceSlug =
+            validated.experienceSlug ||
+            url.searchParams.get("experience") ||
+            null;
+
           const result = await handleChatRequest(
             {
               agentSlug: params.agentSlug,
+              experienceSlug,
               ...validated,
               // Pass Firebase UID for tracking in transcripts/metrics
               firebaseUid: firebaseUserData?.uid,

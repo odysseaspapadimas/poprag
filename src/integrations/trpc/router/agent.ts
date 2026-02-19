@@ -1,4 +1,4 @@
-import { and, desc, eq, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, ne, or, type SQL, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
@@ -247,6 +247,12 @@ export const agentRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         name: z.string().min(1).max(100).optional(),
+        slug: z
+          .string()
+          .min(1)
+          .max(50)
+          .regex(/^[a-z0-9-]+$/)
+          .optional(),
         description: z.string().optional(),
         status: z.enum(["draft", "active", "archived"]).optional(),
         visibility: z.enum(["private", "public"]).optional(),
@@ -265,11 +271,23 @@ export const agentRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       await requireAgent(input.id);
 
+      if (input.slug) {
+        const [existing] = await db
+          .select({ id: agent.id })
+          .from(agent)
+          .where(and(eq(agent.slug, input.slug), ne(agent.id, input.id)))
+          .limit(1);
+        if (existing) {
+          throw new Error("Agent slug already exists");
+        }
+      }
+
       const updates: Partial<InsertAgent> = {
         updatedAt: new Date(),
       };
 
       if (input.name) updates.name = input.name;
+      if (input.slug) updates.slug = input.slug;
       if (input.description !== undefined)
         updates.description = input.description;
       if (input.status) updates.status = input.status;

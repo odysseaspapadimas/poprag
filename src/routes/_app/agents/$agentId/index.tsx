@@ -5,6 +5,7 @@ import { useState } from "react";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
+import { ExperienceList } from "@/components/experiences/ExperienceList";
 import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
 import { KnowledgeSourceViewer } from "@/components/knowledge-source-viewer";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
@@ -50,6 +51,9 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
       context.queryClient.prefetchQuery(
         context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
       ),
+      context.queryClient.prefetchQuery(
+        context.trpc.experience.list.queryOptions({ agentId }),
+      ),
     ]);
   },
 });
@@ -59,6 +63,7 @@ type Tab =
   | "prompts"
   | "models"
   | "knowledge"
+  | "experiences"
   | "rag"
   | "analytics"
   | "audit";
@@ -132,6 +137,7 @@ function AgentDetailPage() {
     { id: "prompts", label: "Prompts" },
     { id: "models", label: "Models & Knobs" },
     { id: "knowledge", label: "Knowledge" },
+    { id: "experiences", label: "Experiences" },
     { id: "rag", label: "RAG Settings" },
     { id: "analytics", label: "Analytics" },
     { id: "audit", label: "Audit Log" },
@@ -528,6 +534,10 @@ function AgentDetailPage() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === "experiences" && (
+            <ExperienceList agentId={agentId} agentSlug={agent.slug} />
           )}
 
           {activeTab === "rag" && (

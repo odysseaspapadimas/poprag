@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable(
   "user",
@@ -492,6 +498,53 @@ export const chatImage = sqliteTable(
 );
 
 // ─────────────────────────────────────────────────────
+// Agent Experiences (Knowledge Groups)
+// ─────────────────────────────────────────────────────
+
+export const agentExperience = sqliteTable(
+  "agent_experience",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(), // e.g., "math-101", "biology-grade10"
+    name: text("name").notNull(),
+    description: text("description"),
+    order: integer("order").default(0),
+    isActive: integer("is_active", { mode: "boolean" }).default(true).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("agent_experience_agent_idx").on(table.agentId),
+    index("agent_experience_slug_idx").on(table.agentId, table.slug),
+  ],
+);
+
+export const agentExperienceKnowledge = sqliteTable(
+  "agent_experience_knowledge",
+  {
+    experienceId: text("experience_id")
+      .notNull()
+      .references(() => agentExperience.id, { onDelete: "cascade" }),
+    knowledgeSourceId: text("knowledge_source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.experienceId, table.knowledgeSourceId] }),
+    index("agent_exp_knowledge_exp_idx").on(table.experienceId),
+    index("agent_exp_knowledge_source_idx").on(table.knowledgeSourceId),
+  ],
+);
+
+// ─────────────────────────────────────────────────────
 // Agent Type exports
 // ─────────────────────────────────────────────────────
 export type Agent = typeof agent.$inferSelect;
@@ -532,6 +585,14 @@ export type InsertRunMetric = typeof runMetric.$inferInsert;
 
 export type ChatImage = typeof chatImage.$inferSelect;
 export type InsertChatImage = typeof chatImage.$inferInsert;
+
+export type AgentExperience = typeof agentExperience.$inferSelect;
+export type InsertAgentExperience = typeof agentExperience.$inferInsert;
+
+export type AgentExperienceKnowledge =
+  typeof agentExperienceKnowledge.$inferSelect;
+export type InsertAgentExperienceKnowledge =
+  typeof agentExperienceKnowledge.$inferInsert;
 
 // ─────────────────────────────────────────────────────
 // Firebase User (for external API authentication)
