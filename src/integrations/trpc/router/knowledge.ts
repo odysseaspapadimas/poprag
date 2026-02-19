@@ -1,3 +1,7 @@
+import { AwsClient } from "aws4fetch";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 import { db } from "@/db";
 import { agent, documentChunks, knowledgeSource } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
@@ -9,10 +13,6 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
-import { AwsClient } from "aws4fetch";
-import { and, count, eq, inArray, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -441,8 +441,8 @@ export const knowledgeRouter = createTRPCRouter({
         }
 
         // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
-        const arrayBuffer = await r2Object.arrayBuffer();
-        const content: string | Buffer | Uint8Array = Buffer.from(arrayBuffer);
+        // Pass ArrayBuffer directly — avoid Buffer.from() copy to reduce memory pressure
+        const content = await r2Object.arrayBuffer();
 
         // Delete old vectors from Vectorize if they exist
         if (source.vectorizeIds && source.vectorizeIds.length > 0) {
@@ -868,9 +868,8 @@ export const knowledgeRouter = createTRPCRouter({
           }
 
           // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
-          const arrayBuffer = await r2Object.arrayBuffer();
-          const content: string | Buffer | Uint8Array =
-            Buffer.from(arrayBuffer);
+          // Pass ArrayBuffer directly — avoid Buffer.from() copy to reduce memory pressure
+          const content = await r2Object.arrayBuffer();
 
           // Delete old vectors and old chunks concurrently
           await Promise.all([

@@ -78,8 +78,9 @@ export async function handleKnowledgeIndexQueue(
         continue;
       }
 
-      // Always use arrayBuffer() to avoid corrupting binary formats
-      const content = Buffer.from(await r2Object.arrayBuffer());
+      // Pass ArrayBuffer directly — avoid Buffer.from() copy to reduce memory usage.
+      // Workers have a 128MB limit; for a 20MB file, each extra copy is significant.
+      const content = await r2Object.arrayBuffer();
 
       console.log(
         `[Queue] Processing source ${sourceId} (${source.fileName}, ${content.byteLength} bytes)`,

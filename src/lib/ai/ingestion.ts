@@ -171,32 +171,42 @@ export interface ParsedDocument {
 }
 
 /**
+ * Decode binary content to a UTF-8 string.
+ * Deferred to avoid eagerly decoding large binary files that don't need text.
+ */
+function decodeToText(
+  content: string | ArrayBuffer | Buffer | Uint8Array,
+): string {
+  if (typeof content === "string") return content;
+  if (content instanceof ArrayBuffer) return new TextDecoder().decode(content);
+  return content.toString("utf-8");
+}
+
+/**
  * Parse text content from uploaded file
  * Handles plain text, markdown, and various document formats using Cloudflare's toMarkdown service
  */
 export async function parseDocument(
-  content: string | Buffer | Uint8Array,
+  content: string | ArrayBuffer | Buffer | Uint8Array,
   mimeType: string,
   filename?: string,
 ): Promise<ParsedDocument> {
-  // Convert buffer to string for text-based formats
-  const text =
-    typeof content === "string" ? content : content.toString("utf-8");
-
-  // Handle markdown files
+  // Handle markdown files — decode to text only when needed
   if (
     mimeType === "text/markdown" ||
     filename?.endsWith(".md") ||
     filename?.endsWith(".markdown")
   ) {
+    const text = decodeToText(content);
     return {
       content: text,
       metadata: { mimeType, type: "markdown", originalLength: text.length },
     };
   }
 
-  // Handle plain text
+  // Handle plain text — decode to text only when needed
   if (mimeType.startsWith("text/") && mimeType !== "text/csv") {
+    const text = decodeToText(content);
     return {
       content: text,
       metadata: { mimeType, type: "text", originalLength: text.length },
@@ -268,16 +278,17 @@ export async function parseDocument(
   if (isSupportedFormat && typeof content !== "string") {
     try {
       const { env } = await import("cloudflare:workers");
-      // Convert to proper Uint8Array for Blob creation
-      const uint8Array = Buffer.isBuffer(content)
-        ? new Uint8Array(
-            content.buffer.slice(
+      // Create Blob directly from content — avoids unnecessary Buffer→Uint8Array→slice copies
+      // For ArrayBuffer: pass directly. For Buffer/Uint8Array: create a view without copying.
+      const blobData =
+        content instanceof ArrayBuffer
+          ? content
+          : new Uint8Array(
+              content.buffer as ArrayBuffer,
               content.byteOffset,
-              content.byteOffset + content.byteLength,
-            ),
-          )
-        : content;
-      const blob = new Blob([uint8Array as any], { type: mimeType });
+              content.byteLength,
+            );
+      const blob = new Blob([blobData], { type: mimeType });
       const file = { name: filename || "document", blob };
 
       const result = await env.AI.toMarkdown(file);
@@ -303,6 +314,7 @@ export async function parseDocument(
   }
 
   // For unsupported formats, treat as text
+  const text = decodeToText(content);
   return {
     content: text,
     metadata: { mimeType, type: "text", originalLength: text.length },
@@ -315,7 +327,7 @@ export async function parseDocument(
  */
 export async function processKnowledgeSource(
   sourceId: string,
-  content: string | Buffer | Uint8Array,
+  content: string | ArrayBuffer | Buffer | Uint8Array,
   options?: {
     chunkSize?: number;
     streamResponse?: StreamResponseCallback;
