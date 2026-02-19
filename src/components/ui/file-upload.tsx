@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
 
 interface FileUploadProps {
   onUpload: (files: File[]) => Promise<void>;
@@ -54,7 +55,7 @@ export function FileUpload({
     "text/markdown": [".md", ".markdown"],
     "application/json": [".json"],
   },
-  maxSize = 10 * 1024 * 1024, // 10MB
+  maxSize = MAX_KNOWLEDGE_FILE_SIZE,
   maxFiles = 5,
   disabled = false,
 }: FileUploadProps) {

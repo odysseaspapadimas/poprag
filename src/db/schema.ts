@@ -305,10 +305,11 @@ export const knowledgeSource = sqliteTable(
     bytes: integer("bytes"),
     checksum: text("checksum"),
     status: text("status", {
-      enum: ["uploaded", "parsed", "indexed", "failed"],
+      enum: ["uploaded", "parsed", "processing", "indexed", "failed"],
     })
       .default("uploaded")
       .notNull(),
+    progress: integer("progress").default(0),
     parserErrors: text("parser_errors", { mode: "json" }).$type<string[]>(),
     vectorizeIds: text("vectorize_ids", { mode: "json" }).$type<
       string[] | null

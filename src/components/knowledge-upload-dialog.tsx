@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import {
 import { FileUpload } from "@/components/ui/file-upload";
 import { Progress } from "@/components/ui/progress";
 import { useTRPC } from "@/integrations/trpc/react";
+import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
 
 interface KnowledgeUploadDialogProps {
   agentId: string;
@@ -29,6 +30,7 @@ export function KnowledgeUploadDialog({
     stage: string;
     progress: number;
   } | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -38,6 +40,89 @@ export function KnowledgeUploadDialog({
   const uploadConfirm = useMutation(trpc.knowledge.confirm.mutationOptions());
   const uploadIndex = useMutation(trpc.knowledge.index.mutationOptions());
   const markFailed = useMutation(trpc.knowledge.markFailed.mutationOptions());
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * Poll for async indexing status until complete or failed
+   */
+  const pollStatus = useCallback(
+    (sourceId: string, fileName: string) => {
+      // Clear any existing poll
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const source = await queryClient.fetchQuery(
+            trpc.knowledge.status.queryOptions({ sourceId }),
+          );
+
+          if (source.status === "processing") {
+            setUploadProgress({
+              fileName,
+              stage: `Indexing in background... (${source.progress ?? 0}%)`,
+              progress: 70 + ((source.progress ?? 0) / 100) * 30, // Map 0-100% to 70-100%
+            });
+          } else if (source.status === "indexed") {
+            // Done!
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setUploadProgress({
+              fileName,
+              stage: "Complete!",
+              progress: 100,
+            });
+            toast.success(`Successfully indexed ${fileName}`);
+
+            // Refresh knowledge sources list
+            await queryClient.invalidateQueries({
+              queryKey: trpc.knowledge.list.queryKey({ agentId }),
+            });
+            await queryClient.invalidateQueries({
+              queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
+            });
+
+            // Clear progress and close after a short delay
+            setTimeout(() => {
+              setUploadProgress(null);
+              setOpen(false);
+            }, 1500);
+          } else if (source.status === "failed") {
+            // Failed
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setUploadProgress(null);
+            const errorMsg = source.parserErrors?.[0] ?? "Indexing failed";
+            toast.error(`Failed to index ${fileName}: ${errorMsg}`);
+
+            // Refresh list to show failed status
+            await queryClient.invalidateQueries({
+              queryKey: trpc.knowledge.list.queryKey({ agentId }),
+            });
+            await queryClient.invalidateQueries({
+              queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
+            });
+          }
+        } catch (error) {
+          console.error("Failed to poll indexing status:", error);
+        }
+      }, 2000); // Poll every 2 seconds
+    },
+    [agentId, queryClient, trpc],
+  );
 
   const handleUpload = async (files: File[]) => {
     for (const file of files) {
@@ -71,8 +156,6 @@ export function KnowledgeUploadDialog({
         });
 
         // Step 2: Upload file directly to R2 using presigned URL
-        // Note: With presigned URLs and signQuery=true, we don't include Content-Type
-        // in headers as it's not part of the signature. R2 will infer it from the upload.
         const uploadResponse = await fetch(uploadResult.uploadUrl, {
           method: "PUT",
           body: file,
@@ -92,7 +175,6 @@ export function KnowledgeUploadDialog({
         });
 
         // Step 3: Confirm upload (sets status to 'uploaded')
-        // Compute SHA-256 checksum for deduplication
         const hashBuffer = await crypto.subtle.digest(
           "SHA-256",
           await file.arrayBuffer(),
@@ -113,12 +195,10 @@ export function KnowledgeUploadDialog({
           progress: 70,
         });
 
-        // Step 4: Trigger indexing with direct content for small files (< 1MB)
-        // This avoids the R2 download round-trip for better performance
+        // Step 4: Trigger indexing
+        // Small files (< 1MB): process synchronously with inline content
+        // Large files: enqueue for async processing via Cloudflare Queues
         if (file.size < 1024 * 1024) {
-          // 1MB threshold
-          // Read file content as ArrayBuffer for all supported formats
-          // The backend will use toMarkdown for supported formats
           const arrayBuffer = await file.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
 
@@ -126,20 +206,43 @@ export function KnowledgeUploadDialog({
             sourceId: uploadResult.sourceId,
             contentBuffer: uint8Array,
           });
+
+          setUploadProgress({
+            fileName: file.name,
+            stage: "Complete!",
+            progress: 100,
+          });
+
+          toast.success(`Successfully uploaded and indexed ${file.name}`);
         } else {
-          // For larger files, use the standard R2 download approach
-          await uploadIndex.mutateAsync({
+          // Large file: enqueue and start polling
+          const result = await uploadIndex.mutateAsync({
             sourceId: uploadResult.sourceId,
           });
+
+          if ("queued" in result && result.queued) {
+            setUploadProgress({
+              fileName: file.name,
+              stage: "Indexing in background... (0%)",
+              progress: 70,
+            });
+
+            toast.info(`${file.name} uploaded. Indexing in background...`);
+
+            // Start polling for progress
+            pollStatus(uploadResult.sourceId, file.name);
+            // Don't close the dialog - let polling handle it
+            return;
+          }
+
+          // If not queued (shouldn't happen for large files, but handle gracefully)
+          setUploadProgress({
+            fileName: file.name,
+            stage: "Complete!",
+            progress: 100,
+          });
+          toast.success(`Successfully uploaded and indexed ${file.name}`);
         }
-
-        setUploadProgress({
-          fileName: file.name,
-          stage: "Complete!",
-          progress: 100,
-        });
-
-        toast.success(`Successfully uploaded and indexed ${file.name}`);
       } catch (error) {
         console.error("Upload failed:", error);
         setUploadProgress(null);
@@ -161,10 +264,13 @@ export function KnowledgeUploadDialog({
       }
     }
 
-    // Clear progress and refresh knowledge sources
+    // Clear progress and refresh knowledge sources (for sync uploads)
     setUploadProgress(null);
     await queryClient.invalidateQueries({
       queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
+    });
+    await queryClient.invalidateQueries({
+      queryKey: trpc.knowledge.list.queryKey({ agentId }),
     });
 
     setOpen(false);
@@ -175,6 +281,7 @@ export function KnowledgeUploadDialog({
     uploadConfirm.isPending ||
     uploadIndex.isPending ||
     uploadProgress !== null;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
@@ -196,7 +303,7 @@ export function KnowledgeUploadDialog({
                   Processing: {uploadProgress.fileName}
                 </span>
                 <span className="text-sm text-muted-foreground">
-                  {uploadProgress.progress}%
+                  {Math.round(uploadProgress.progress)}%
                 </span>
               </div>
               <Progress value={uploadProgress.progress} className="mb-2" />
@@ -210,7 +317,7 @@ export function KnowledgeUploadDialog({
             onUpload={handleUpload}
             disabled={isUploading}
             maxFiles={5}
-            maxSize={10 * 1024 * 1024} // 10MB
+            maxSize={MAX_KNOWLEDGE_FILE_SIZE}
           />
         </div>
 
@@ -218,12 +325,16 @@ export function KnowledgeUploadDialog({
           <Button
             variant="outline"
             onClick={() => {
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
               setOpen(false);
               setUploadProgress(null);
             }}
-            disabled={isUploading}
+            disabled={isUploading && !pollIntervalRef.current}
           >
-            Cancel
+            {pollIntervalRef.current ? "Close" : "Cancel"}
           </Button>
         </div>
       </DialogContent>

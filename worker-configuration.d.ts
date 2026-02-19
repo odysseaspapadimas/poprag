@@ -22,6 +22,7 @@ declare namespace Cloudflare {
 		DB: D1Database;
 		VECTORIZE: Vectorize;
 		AI: Ai;
+		KNOWLEDGE_INDEX_QUEUE: Queue<{ sourceId: string; agentId: string }>;
 	}
 }
 interface Env extends Cloudflare.Env {}

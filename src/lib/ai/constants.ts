@@ -90,3 +90,11 @@ export type ProviderType =
   | "cloudflare-workers-ai";
 
 export const DEFAULT_PROVIDER: ProviderType = "cloudflare-workers-ai";
+
+/**
+ * Maximum file size for knowledge source uploads (50MB)
+ * Files go directly to R2 via presigned PUT URL, bypassing the Worker body,
+ * so this limit is safe for the upload step. Processing of large files
+ * is handled asynchronously via Cloudflare Queues.
+ */
+export const MAX_KNOWLEDGE_FILE_SIZE = 50 * 1024 * 1024; // 50MB

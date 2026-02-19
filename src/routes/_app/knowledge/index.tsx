@@ -13,6 +13,7 @@ import {
   Database,
   FileText,
   HardDrive,
+  Loader2,
   RefreshCw,
 } from "lucide-react";
 import { useState } from "react";
@@ -80,6 +81,11 @@ function StatusBadge({ status }: { status: string }) {
       color:
         "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
       icon: <Clock className="h-3 w-3" />,
+    },
+    processing: {
+      color:
+        "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+      icon: <Loader2 className="h-3 w-3 animate-spin" />,
     },
     failed: {
       color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
@@ -262,6 +268,14 @@ function KnowledgeHealthPage() {
               >
                 {healthData.statusCounts.indexed} indexed
               </Badge>
+              {healthData.statusCounts.processing > 0 && (
+                <Badge
+                  variant="outline"
+                  className="bg-purple-50 dark:bg-purple-950"
+                >
+                  {healthData.statusCounts.processing} processing
+                </Badge>
+              )}
               <Badge
                 variant="outline"
                 className="bg-yellow-50 dark:bg-yellow-950"

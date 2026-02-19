@@ -27,6 +27,7 @@ export type AuditEventType =
   // Knowledge events
   | "knowledge.uploaded"
   | "knowledge.indexed"
+  | "knowledge.queued"
   | "knowledge.reindexed"
   | "knowledge.deleted"
   | "knowledge.failed"

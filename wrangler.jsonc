@@ -31,6 +31,22 @@
       "remote": true,
     },
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "KNOWLEDGE_INDEX_QUEUE",
+        "queue": "knowledge-index-queue",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "knowledge-index-queue",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "knowledge-index-dlq",
+      },
+    ],
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

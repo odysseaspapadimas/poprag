@@ -1,17 +1,18 @@
-import { AwsClient } from "aws4fetch";
-import { and, count, eq, inArray, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
 import { db } from "@/db";
 import { agent, documentChunks, knowledgeSource } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
+import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
 import { generateEmbedding } from "@/lib/ai/embedding";
 import {
   createKnowledgeSource,
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import { AwsClient } from "aws4fetch";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 /**
  * Knowledge management router
@@ -27,7 +28,12 @@ export const knowledgeRouter = createTRPCRouter({
         agentId: z.string(),
         fileName: z.string(),
         mime: z.string(),
-        bytes: z.number(),
+        bytes: z
+          .number()
+          .max(
+            MAX_KNOWLEDGE_FILE_SIZE,
+            `File exceeds maximum size of ${MAX_KNOWLEDGE_FILE_SIZE / (1024 * 1024)}MB`,
+          ),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -203,7 +209,8 @@ export const knowledgeRouter = createTRPCRouter({
 
   /**
    * Index knowledge source (parse + embed + vectorize)
-   * Optimized to avoid R2 round-trip for small files
+   * Small files (< 1MB with inline content) are processed synchronously.
+   * Large files are enqueued for async processing via Cloudflare Queues.
    */
   index: protectedProcedure
     .input(
@@ -229,65 +236,76 @@ export const knowledgeRouter = createTRPCRouter({
       // Verify user has access to the agent
       await requireAgent(source.agentId);
 
-      // Get content - either from input or from R2
-      let content: string | Buffer | Uint8Array;
-      if (input.content) {
-        content = input.content;
-      } else if (input.contentBuffer) {
-        content = input.contentBuffer;
-      } else {
-        // Fallback: fetch from R2
-        const { env } = await import("cloudflare:workers");
-        const r2Object = await env.R2.get(source.r2Key!);
-        if (!r2Object) {
-          throw new Error("File not found in storage");
-        }
+      // Small file fast path: process synchronously when content is inline
+      if (input.content || input.contentBuffer) {
+        const content: string | Buffer | Uint8Array = input.content
+          ? input.content
+          : input.contentBuffer!;
 
-        // Get content based on file type - PDFs need Buffer, others can be text
-        if (source.mime === "application/pdf") {
-          const arrayBuffer = await r2Object.arrayBuffer();
-          content = Buffer.from(arrayBuffer);
-        } else {
-          content = await r2Object.text();
+        try {
+          const result = await processKnowledgeSource(input.sourceId, content, {
+            abortSignal: ctx.request.signal,
+          });
+
+          // Audit log
+          await audit(
+            ctx,
+            "knowledge.indexed",
+            { type: "knowledge_source", id: input.sourceId },
+            {
+              vectorsInserted: result.vectorsInserted,
+              reindex: input.reindex,
+            },
+          );
+
+          return result;
+        } catch (error) {
+          // Update status to failed
+          await db
+            .update(knowledgeSource)
+            .set({
+              status: "failed",
+              updatedAt: new Date(),
+            })
+            .where(eq(knowledgeSource.id, input.sourceId));
+
+          throw new Error(
+            `Indexing failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
       }
 
-      try {
-        const result = await processKnowledgeSource(input.sourceId, content, {
-          abortSignal: ctx.request.signal,
-        });
+      // Large file path: enqueue for async processing via Cloudflare Queues
+      await db
+        .update(knowledgeSource)
+        .set({ status: "processing", progress: 0, updatedAt: new Date() })
+        .where(eq(knowledgeSource.id, input.sourceId));
 
-        // Note: processKnowledgeSource already sets status to "indexed" in D1,
-        // so no additional status update needed here.
+      const { env } = await import("cloudflare:workers");
+      await env.KNOWLEDGE_INDEX_QUEUE.send({
+        sourceId: input.sourceId,
+        agentId: source.agentId,
+      });
 
-        // Audit log
-        await audit(
-          ctx,
-          "knowledge.indexed",
-          { type: "knowledge_source", id: input.sourceId },
-          {
-            vectorsInserted: result.vectorsInserted,
-            reindex: input.reindex,
-          },
-        );
+      // Audit log
+      await audit(
+        ctx,
+        "knowledge.queued",
+        { type: "knowledge_source", id: input.sourceId },
+        {
+          reindex: input.reindex,
+        },
+      );
 
-        return result;
-      } catch (error) {
-        // Update status to failed
-        await db
-          .update(knowledgeSource)
-          .set({
-            status: "failed",
-            updatedAt: new Date(),
-          })
-          .where(eq(knowledgeSource.id, input.sourceId));
-
-        throw new Error(
-          `Indexing failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+      return {
+        queued: true,
+        sourceId: input.sourceId,
+        success: true,
+        vectorsInserted: 0,
+        chunksProcessed: 0,
+      };
     }),
 
   /**
@@ -364,7 +382,9 @@ export const knowledgeRouter = createTRPCRouter({
     .input(
       z.object({
         agentId: z.string(),
-        status: z.enum(["uploaded", "parsed", "indexed", "failed"]).optional(),
+        status: z
+          .enum(["uploaded", "parsed", "processing", "indexed", "failed"])
+          .optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -420,14 +440,9 @@ export const knowledgeRouter = createTRPCRouter({
           throw new Error("File not found in R2");
         }
 
-        // Get content based on file type - PDFs need Buffer, others can be text
-        let content: string | Buffer | Uint8Array;
-        if (source.mime === "application/pdf") {
-          const arrayBuffer = await r2Object.arrayBuffer();
-          content = Buffer.from(arrayBuffer);
-        } else {
-          content = await r2Object.text();
-        }
+        // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
+        const arrayBuffer = await r2Object.arrayBuffer();
+        const content: string | Buffer | Uint8Array = Buffer.from(arrayBuffer);
 
         // Delete old vectors from Vectorize if they exist
         if (source.vectorizeIds && source.vectorizeIds.length > 0) {
@@ -607,7 +622,13 @@ export const knowledgeRouter = createTRPCRouter({
       if (agentIds.length === 0) {
         return {
           totalSources: 0,
-          statusCounts: { uploaded: 0, parsed: 0, indexed: 0, failed: 0 },
+          statusCounts: {
+            uploaded: 0,
+            parsed: 0,
+            processing: 0,
+            indexed: 0,
+            failed: 0,
+          },
           totalChunks: 0,
           totalBytes: 0,
           staleCount: 0,
@@ -639,7 +660,13 @@ export const knowledgeRouter = createTRPCRouter({
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
       // Aggregate stats
-      const statusCounts = { uploaded: 0, parsed: 0, indexed: 0, failed: 0 };
+      const statusCounts = {
+        uploaded: 0,
+        parsed: 0,
+        processing: 0,
+        indexed: 0,
+        failed: 0,
+      };
       let totalChunks = 0;
       let totalBytes = 0;
       let staleCount = 0;
@@ -840,14 +867,10 @@ export const knowledgeRouter = createTRPCRouter({
             return { sourceId, success: false, error: "File not found in R2" };
           }
 
-          // Get content based on file type
-          let content: string | Buffer | Uint8Array;
-          if (source.mime === "application/pdf") {
-            const arrayBuffer = await r2Object.arrayBuffer();
-            content = Buffer.from(arrayBuffer);
-          } else {
-            content = await r2Object.text();
-          }
+          // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
+          const arrayBuffer = await r2Object.arrayBuffer();
+          const content: string | Buffer | Uint8Array =
+            Buffer.from(arrayBuffer);
 
           // Delete old vectors and old chunks concurrently
           await Promise.all([

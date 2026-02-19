@@ -1,0 +1,1 @@
+ALTER TABLE `knowledge_source` ADD `progress` integer DEFAULT 0;
