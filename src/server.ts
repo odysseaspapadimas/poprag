@@ -1,16 +1,11 @@
-import {
-  createStartHandler,
-  defaultStreamHandler,
-} from "@tanstack/react-start/server";
+import handler from "@tanstack/react-start/server-entry";
 import {
   handleKnowledgeIndexQueue,
   type KnowledgeIndexMessage,
 } from "@/lib/ai/queue-consumer";
 
-const fetch = createStartHandler(defaultStreamHandler);
-
 export default {
-  fetch,
+  fetch: handler.fetch,
   async queue(
     batch: MessageBatch<KnowledgeIndexMessage>,
     env: Env,
