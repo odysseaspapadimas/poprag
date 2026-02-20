@@ -7,6 +7,7 @@ import {
   agentIndexPin,
   agentModelPolicy,
   auditLog,
+  firebaseUser,
   type InsertAgent,
   knowledgeSource,
   modelAlias,
@@ -571,6 +572,9 @@ export const agentRouter = createTRPCRouter({
           >`coalesce(${runMetric.initiatedBy}, ${transcript.initiatedBy})`,
           initiatedByName: user.name,
           initiatedByEmail: user.email,
+          firebaseUid: runMetric.firebaseUid,
+          firebaseUserName: firebaseUser.displayName,
+          firebaseUserEmail: firebaseUser.email,
           modelAlias: runMetric.modelAlias,
           promptTokens: runMetric.promptTokens,
           completionTokens: runMetric.completionTokens,
@@ -593,6 +597,7 @@ export const agentRouter = createTRPCRouter({
             eq(user.id, transcript.initiatedBy),
           ),
         )
+        .leftJoin(firebaseUser, eq(firebaseUser.uid, runMetric.firebaseUid))
         .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(runMetric.createdAt));
 

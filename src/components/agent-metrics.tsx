@@ -84,6 +84,9 @@ type RunMetricRow = {
   initiatedBy: string | null;
   initiatedByName: string | null;
   initiatedByEmail: string | null;
+  firebaseUid: string | null;
+  firebaseUserName: string | null;
+  firebaseUserEmail: string | null;
   modelAlias: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
@@ -684,9 +687,9 @@ function RunDetails({ run }: { run: RunMetricRow }) {
           <div className="text-xs text-muted-foreground">User</div>
           <div className="text-xs">
             {formatUserLabel(
-              run.initiatedByName,
-              run.initiatedByEmail,
-              run.initiatedBy,
+              run.initiatedByName ?? run.firebaseUserName,
+              run.initiatedByEmail ?? run.firebaseUserEmail,
+              run.initiatedBy ?? run.firebaseUid,
             )}
           </div>
         </div>
@@ -978,9 +981,9 @@ export function AgentMetrics({ agentId }: Props) {
       const key = conversationId;
       const timestamp = new Date(metric.createdAt).getTime();
       const userLabel = formatUserLabel(
-        metric.initiatedByName,
-        metric.initiatedByEmail,
-        metric.initiatedBy,
+        metric.initiatedByName ?? metric.firebaseUserName,
+        metric.initiatedByEmail ?? metric.firebaseUserEmail,
+        metric.initiatedBy ?? metric.firebaseUid,
       );
       const existing = grouped.get(key);
 
@@ -1029,11 +1032,11 @@ export function AgentMetrics({ agentId }: Props) {
   const userRows = useMemo(() => {
     const grouped = new Map<string, UserSummary>();
     rows.forEach((metric) => {
-      const userId = metric.initiatedBy ?? "unknown";
+      const userId = metric.initiatedBy ?? metric.firebaseUid ?? "unknown";
       const userLabel = formatUserLabel(
-        metric.initiatedByName,
-        metric.initiatedByEmail,
-        metric.initiatedBy,
+        metric.initiatedByName ?? metric.firebaseUserName,
+        metric.initiatedByEmail ?? metric.firebaseUserEmail,
+        metric.initiatedBy ?? metric.firebaseUid,
       );
       const timestamp = new Date(metric.createdAt).getTime();
       const existing = grouped.get(userId);
@@ -1107,9 +1110,9 @@ export function AgentMetrics({ agentId }: Props) {
         header: "User",
         cell: ({ row }) =>
           formatUserLabel(
-            row.original.initiatedByName,
-            row.original.initiatedByEmail,
-            row.original.initiatedBy,
+            row.original.initiatedByName ?? row.original.firebaseUserName,
+            row.original.initiatedByEmail ?? row.original.firebaseUserEmail,
+            row.original.initiatedBy ?? row.original.firebaseUid,
           ),
       },
       {
