@@ -46,21 +46,46 @@ const chatRequestSchema = z.object({
 async function resolveFirebaseUser(
   request: Request,
 ): Promise<VerifiedFirebaseUser | null> {
-  const token = extractBearerToken(request.headers.get("Authorization"));
-  if (!token) return null;
+  const authHeader = request.headers.get("Authorization");
+  console.log(
+    "[Firebase Auth] Authorization header:",
+    authHeader ? `present (${authHeader.slice(0, 20)}...)` : "missing",
+  );
+
+  const token = extractBearerToken(authHeader);
+  if (!token) {
+    console.warn(
+      "[Firebase Auth] No Bearer token extracted — header is missing or not in 'Bearer <token>' format",
+    );
+    return null;
+  }
+  console.log("[Firebase Auth] Bearer token extracted, length:", token.length);
 
   const serviceAccountData = process.env.SERVICE_ACCOUNT_DATA;
-  if (!serviceAccountData) return null;
+  if (!serviceAccountData) {
+    console.error(
+      "[Firebase Auth] SERVICE_ACCOUNT_DATA env var is not set — cannot verify token",
+    );
+    return null;
+  }
 
   try {
     const decoded = Buffer.from(serviceAccountData, "base64").toString("utf-8");
     const { project_id } = JSON.parse(decoded) as { project_id: string };
+    console.log("[Firebase Auth] Verifying token against project:", project_id);
+
     const userData = await verifyFirebaseToken(token, project_id);
 
     if (!userData) {
-      console.warn("[Chat API] Invalid Firebase token provided");
+      console.warn(
+        "[Firebase Auth] Token verification returned null — see [Firebase Auth] logs above for the specific failure",
+      );
       return null;
     }
+
+    console.log(
+      `[Firebase Auth] Token verified OK: uid=${userData.uid} email=${userData.email} provider=${userData.signInProvider}`,
+    );
 
     upsertFirebaseUser(userData).catch((err) => {
       console.error("[Chat API] Background user upsert failed:", err);
@@ -68,7 +93,10 @@ async function resolveFirebaseUser(
 
     return userData;
   } catch (err) {
-    console.error("[Chat API] Failed to verify Firebase token:", err);
+    console.error(
+      "[Firebase Auth] Unexpected error during token verification:",
+      err,
+    );
     return null;
   }
 }
@@ -221,6 +249,13 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
             },
             env,
             waitUntil,
+          );
+
+          console.log(
+            "[Chat API] Dispatching handleChatRequest:",
+            `agentSlug=${params.agentSlug}`,
+            `firebaseUid=${firebaseUserData?.uid ?? "none"}`,
+            `initiatedBy=${validated.initiatedBy ?? "none"}`,
           );
 
           const response = result.toUIMessageStreamResponse();

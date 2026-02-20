@@ -554,6 +554,15 @@ async function saveTranscriptAndMetrics(
   // Save metrics
   try {
     const metricId = nanoid();
+    console.log(
+      "[Chat] Saving run metric:",
+      `agentId=${agentData.id}`,
+      `runId=${runId}`,
+      `firebaseUid=${request.firebaseUid ?? "none"}`,
+      `initiatedBy=${request.initiatedBy ?? "none"}`,
+      `tokens=${usage.totalTokens ?? "n/a"}`,
+      `latency=${latency}ms`,
+    );
     await db.insert(runMetric).values({
       id: metricId,
       agentId: agentData.id,
