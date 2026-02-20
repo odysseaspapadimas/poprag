@@ -66,8 +66,18 @@ export interface ChatRequest {
 /**
  * Handle chat request with RAG
  * Refactored to use extracted helper modules for better maintainability
+ *
+ * @param waitUntil - Cloudflare Workers waitUntil to extend Worker lifetime
+ *   for background DB writes (metrics/transcript) after the stream is sent.
+ *   Without this, the Worker may be terminated before onFinish DB inserts
+ *   complete, causing metrics to be silently dropped for external API clients
+ *   (e.g. Flutter apps) that close the connection as soon as streaming ends.
  */
-export async function handleChatRequest(request: ChatRequest, env: Env) {
+export async function handleChatRequest(
+  request: ChatRequest,
+  env: Env,
+  waitUntil?: (promise: Promise<unknown>) => void,
+) {
   const runId = nanoid();
   const startTime = Date.now();
 
@@ -183,7 +193,7 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
         }
       },
       onFinish: async (event) => {
-        await saveTranscriptAndMetrics(
+        const metricsPromise = saveTranscriptAndMetrics(
           agentData!,
           runId,
           request,
@@ -194,12 +204,19 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
           selectedAlias,
           resolvedCapabilities,
         );
+        // Register with waitUntil so the Worker stays alive for DB writes
+        // even after the streaming response has been fully sent to the client.
+        if (waitUntil) {
+          waitUntil(metricsPromise);
+        } else {
+          await metricsPromise;
+        }
       },
     });
 
     return result;
   } catch (error) {
-    await saveErrorMetric(
+    const errorMetricPromise = saveErrorMetric(
       agentData,
       runId,
       startTime,
@@ -207,6 +224,11 @@ export async function handleChatRequest(request: ChatRequest, env: Env) {
       request,
       selectedAlias,
     );
+    if (waitUntil) {
+      waitUntil(errorMetricPromise);
+    } else {
+      await errorMetricPromise;
+    }
     throw error;
   }
 }

@@ -196,8 +196,8 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
           console.log("[Chat API] Request payload:", validated);
           validateChatPayload(validated);
 
-          // Access Cloudflare Workers environment
-          const { env } = await import("cloudflare:workers");
+          // Access Cloudflare Workers environment and execution context
+          const { env, waitUntil } = await import("cloudflare:workers");
 
           // Verify Firebase ID token if provided
           const firebaseUserData = await resolveFirebaseUser(request);
@@ -220,6 +220,7 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
               firebaseUid: firebaseUserData?.uid,
             },
             env,
+            waitUntil,
           );
 
           const response = result.toUIMessageStreamResponse();
