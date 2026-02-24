@@ -58,6 +58,10 @@ export interface RAGDebugInfo {
   cqrApplied?: boolean;
   /** Whether CQR was attempted but failed (e.g. timeout) */
   cqrFailed?: boolean;
+  /** Whether image context extraction was attempted and succeeded */
+  imageContextExtracted?: boolean;
+  /** Description extracted from image by vision model (used to enhance RAG query) */
+  imageDescription?: string;
   rewrittenQueries?: string[];
   keywords?: string[];
   vectorResultsCount?: number;
@@ -75,6 +79,7 @@ export interface RAGDebugInfo {
   }>;
   // Timing metrics (in milliseconds)
   timing?: {
+    imageContextExtractionMs?: number;
     conversationalReformulationMs?: number;
     intentClassificationMs?: number;
     queryRewriteMs?: number;
@@ -87,6 +92,7 @@ export interface RAGDebugInfo {
   };
   // Model information
   models?: {
+    imageContextModel?: string;
     conversationalReformulationModel?: string;
     intentModel?: string;
     rewriteModel?: string;
@@ -190,10 +196,17 @@ Standalone query:`,
 
     const reformulated = text.trim();
 
-    // Sanity check: if the LLM returned empty or something suspiciously long, fall back
-    if (!reformulated || reformulated.length > userQuery.length * 3) {
+    // Sanity check: if the LLM returned empty or something suspiciously long, fall back.
+    // Use a minimum floor (150 chars) so short follow-ups like "ingredient list?"
+    // can expand to include entity names from conversation context.
+    const maxReformulatedLength = Math.max(150, userQuery.length * 3);
+    if (!reformulated) {
+      console.warn("[CQR] Reformulated query is empty, using original");
+      return { reformulatedQuery: userQuery, wasReformulated: false };
+    }
+    if (reformulated.length > maxReformulatedLength) {
       console.warn(
-        "[CQR] Reformulated query failed sanity check, using original",
+        `[CQR] Reformulated query too long (${reformulated.length} > ${maxReformulatedLength}), using original`,
       );
       return { reformulatedQuery: userQuery, wasReformulated: false };
     }

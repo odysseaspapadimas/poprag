@@ -47,19 +47,11 @@ async function resolveFirebaseUser(
   request: Request,
 ): Promise<VerifiedFirebaseUser | null> {
   const authHeader = request.headers.get("Authorization");
-  console.log(
-    "[Firebase Auth] Authorization header:",
-    authHeader ? `present (${authHeader.slice(0, 20)}...)` : "missing",
-  );
 
   const token = extractBearerToken(authHeader);
   if (!token) {
-    console.warn(
-      "[Firebase Auth] No Bearer token extracted — header is missing or not in 'Bearer <token>' format",
-    );
     return null;
   }
-  console.log("[Firebase Auth] Bearer token extracted, length:", token.length);
 
   const serviceAccountData = process.env.SERVICE_ACCOUNT_DATA;
   if (!serviceAccountData) {
@@ -72,20 +64,12 @@ async function resolveFirebaseUser(
   try {
     const decoded = Buffer.from(serviceAccountData, "base64").toString("utf-8");
     const { project_id } = JSON.parse(decoded) as { project_id: string };
-    console.log("[Firebase Auth] Verifying token against project:", project_id);
 
     const userData = await verifyFirebaseToken(token, project_id);
 
     if (!userData) {
-      console.warn(
-        "[Firebase Auth] Token verification returned null — see [Firebase Auth] logs above for the specific failure",
-      );
       return null;
     }
-
-    console.log(
-      `[Firebase Auth] Token verified OK: uid=${userData.uid} email=${userData.email} provider=${userData.signInProvider}`,
-    );
 
     upsertFirebaseUser(userData).catch((err) => {
       console.error("[Chat API] Background user upsert failed:", err);

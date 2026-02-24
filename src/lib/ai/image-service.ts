@@ -3,6 +3,8 @@
  * Handles image fetching, processing, and validation for multimodal chat
  */
 
+import type { LanguageModel } from "ai";
+import { generateText } from "ai";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { chatImage } from "@/db/schema";
@@ -204,4 +206,91 @@ export async function processMessageParts(
   );
 
   return processedParts.filter(Boolean);
+}
+
+// ─────────────────────────────────────────────────────
+// Image Context Extraction for RAG
+// ─────────────────────────────────────────────────────
+
+/**
+ * Extract visual context from image parts using a vision-capable model.
+ * Used to enhance RAG queries with information visible in attached images
+ * (e.g., product names, brands, text on packaging).
+ *
+ * Only processes the first image in the message to keep latency low.
+ *
+ * @param messageParts - The parts of the last user message
+ * @param model - A vision-capable language model
+ * @param env - Cloudflare environment with R2 binding
+ * @returns Extracted text description, or null if no images or extraction fails
+ */
+export async function extractImageContextForRAG(
+  messageParts: unknown[],
+  model: LanguageModel,
+  env: { R2: R2Bucket },
+): Promise<string | null> {
+  // Find image parts
+  const imageParts = messageParts.filter(isImagePart);
+  if (imageParts.length === 0) return null;
+
+  // Resolve the first image to a data URL
+  const firstImage = imageParts[0];
+  let dataUrl: string | null = resolveInlineDataUrl(firstImage.image);
+
+  // Fall back to R2 fetch (dashboard client stores images in R2)
+  if (!dataUrl) {
+    const imageId = resolveImageId(firstImage.image);
+    if (imageId) {
+      try {
+        const result = await fetchImageAsBase64(imageId, env);
+        dataUrl = result.dataUrl;
+      } catch (error) {
+        console.warn("[Image Context] Failed to fetch image from R2:", error);
+        return null;
+      }
+    }
+  }
+
+  if (!dataUrl) return null;
+
+  try {
+    const { text } = await generateText({
+      model,
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            {
+              type: "image" as const,
+              image: dataUrl,
+            },
+            {
+              type: "text" as const,
+              text: "Extract all visible text, product names, brands, quantities, and key details from this image. Return ONLY a concise factual description with the extracted information. No commentary or explanation.",
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+      maxOutputTokens: 200,
+      abortSignal: AbortSignal.timeout(8000),
+    });
+
+    const description = text.trim();
+    if (!description) return null;
+
+    console.log(
+      `[Image Context] Extracted: "${description.substring(0, 100)}${description.length > 100 ? "..." : ""}"`,
+    );
+
+    return description;
+  } catch (error) {
+    const isTimeout =
+      error instanceof DOMException && error.name === "AbortError";
+    console.warn(
+      `[Image Context] Vision extraction ${isTimeout ? "timed out (8s)" : "failed"}:`,
+      error,
+    );
+    return null;
+  }
 }

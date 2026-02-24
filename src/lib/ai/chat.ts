@@ -31,7 +31,12 @@ import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
 
 // Import refactored modules
 import type { ModelCapabilities } from "./helpers";
-import { processMessageParts } from "./image-service";
+import { supportsModality } from "./helpers";
+import {
+  extractImageContextForRAG,
+  isImagePart,
+  processMessageParts,
+} from "./image-service";
 import {
   type ConversationMessage,
   performRAGRetrieval,
@@ -98,9 +103,48 @@ export async function handleChatRequest(
         resolveExperienceKnowledge(agentData.id, request.experienceSlug),
       ]);
 
-    // 3. RAG retrieval (using extracted pipeline)
-    const userQuery = extractUserQuery(request);
+    // 3. Resolve model and capabilities (before RAG, needed for image context extraction)
+    const resolved = await resolveModelForChat(
+      request.modelAlias || policy.modelAlias,
+    );
+    const resolvedAlias = resolved.selectedAlias;
+    selectedAlias = resolvedAlias;
+    resolvedCapabilities = resolved.capabilities;
+    const { model, capabilities, provider } = resolved;
+
+    // 4. Extract user query and enhance with image context if present
+    let userQuery = extractUserQuery(request);
     const conversationHistory = extractConversationHistory(request);
+
+    // 4b. Image context extraction: use the chat model (vision-capable) to extract
+    // searchable text from images, so RAG can retrieve relevant knowledge.
+    // Without this, queries like "analyze this image" produce irrelevant RAG results
+    // because the image content is never used to inform retrieval.
+    let imageDescription: string | null = null;
+    let imageContextMs: number | undefined;
+    const lastUserMessage = findLastUserMessage(request.messages);
+    const hasImages =
+      lastUserMessage?.parts.some((p: { type: string }) => isImagePart(p)) ??
+      false;
+
+    if (hasImages && supportsModality(capabilities, "image")) {
+      const imageStart = Date.now();
+      imageDescription = await extractImageContextForRAG(
+        lastUserMessage!.parts,
+        model,
+        env,
+      );
+      imageContextMs = Date.now() - imageStart;
+
+      if (imageDescription) {
+        userQuery = `${imageDescription}. ${userQuery}`;
+        console.log(
+          `[Chat] Enhanced RAG query with image context (${imageContextMs}ms)`,
+        );
+      }
+    }
+
+    // 5. RAG retrieval (using extracted pipeline, with image-enhanced query)
     const ragConfig: RAGConfig = {
       enabled: agentData.ragEnabled,
       skipIntentClassification: agentData.skipIntentClassification ?? false,
@@ -123,38 +167,33 @@ export async function handleChatRequest(
         conversationHistory,
       );
 
-    // 4. Build final system prompt with RAG context
+    // 5b. Add model and image context info to debug
+    ragDebugInfo.models = {
+      ...ragDebugInfo.models,
+      chatModel: resolvedAlias,
+      chatProvider: provider,
+      ...(hasImages && { imageContextModel: resolvedAlias }),
+    };
+    if (hasImages) {
+      ragDebugInfo.imageContextExtracted = !!imageDescription;
+      if (imageDescription) ragDebugInfo.imageDescription = imageDescription;
+      if (ragDebugInfo.timing) {
+        ragDebugInfo.timing.imageContextExtractionMs = imageContextMs;
+      }
+    }
+
+    // 6. Build final system prompt with RAG context
     let systemPrompt = basePrompt;
     if (ragContext?.chunks && ragContext.chunks.length > 0) {
       systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
     }
 
-    // 4b. Append language instruction if provided (for Flutter app)
+    // 6b. Append language instruction if provided (for Flutter app)
     if (request.languageInstruction) {
       systemPrompt = `${systemPrompt}\n\n${request.languageInstruction}`;
     }
 
-    // 5. Resolve model and capabilities
-    const resolved = await resolveModelForChat(
-      request.modelAlias || policy.modelAlias,
-    );
-    const resolvedAlias = resolved.selectedAlias;
-    selectedAlias = resolvedAlias;
-    resolvedCapabilities = resolved.capabilities;
-    const { model, capabilities, provider } = resolved;
-
-    // 5b. Add chat model info to debug info
-    if (ragDebugInfo.models) {
-      ragDebugInfo.models.chatModel = resolvedAlias;
-      ragDebugInfo.models.chatProvider = provider;
-    } else {
-      ragDebugInfo.models = {
-        chatModel: resolvedAlias,
-        chatProvider: provider,
-      };
-    }
-
-    // 6. Process messages (handle images based on model capabilities)
+    // 7. Process messages (handle images based on model capabilities)
     const processedMessages = (await Promise.all(
       request.messages.map(async (msg) => ({
         ...msg,
@@ -425,6 +464,16 @@ function extractConversationHistory(
   }
 
   return history;
+}
+
+/**
+ * Find the last user message in the conversation
+ */
+function findLastUserMessage(messages: UIMessage[]): UIMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return messages[i];
+  }
+  return undefined;
 }
 
 /**
