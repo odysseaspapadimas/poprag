@@ -3,9 +3,10 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Copy, MoreHorizontal, Pencil, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { BulkUploadExperiences } from "@/components/experiences/BulkUploadExperiences";
 import { ExperienceForm } from "@/components/experiences/ExperienceForm";
 import {
   AlertDialog,
@@ -44,10 +45,21 @@ export function ExperienceList({ agentId, agentSlug }: ExperienceListProps) {
     <div className="bg-card border rounded-lg p-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold">Experiences</h2>
-        <ExperienceForm
-          agentId={agentId}
-          trigger={<Button>Create Experience</Button>}
-        />
+        <div className="flex gap-2">
+          <BulkUploadExperiences
+            agentId={agentId}
+            trigger={
+              <Button variant="outline">
+                <Upload className="h-4 w-4 mr-2" />
+                Bulk Upload
+              </Button>
+            }
+          />
+          <ExperienceForm
+            agentId={agentId}
+            trigger={<Button>Create Experience</Button>}
+          />
+        </div>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
         Group knowledge sources into named experiences. Use{" "}
