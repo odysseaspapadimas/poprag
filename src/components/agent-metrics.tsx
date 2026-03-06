@@ -814,7 +814,7 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
 
 export function AgentMetrics({ agentId }: Props) {
   const trpc = useTRPC();
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>("7d");
   const [isRagOpen, setIsRagOpen] = useState(false);
 
   // Compute sinceMs based on time period - "all" = undefined (matches loader prefetch)

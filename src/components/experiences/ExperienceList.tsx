@@ -36,6 +36,7 @@ interface ExperienceListProps {
 
 export function ExperienceList({ agentId, agentSlug }: ExperienceListProps) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
   const { data: experiences } = useSuspenseQuery(
     trpc.experience.list.queryOptions({ agentId }),

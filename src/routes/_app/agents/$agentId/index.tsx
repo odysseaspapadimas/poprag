@@ -46,9 +46,6 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
         context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
       ),
       context.queryClient.prefetchQuery(
-        context.trpc.agent.getRunMetrics.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(
         context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
       ),
       context.queryClient.prefetchQuery(

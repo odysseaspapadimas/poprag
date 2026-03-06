@@ -3,7 +3,12 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
-import { agent, documentChunks, knowledgeSource } from "@/db/schema";
+import {
+  agent,
+  agentExperienceKnowledge,
+  documentChunks,
+  knowledgeSource,
+} from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
@@ -13,6 +18,10 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+
+function normalizeFileNameForDedup(fileName: string): string {
+  return fileName.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 /**
  * Knowledge management router
@@ -115,9 +124,10 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Source not found");
       }
 
-      // Deduplication: if checksum provided, check for existing source with same checksum + agentId
+      // Deduplication: replace an old source only when BOTH checksum and filename match.
+      // This prevents accidental deletes when different books somehow share a checksum.
       if (input.checksum) {
-        const [existing] = await db
+        const existingCandidates = await db
           .select({
             id: knowledgeSource.id,
             fileName: knowledgeSource.fileName,
@@ -130,9 +140,43 @@ export const knowledgeRouter = createTRPCRouter({
               sql`${knowledgeSource.id} != ${input.sourceId}`,
             ),
           )
-          .limit(1);
+          .limit(20);
 
-        if (existing) {
+        const sourceNameKey = normalizeFileNameForDedup(source.fileName ?? "");
+
+        const exactNameMatches = existingCandidates.filter(
+          (candidate) =>
+            normalizeFileNameForDedup(candidate.fileName ?? "") ===
+            sourceNameKey,
+        );
+
+        if (exactNameMatches.length === 0 && existingCandidates.length > 0) {
+          const first = existingCandidates[0];
+          console.log(
+            `[Knowledge] Checksum match ignored due to different filename: "${source.fileName}" vs "${first.fileName}" (${first.id}).`,
+          );
+        }
+
+        for (const existing of exactNameMatches) {
+          // Preserve any experience links that currently point to the old source
+          // before deleting it.
+          const existingLinks = await db
+            .select({ experienceId: agentExperienceKnowledge.experienceId })
+            .from(agentExperienceKnowledge)
+            .where(eq(agentExperienceKnowledge.knowledgeSourceId, existing.id));
+
+          if (existingLinks.length > 0) {
+            await db
+              .insert(agentExperienceKnowledge)
+              .values(
+                existingLinks.map((link) => ({
+                  experienceId: link.experienceId,
+                  knowledgeSourceId: input.sourceId,
+                })),
+              )
+              .onConflictDoNothing();
+          }
+
           console.log(
             `[Knowledge] Duplicate detected: "${source.fileName}" matches existing source "${existing.fileName}" (${existing.id}). Deleting old source.`,
           );

@@ -7,11 +7,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
-import {
-  agentExperience,
-  agentExperienceKnowledge,
-  knowledgeSource,
-} from "@/db/schema";
+import { agentExperience, agentExperienceKnowledge } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 
