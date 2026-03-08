@@ -324,7 +324,12 @@ export const knowledgeRouter = createTRPCRouter({
       // Large file path: enqueue for async processing via Cloudflare Queues
       await db
         .update(knowledgeSource)
-        .set({ status: "processing", progress: 0, updatedAt: new Date() })
+        .set({
+          status: "processing",
+          progress: 0,
+          parserErrors: [],
+          updatedAt: new Date(),
+        })
         .where(eq(knowledgeSource.id, input.sourceId));
 
       const { env } = await import("cloudflare:workers");
@@ -336,7 +341,7 @@ export const knowledgeRouter = createTRPCRouter({
       // Audit log
       await audit(
         ctx,
-        "knowledge.queued",
+        input.reindex ? "knowledge.reindex.queued" : "knowledge.queued",
         { type: "knowledge_source", id: input.sourceId },
         {
           reindex: input.reindex,
@@ -452,7 +457,7 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /**
-   * Reindex knowledge source with updated chunking strategy
+   * Reindex knowledge source by enqueueing queue-based reprocessing
    */
   reindex: protectedProcedure
     .input(z.object({ sourceId: z.string() }))
@@ -475,76 +480,36 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("No R2 file found for this source");
       }
 
-      try {
-        // Download the file from R2
-        const { env } = await import("cloudflare:workers");
-        const r2Object = await env.R2.get(source.r2Key);
+      await db
+        .update(knowledgeSource)
+        .set({
+          status: "processing",
+          progress: 0,
+          parserErrors: [],
+          updatedAt: new Date(),
+        })
+        .where(eq(knowledgeSource.id, input.sourceId));
 
-        if (!r2Object) {
-          throw new Error("File not found in R2");
-        }
+      const { env } = await import("cloudflare:workers");
+      await env.KNOWLEDGE_INDEX_QUEUE.send({
+        sourceId: input.sourceId,
+        agentId: source.agentId,
+      });
 
-        // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
-        // Pass ArrayBuffer directly — avoid Buffer.from() copy to reduce memory pressure
-        const content = await r2Object.arrayBuffer();
+      await audit(
+        ctx,
+        "knowledge.reindex.queued",
+        { type: "knowledge_source", id: input.sourceId },
+        {
+          fileName: source.fileName,
+        },
+      );
 
-        // Delete old vectors from Vectorize if they exist
-        if (source.vectorizeIds && source.vectorizeIds.length > 0) {
-          try {
-            const { deleteVectorizeIds } = await import("@/lib/ai/ingestion");
-            await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
-              namespace: source.agentId,
-              logPrefix: "Vectorize",
-            });
-          } catch (error) {
-            console.error("Failed to delete old vectors:", error);
-            // Continue anyway - will create duplicates but at least new chunks will be there
-          }
-        }
-
-        // Delete old chunks from D1 database
-        await db
-          .delete(documentChunks)
-          .where(eq(documentChunks.documentId, input.sourceId));
-
-        console.log(
-          `Deleted old chunks for source ${input.sourceId} before re-indexing`,
-        );
-
-        // Reset status and clear old vectorize IDs before reprocessing
-        await db
-          .update(knowledgeSource)
-          .set({
-            status: "uploaded",
-            vectorizeIds: [],
-            updatedAt: new Date(),
-          })
-          .where(eq(knowledgeSource.id, input.sourceId));
-
-        // Reprocess with new chunking strategy
-        await processKnowledgeSource(input.sourceId, content, {
-          abortSignal: ctx.request.signal,
-        });
-
-        // Audit log
-        await audit(
-          ctx,
-          "knowledge.reindexed",
-          { type: "knowledge_source", id: input.sourceId },
-          {
-            fileName: source.fileName,
-          },
-        );
-
-        return { success: true };
-      } catch (error) {
-        console.error("Reindex failed:", error);
-        throw new Error(
-          `Reindex failed: ${
-            error instanceof Error ? error.message : "Unknown error"
-          }`,
-        );
-      }
+      return {
+        queued: true,
+        sourceId: input.sourceId,
+        success: true,
+      };
     }),
 
   /**
@@ -878,105 +843,84 @@ export const knowledgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const BULK_CONCURRENCY = 3;
+      const sourceIds = [...new Set(input.sourceIds)];
+      const { env } = await import("cloudflare:workers");
 
-      // Process a single source for reindexing
-      async function reindexOne(sourceId: string): Promise<{
+      const sources = await db
+        .select({
+          id: knowledgeSource.id,
+          agentId: knowledgeSource.agentId,
+          fileName: knowledgeSource.fileName,
+          r2Key: knowledgeSource.r2Key,
+        })
+        .from(knowledgeSource)
+        .where(inArray(knowledgeSource.id, sourceIds));
+
+      const sourceMap = new Map(sources.map((source) => [source.id, source]));
+
+      const results: {
         sourceId: string;
         success: boolean;
         error?: string;
-      }> {
-        try {
-          const [source] = await db
-            .select()
-            .from(knowledgeSource)
-            .where(eq(knowledgeSource.id, sourceId))
-            .limit(1);
+      }[] = [];
 
+      for (const sourceId of sourceIds) {
+        try {
+          const source = sourceMap.get(sourceId);
           if (!source) {
-            return { sourceId, success: false, error: "Source not found" };
+            results.push({
+              sourceId,
+              success: false,
+              error: "Source not found",
+            });
+            continue;
           }
 
           await requireAgent(source.agentId);
 
           if (!source.r2Key) {
-            return { sourceId, success: false, error: "No R2 file found" };
+            results.push({
+              sourceId,
+              success: false,
+              error: "No R2 file found",
+            });
+            continue;
           }
 
-          // Download from R2
-          const { env } = await import("cloudflare:workers");
-          const r2Object = await env.R2.get(source.r2Key);
-
-          if (!r2Object) {
-            return { sourceId, success: false, error: "File not found in R2" };
-          }
-
-          // Always use arrayBuffer() to avoid corrupting binary formats (xlsx, docx, etc.)
-          // Pass ArrayBuffer directly — avoid Buffer.from() copy to reduce memory pressure
-          const content = await r2Object.arrayBuffer();
-
-          // Delete old vectors and old chunks concurrently
-          await Promise.all([
-            source.vectorizeIds && source.vectorizeIds.length > 0
-              ? import("@/lib/ai/ingestion")
-                  .then(({ deleteVectorizeIds }) =>
-                    deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds!, {
-                      namespace: source.agentId,
-                      logPrefix: "Vectorize",
-                    }),
-                  )
-                  .catch((error) => {
-                    console.error("Failed to delete old vectors:", error);
-                  })
-              : Promise.resolve(),
-            db
-              .delete(documentChunks)
-              .where(eq(documentChunks.documentId, sourceId)),
-          ]);
-
-          // Reset status
           await db
             .update(knowledgeSource)
             .set({
-              status: "uploaded",
-              vectorizeIds: [],
+              status: "processing",
+              progress: 0,
+              parserErrors: [],
               updatedAt: new Date(),
             })
             .where(eq(knowledgeSource.id, sourceId));
 
-          // Reprocess
-          await processKnowledgeSource(sourceId, content, {
-            abortSignal: ctx.request.signal,
+          await env.KNOWLEDGE_INDEX_QUEUE.send({
+            sourceId,
+            agentId: source.agentId,
           });
 
           await audit(
             ctx,
-            "knowledge.reindexed",
+            "knowledge.reindex.queued",
             { type: "knowledge_source", id: sourceId },
             { fileName: source.fileName, bulk: true },
           );
 
-          return { sourceId, success: true };
+          results.push({ sourceId, success: true });
         } catch (error) {
-          return {
+          results.push({
             sourceId,
             success: false,
             error: error instanceof Error ? error.message : "Unknown error",
-          };
+          });
         }
       }
 
-      // Process sources with bounded concurrency
-      const results: { sourceId: string; success: boolean; error?: string }[] =
-        [];
-      for (let i = 0; i < input.sourceIds.length; i += BULK_CONCURRENCY) {
-        const batch = input.sourceIds.slice(i, i + BULK_CONCURRENCY);
-        const batchResults = await Promise.all(batch.map(reindexOne));
-        results.push(...batchResults);
-      }
-
       return {
-        total: input.sourceIds.length,
+        total: sourceIds.length,
         successful: results.filter((r) => r.success).length,
         failed: results.filter((r) => !r.success).length,
         results,

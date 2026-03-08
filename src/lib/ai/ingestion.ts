@@ -22,8 +22,67 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 
 const VECTORIZE_DELETE_BATCH_SIZE = 100;
 const D1_INSERT_BATCH_SIZE = 10; // D1 has ~100 param limit; 10 chunks * 7 fields = 70 params
+const EMBEDDING_BATCH_SIZE = 20;
+const LARGE_DOCUMENT_STREAMING_THRESHOLD_CHARS = 1_000_000;
 const DEFAULT_RETRY_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 400;
+
+function estimateChunkCount(
+  inputLength: number,
+  chunkSize: number,
+  chunkOverlap: number,
+): number {
+  const safeChunkSize = Math.max(1, chunkSize);
+  const safeOverlap = Math.max(0, Math.min(chunkOverlap, safeChunkSize - 1));
+  const step = Math.max(1, safeChunkSize - safeOverlap);
+
+  if (inputLength <= 0) return 0;
+
+  return Math.max(1, Math.ceil((inputLength - safeChunkSize) / step) + 1);
+}
+
+function* streamChunkBatches(
+  input: string,
+  options: {
+    chunkSize: number;
+    chunkOverlap: number;
+    minChunkSize: number;
+    batchSize: number;
+  },
+): Generator<string[]> {
+  const safeChunkSize = Math.max(1, options.chunkSize);
+  const safeOverlap = Math.max(
+    0,
+    Math.min(options.chunkOverlap, safeChunkSize - 1),
+  );
+  const step = Math.max(1, safeChunkSize - safeOverlap);
+
+  let cursor = 0;
+  let batch: string[] = [];
+
+  while (cursor < input.length) {
+    const end = Math.min(input.length, cursor + safeChunkSize);
+    const chunk = input.slice(cursor, end).trim();
+
+    if (chunk.length >= options.minChunkSize) {
+      batch.push(chunk);
+      if (batch.length >= options.batchSize) {
+        yield batch;
+        batch = [];
+      }
+    }
+
+    if (end >= input.length) {
+      break;
+    }
+
+    cursor += step;
+  }
+
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
 
 function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -170,6 +229,330 @@ export interface ParsedDocument {
   }>;
 }
 
+type DelimitedFormat = "csv" | "tsv";
+
+function parseDelimitedRows(input: string, delimiter: "," | "\t"): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (input[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (char === delimiter) {
+      row.push(field);
+      field = "";
+      continue;
+    }
+
+    if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      continue;
+    }
+
+    if (char === "\r") {
+      continue;
+    }
+
+    field += char;
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function cleanDelimitedCell(value: string): string {
+  const trimmed = value.replaceAll("\u0000", "").replaceAll("\r", "").trim();
+  if (!trimmed) return "";
+
+  const normalized = trimmed
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const lower = normalized.replace(/\s+/g, " ").toLowerCase();
+  if (lower === "n/a" || lower === "na" || lower === "null") {
+    return "";
+  }
+
+  return normalized;
+}
+
+function containsLetter(value: string): boolean {
+  return /\p{L}/u.test(value);
+}
+
+function truncateSingleLine(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function splitLongDelimitedSection(
+  value: string,
+  maxSectionLength: number = 900,
+): string[] {
+  if (value.length <= maxSectionLength) {
+    return [value];
+  }
+
+  const stepParts = value
+    .split(/(?=\b\d+\.\s)/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const candidateParts = stepParts.length > 1 ? stepParts : [value];
+
+  const chunks: string[] = [];
+  let current = "";
+
+  const flushCurrent = () => {
+    if (current.trim()) {
+      chunks.push(current.trim());
+      current = "";
+    }
+  };
+
+  for (const part of candidateParts) {
+    if (part.length > maxSectionLength) {
+      flushCurrent();
+      let cursor = 0;
+      while (cursor < part.length) {
+        const end = Math.min(cursor + maxSectionLength, part.length);
+        chunks.push(part.slice(cursor, end).trim());
+        cursor = end;
+      }
+      continue;
+    }
+
+    if (!current) {
+      current = part;
+      continue;
+    }
+
+    if (current.length + 1 + part.length <= maxSectionLength) {
+      current = `${current}\n${part}`;
+      continue;
+    }
+
+    flushCurrent();
+    current = part;
+  }
+
+  flushCurrent();
+
+  return chunks.filter(Boolean);
+}
+
+type DelimitedColumn = {
+  index: number;
+  label: string;
+};
+
+function buildDelimitedColumns(headerRow: string[]): DelimitedColumn[] {
+  const labelCounts = new Map<string, number>();
+
+  return headerRow.map((rawHeader, index) => {
+    const cleaned = cleanDelimitedCell(rawHeader).replace(/\n+/g, " ").trim();
+    const baseLabel = cleaned || `Column ${index + 1}`;
+    const key = baseLabel.toLowerCase();
+    const seen = labelCounts.get(key) ?? 0;
+    labelCounts.set(key, seen + 1);
+
+    return {
+      index,
+      label: seen === 0 ? baseLabel : `${baseLabel} (${seen + 1})`,
+    };
+  });
+}
+
+function toDelimitedFieldKey(label: string): string {
+  const normalized = label
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || "column";
+}
+
+function splitDelimitedSections(value: string): string[] {
+  const normalized = value
+    .replaceAll("\r", "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!normalized) return [];
+
+  const sections = normalized
+    .split(/\n{2,}/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  return sections.length > 0 ? sections : [normalized];
+}
+
+function parseDelimitedDocument(
+  text: string,
+  format: DelimitedFormat,
+  mimeType: string,
+): ParsedDocument {
+  const delimiter = format === "tsv" ? "\t" : ",";
+  const rows = parseDelimitedRows(text, delimiter);
+
+  if (rows.length <= 1) {
+    return {
+      content: text,
+      metadata: {
+        mimeType,
+        type: "text",
+        format,
+        originalLength: text.length,
+        structuredRows: 0,
+      },
+    };
+  }
+
+  const columns = buildDelimitedColumns(rows[0]);
+
+  const structuredChunks: ParsedDocument["chunks"] = [];
+
+  for (let rowIdx = 1; rowIdx < rows.length; rowIdx += 1) {
+    const row = rows[rowIdx];
+    if (!row || row.length === 0) continue;
+
+    const rowCells = columns
+      .map((column) => {
+        const rawValue = row[column.index] || "";
+        const value = cleanDelimitedCell(rawValue);
+        return {
+          index: column.index,
+          label: column.label,
+          value,
+          fieldKey: toDelimitedFieldKey(column.label),
+          compactValue: value.replace(/\s+/g, " ").trim(),
+        };
+      })
+      .filter((cell) => cell.value.length > 0);
+
+    const meaningfulCells = rowCells.filter((cell) => {
+      if (!cell.compactValue) return false;
+      if (/^https?:\/\//i.test(cell.compactValue)) return false;
+
+      const alnumCount = (cell.compactValue.match(/[\p{L}\p{N}]/gu) || [])
+        .length;
+      return containsLetter(cell.compactValue) || alnumCount >= 10;
+    });
+
+    if (meaningfulCells.length === 0) continue;
+
+    const anchorCell =
+      meaningfulCells.find(
+        (cell) =>
+          containsLetter(cell.compactValue) && cell.compactValue.length <= 140,
+      ) ||
+      meaningfulCells.find((cell) => containsLetter(cell.compactValue)) ||
+      meaningfulCells[0];
+
+    const anchorValue = truncateSingleLine(anchorCell.compactValue, 140);
+    const recordAnchor = `${anchorCell.label}: ${anchorValue}`;
+
+    const pushChunk = (
+      text: string,
+      field: string,
+      sectionIndex?: number,
+    ): void => {
+      const chunkText = text.trim();
+      if (!chunkText) return;
+      structuredChunks.push({
+        text: chunkText,
+        metadata: {
+          rowIndex: rowIdx,
+          format,
+          field,
+          sectionIndex,
+        },
+      });
+    };
+
+    const overviewCandidates = meaningfulCells
+      .filter((cell) => cell.index !== anchorCell.index)
+      .sort((a, b) => a.compactValue.length - b.compactValue.length)
+      .slice(0, 2);
+
+    const overviewParts = [`Record: ${recordAnchor}`];
+    overviewCandidates.forEach((cell) => {
+      overviewParts.push(
+        `${cell.label}: ${truncateSingleLine(cell.compactValue, 220)}`,
+      );
+    });
+    pushChunk(overviewParts.join("\n"), "overview");
+
+    meaningfulCells.forEach((cell) => {
+      if (cell.index === anchorCell.index && cell.compactValue.length <= 120) {
+        return;
+      }
+
+      const sections = splitDelimitedSections(cell.value).flatMap((section) =>
+        splitLongDelimitedSection(section),
+      );
+
+      sections.forEach((segment, sectionIndex) => {
+        const chunkText = `Record: ${recordAnchor}\n${cell.label}: ${segment}`;
+        pushChunk(chunkText, cell.fieldKey, sectionIndex);
+      });
+    });
+  }
+
+  const structuredContent = structuredChunks
+    .map((chunk) => chunk.text)
+    .join("\n\n---\n\n");
+
+  return {
+    content: structuredContent || text,
+    metadata: {
+      mimeType,
+      type: "text",
+      format,
+      originalLength: text.length,
+      structuredRows: structuredChunks.length,
+      parsedRows: rows.length - 1,
+    },
+    chunks: structuredChunks,
+  };
+}
+
 /**
  * Decode binary content to a UTF-8 string.
  * Deferred to avoid eagerly decoding large binary files that don't need text.
@@ -178,8 +561,10 @@ function decodeToText(
   content: string | ArrayBuffer | Buffer | Uint8Array,
 ): string {
   if (typeof content === "string") return content;
-  if (content instanceof ArrayBuffer) return new TextDecoder().decode(content);
-  return content.toString("utf-8");
+  const decoder = new TextDecoder();
+  if (content instanceof ArrayBuffer) return decoder.decode(content);
+  if (ArrayBuffer.isView(content)) return decoder.decode(content);
+  return String(content);
 }
 
 /**
@@ -191,6 +576,23 @@ export async function parseDocument(
   mimeType: string,
   filename?: string,
 ): Promise<ParsedDocument> {
+  const lowerFilename = filename?.toLowerCase();
+
+  // Handle CSV/TSV as plain text to preserve original encoding and row layout.
+  // Sending delimited text through toMarkdown can corrupt non-Latin characters.
+  if (
+    mimeType === "text/csv" ||
+    mimeType === "text/tab-separated-values" ||
+    lowerFilename?.endsWith(".csv") ||
+    lowerFilename?.endsWith(".tsv")
+  ) {
+    const text = decodeToText(content).replace(/^\uFEFF/, "");
+    const format: DelimitedFormat = lowerFilename?.endsWith(".tsv")
+      ? "tsv"
+      : "csv";
+    return parseDelimitedDocument(text, format, mimeType);
+  }
+
   // Handle markdown files — decode to text only when needed
   if (
     mimeType === "text/markdown" ||
@@ -205,7 +607,7 @@ export async function parseDocument(
   }
 
   // Handle plain text — decode to text only when needed
-  if (mimeType.startsWith("text/") && mimeType !== "text/csv") {
+  if (mimeType.startsWith("text/")) {
     const text = decodeToText(content);
     return {
       content: text,
@@ -235,8 +637,6 @@ export async function parseDocument(
     // Open Document Format
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.oasis.opendocument.text",
-    // CSV
-    "text/csv",
     // Apple Documents
     "application/vnd.apple.numbers",
   ];
@@ -264,8 +664,6 @@ export async function parseDocument(
     // Open Document Format
     ".ods",
     ".odt",
-    // CSV
-    ".csv",
     // Apple Documents
     ".numbers",
   ];
@@ -372,28 +770,73 @@ export async function processKnowledgeSource(
 
     const contentType =
       parsed.metadata.type === "markdown" ? "markdown" : "text";
+    const chunkSize = options?.chunkSize || 1024;
+    const chunkOverlap = 200;
+    const minChunkSize = 100;
+    const structuredChunks = parsed.chunks?.map((chunk) => chunk.text) || [];
+    const hasStructuredChunks = structuredChunks.length > 0;
+    const useStreamingChunker =
+      !hasStructuredChunks &&
+      parsed.content.length >= LARGE_DOCUMENT_STREAMING_THRESHOLD_CHARS;
+
+    let chunkBatchIterator: Iterable<string[]>;
+    let totalChunksEstimate = 0;
 
     assertNotAborted(abortSignal);
-    const chunks = await generateChunks(parsed.content, {
-      chunkSize: options?.chunkSize || 1024,
-      chunkOverlap: 200,
-      minChunkSize: 100,
-      contentType,
-    });
-    await streamResponse({ message: `Split into ${chunks.length} chunks` });
+    if (hasStructuredChunks) {
+      totalChunksEstimate = structuredChunks.length;
+      chunkBatchIterator = chunkArray(structuredChunks, EMBEDDING_BATCH_SIZE);
+      await streamResponse({
+        message: `Prepared ${structuredChunks.length} structured rows`,
+      });
+      console.log(
+        `[Ingestion] Using structured row chunks for source ${sourceId}: ${structuredChunks.length} rows`,
+      );
+    } else if (useStreamingChunker) {
+      totalChunksEstimate = estimateChunkCount(
+        parsed.content.length,
+        chunkSize,
+        chunkOverlap,
+      );
+      chunkBatchIterator = streamChunkBatches(parsed.content, {
+        chunkSize,
+        chunkOverlap,
+        minChunkSize,
+        batchSize: EMBEDDING_BATCH_SIZE,
+      });
 
-    console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
+      await streamResponse({
+        message: `Large document detected. Streaming chunking (~${totalChunksEstimate} chunks)`,
+      });
+      console.log(
+        `[Ingestion] Using streaming chunker for source ${sourceId}: ${parsed.content.length} chars, estimated ${totalChunksEstimate} chunks`,
+      );
+    } else {
+      const chunks = await generateChunks(parsed.content, {
+        chunkSize,
+        chunkOverlap,
+        minChunkSize,
+        contentType,
+      });
+      totalChunksEstimate = chunks.length;
+      await streamResponse({ message: `Split into ${chunks.length} chunks` });
+      console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
+      chunkBatchIterator = chunkArray(chunks, EMBEDDING_BATCH_SIZE);
+    }
 
-    // Process chunks in batches for embedding
-    const BATCH_SIZE = 50; // Reduced batch size for better progress tracking
-    const chunkBatches = chunkArray(chunks, BATCH_SIZE);
+    const totalBatchEstimate = Math.max(
+      1,
+      Math.ceil(Math.max(totalChunksEstimate, 1) / EMBEDDING_BATCH_SIZE),
+    );
+
     const vectorizeIds: string[] = [];
     const { env } = await import("cloudflare:workers");
     let processedChunks = 0;
+    let batchIdx = 0;
 
     // Process each batch
-    for (let batchIdx = 0; batchIdx < chunkBatches.length; batchIdx++) {
-      const batch = chunkBatches[batchIdx];
+    for (const batch of chunkBatchIterator) {
+      batchIdx += 1;
       assertNotAborted(abortSignal);
 
       // Generate embeddings for this batch using platform-wide model
@@ -405,14 +848,14 @@ export async function processKnowledgeSource(
             abortSignal,
           }),
         {
-          label: `embedding batch ${batchIdx + 1}`,
+          label: `embedding batch ${batchIdx}`,
           abortSignal,
         },
       );
       const embeddingTime = Date.now() - startTime;
 
       console.log(
-        `Batch ${batchIdx + 1} embedding took ${embeddingTime}ms for ${batch.length} chunks`,
+        `Batch ${batchIdx} embedding took ${embeddingTime}ms for ${batch.length} chunks`,
       );
 
       // Insert chunks into database in smaller batches to respect D1 parameter limits
@@ -468,25 +911,28 @@ export async function processKnowledgeSource(
             })),
           ),
         {
-          label: `vectorize insert batch ${batchIdx + 1}`,
+          label: `vectorize insert batch ${batchIdx}`,
           abortSignal,
         },
       );
       const vectorizeTime = Date.now() - vectorizeStartTime;
 
-      console.log(
-        `Batch ${batchIdx + 1} vectorize insert took ${vectorizeTime}ms`,
-      );
+      console.log(`Batch ${batchIdx} vectorize insert took ${vectorizeTime}ms`);
 
       processedChunks += batch.length;
-      const progressPercent = ((batchIdx + 1) / chunkBatches.length) * 100;
+      const progressDenominator = Math.max(
+        totalChunksEstimate,
+        processedChunks,
+        1,
+      );
+      const progressPercent = (processedChunks / progressDenominator) * 100;
       await streamResponse({
         message: `Embedding... (${progressPercent.toFixed(1)}%)`,
         progress: progressPercent,
       });
 
       console.log(
-        `Processed batch ${batchIdx + 1}/${chunkBatches.length}, embedded ${processedChunks} chunks`,
+        `Processed batch ${batchIdx}/${totalBatchEstimate}, embedded ${processedChunks} chunks`,
       );
     }
 

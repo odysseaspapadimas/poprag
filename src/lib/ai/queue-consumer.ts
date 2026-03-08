@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { knowledgeSource } from "@/db/schema";
-import { processKnowledgeSource } from "@/lib/ai/ingestion";
+import { documentChunks, knowledgeSource } from "@/db/schema";
+import { deleteVectorizeIds, processKnowledgeSource } from "@/lib/ai/ingestion";
 
 /**
  * Message schema for the knowledge indexing queue
@@ -85,6 +85,36 @@ export async function handleKnowledgeIndexQueue(
       console.log(
         `[Queue] Processing source ${sourceId} (${source.fileName}, ${content.byteLength} bytes)`,
       );
+
+      // Best effort cleanup before indexing to keep queue retries/idempotency safe.
+      // This prevents duplicate chunks/vectors when a message is retried.
+      try {
+        if (source.vectorizeIds && source.vectorizeIds.length > 0) {
+          await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
+            namespace: source.agentId,
+            logPrefix: "Vectorize",
+          });
+        }
+      } catch (deleteError) {
+        console.error(
+          `[Queue] Failed deleting old vectors for source ${sourceId}:`,
+          deleteError,
+        );
+      }
+
+      await db
+        .delete(documentChunks)
+        .where(eq(documentChunks.documentId, sourceId));
+
+      await db
+        .update(knowledgeSource)
+        .set({
+          progress: 0,
+          vectorizeIds: [],
+          parserErrors: [],
+          updatedAt: new Date(),
+        })
+        .where(eq(knowledgeSource.id, sourceId));
 
       // Run the full ingestion pipeline with progress updates written to D1
       await processKnowledgeSource(sourceId, content, {

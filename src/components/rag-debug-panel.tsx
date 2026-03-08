@@ -88,19 +88,23 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
   // Show skipped message if intent classification skipped RAG
   if (debugInfo.skippedByIntent) {
     return (
-      <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+      <Collapsible
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        className="w-full max-w-full overflow-hidden"
+      >
         <CollapsibleTrigger asChild>
           <Button
             variant="outline"
-            className="w-full justify-between text-sm"
+            className="w-full max-w-full justify-between text-sm"
             size="sm"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
-              <span>RAG Debug Info</span>
+              <span className="truncate">RAG Debug Info</span>
               <Badge
                 variant="secondary"
-                className="ml-2 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400"
+                className="ml-2 shrink-0 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400"
               >
                 Skipped
               </Badge>
@@ -112,8 +116,8 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             )}
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
-          <div className="bg-muted/50 border rounded-lg p-4 space-y-2 text-sm">
+        <CollapsibleContent className="mt-2 w-full max-w-full overflow-hidden">
+          <div className="bg-muted/50 border rounded-lg p-4 space-y-2 text-sm w-full max-w-full overflow-x-hidden">
             <div className="flex items-center gap-2 font-semibold">
               <Search className="h-4 w-4" />
               <span>RAG Skipped by Intent Classification</span>
@@ -121,7 +125,7 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             {debugInfo.originalQuery && (
               <div className="pl-6">
                 <span className="text-muted-foreground">Query: </span>
-                <span className="font-mono text-xs">
+                <span className="font-mono text-xs break-all">
                   {debugInfo.originalQuery}
                 </span>
               </div>
@@ -148,7 +152,7 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                   <div className="flex items-center gap-2 text-xs">
                     <Cpu className="h-3 w-3 text-muted-foreground" />
                     <span className="text-muted-foreground">Chat Model:</span>
-                    <span className="font-mono">
+                    <span className="font-mono break-all">
                       {debugInfo.models.chatModel}
                     </span>
                     {debugInfo.models.chatProvider && (
@@ -228,30 +232,34 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
   };
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+    <Collapsible
+      open={isOpen}
+      onOpenChange={setIsOpen}
+      className="w-full max-w-full overflow-hidden"
+    >
       <CollapsibleTrigger asChild>
         <Button
           variant="outline"
-          className="w-full justify-between text-sm"
+          className="w-full max-w-full justify-between text-sm"
           size="sm"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
             <BarChart3 className="h-4 w-4" />
-            <span>RAG Debug Info</span>
+            <span className="truncate">RAG Debug Info</span>
             {debugInfo.chunks && debugInfo.chunks.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
+              <Badge variant="secondary" className="ml-2 shrink-0">
                 {debugInfo.chunks.length} chunks
               </Badge>
             )}
             {debugInfo.timing?.totalRagMs && (
-              <Badge variant="outline" className="ml-1 text-xs">
+              <Badge variant="outline" className="ml-1 shrink-0 text-xs">
                 {debugInfo.timing.totalRagMs}ms
               </Badge>
             )}
             {debugInfo.models?.chatModel && (
               <Badge
                 variant="outline"
-                className="ml-1 text-xs hidden sm:inline-flex"
+                className="ml-1 hidden max-w-40 truncate text-xs sm:inline-flex"
               >
                 {debugInfo.models.chatModel}
               </Badge>
@@ -264,8 +272,8 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
           )}
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2">
-        <div className="bg-muted/50 border rounded-lg p-4 space-y-4 text-sm">
+      <CollapsibleContent className="mt-2 w-full max-w-full overflow-hidden">
+        <div className="bg-muted/50 border rounded-lg p-4 space-y-4 text-sm w-full max-w-full overflow-x-hidden">
           {/* Query Information */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 font-semibold">
@@ -346,7 +354,7 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <BarChart3 className="h-4 w-4" />
               <span>Search Results</span>
             </div>
-            <div className="pl-6 grid grid-cols-2 gap-2">
+            <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="bg-background border rounded p-2">
                 <div className="text-xs text-muted-foreground">
                   Vector Results
@@ -609,7 +617,7 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       className="bg-background border rounded-lg overflow-hidden"
                     >
                       <div className="p-3 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-start justify-between gap-2 sm:items-center">
                           <div className="flex items-center gap-2 flex-wrap">
                             {chunk.rerankScore !== undefined ? (
                               <>
@@ -653,8 +661,8 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground">
+                          <div className="flex min-w-0 items-center gap-1">
+                            <span className="max-w-[10rem] truncate text-xs text-muted-foreground sm:max-w-[16rem]">
                               {fileName}
                             </span>
                             <Button

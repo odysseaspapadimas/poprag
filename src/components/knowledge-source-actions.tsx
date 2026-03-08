@@ -43,15 +43,15 @@ export function KnowledgeSourceActions({
     trpc.knowledge.reindex.mutationOptions({
       onMutate: () => {
         // Show persistent toast during re-indexing
-        toast.loading(`Re-indexing ${source.fileName}...`, {
+        toast.loading(`Queueing re-index for ${source.fileName}...`, {
           id: `reindex-${source.id}`,
-          description: "This may take a moment depending on file size.",
+          description: "This may take a moment.",
         });
       },
       onSuccess: () => {
-        toast.success(`Re-indexed ${source.fileName} successfully`, {
+        toast.success(`Re-index queued for ${source.fileName}`, {
           id: `reindex-${source.id}`,
-          description: "Knowledge source is now up to date.",
+          description: "Processing continues in the background.",
         });
         queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),

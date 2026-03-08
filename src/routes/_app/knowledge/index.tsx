@@ -132,9 +132,11 @@ function KnowledgeHealthPage() {
   const bulkReindexMutation = useMutation(
     trpc.knowledge.bulkReindex.mutationOptions({
       onSuccess: (result) => {
-        toast.success(`Reindexed ${result.successful}/${result.total} sources`);
+        toast.success(
+          `Queued re-index for ${result.successful}/${result.total} sources`,
+        );
         if (result.failed > 0) {
-          toast.error(`${result.failed} sources failed to reindex`);
+          toast.error(`${result.failed} sources could not be queued`);
         }
         queryClient.invalidateQueries({
           queryKey: trpc.knowledge.healthOverview.queryKey({}),
