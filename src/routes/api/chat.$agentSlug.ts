@@ -7,6 +7,7 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
@@ -37,6 +38,36 @@ const chatRequestSchema = z.object({
   initiatedBy: z.string().optional(),
   experienceSlug: z.string().optional(),
 });
+
+const GENERIC_CHAT_ERROR_MESSAGE =
+  "Something went wrong, please try again later.";
+
+function createGenericChatErrorResponse(corsHeaders: Record<string, string>) {
+  return createUIMessageStreamResponse({
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      "X-Chat-Fallback": "error",
+    },
+    stream: createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({
+          type: "text-start",
+          id: "error-text",
+        });
+        writer.write({
+          type: "text-delta",
+          id: "error-text",
+          delta: GENERIC_CHAT_ERROR_MESSAGE,
+        });
+        writer.write({
+          type: "text-end",
+          id: "error-text",
+        });
+      },
+    }),
+  });
+}
 
 /**
  * Resolve Firebase user from request Authorization header.
@@ -242,7 +273,9 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
             `initiatedBy=${validated.initiatedBy ?? "none"}`,
           );
 
-          const response = result.toUIMessageStreamResponse();
+          const response = result.toUIMessageStreamResponse({
+            onError: () => GENERIC_CHAT_ERROR_MESSAGE,
+          });
           return new Response(response.body, {
             status: response.status,
             statusText: response.statusText,
@@ -285,21 +318,7 @@ export const Route = createFileRoute("/api/chat/$agentSlug")({
             );
           }
 
-          return new Response(
-            JSON.stringify({
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Internal server error",
-            }),
-            {
-              status: 500,
-              headers: {
-                "Content-Type": "application/json",
-                ...corsHeaders,
-              },
-            },
-          );
+          return createGenericChatErrorResponse(corsHeaders);
         }
       },
     },
