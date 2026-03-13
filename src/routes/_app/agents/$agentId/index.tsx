@@ -2,6 +2,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
+import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -472,12 +473,27 @@ function AgentDetailPage() {
 
           {activeTab === "knowledge" && (
             <div className="bg-card border rounded-lg p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Knowledge Management</h2>
-                <KnowledgeUploadDialog
-                  agentId={agentId}
-                  trigger={<Button>Upload Knowledge Source</Button>}
-                />
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold">
+                    Knowledge Management
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Upload new sources or re-index everything attached to this
+                    agent.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <AgentBulkReindexButton
+                    agentId={agentId}
+                    agentName={agent.name}
+                    knowledgeSourceCount={knowledgeSources.length}
+                  />
+                  <KnowledgeUploadDialog
+                    agentId={agentId}
+                    trigger={<Button>Upload Knowledge Source</Button>}
+                  />
+                </div>
               </div>
               <div className="space-y-4">
                 {knowledgeSources.map((source) => (

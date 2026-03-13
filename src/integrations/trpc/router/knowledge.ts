@@ -5,12 +5,17 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   agent,
+  agentExperience,
   agentExperienceKnowledge,
   documentChunks,
   knowledgeSource,
 } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
-import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
+import {
+  adminProcedure,
+  createTRPCRouter,
+  protectedProcedure,
+} from "@/integrations/trpc/init";
 import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
 import { generateEmbedding } from "@/lib/ai/embedding";
 import {
@@ -18,6 +23,10 @@ import {
   deleteKnowledgeSource,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import {
+  checkVectorizeHealth,
+  inspectVectorizeExperienceFiltering,
+} from "@/lib/ai/vectorize-utils";
 
 function normalizeFileNameForDedup(fileName: string): string {
   return fileName.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
@@ -399,7 +408,7 @@ export const knowledgeRouter = createTRPCRouter({
       const results = await env.VECTORIZE.query(queryEmbedding, {
         topK: input.topK,
         namespace: input.agentId,
-        returnMetadata: true,
+        returnMetadata: "indexed",
       });
 
       // Fetch chunk text from D1 (Vectorize metadata no longer stores text)
@@ -641,6 +650,7 @@ export const knowledgeRouter = createTRPCRouter({
           totalChunks: 0,
           totalBytes: 0,
           staleCount: 0,
+          vectorize: await checkVectorizeHealth(),
           agents: [],
         };
       }
@@ -695,6 +705,7 @@ export const knowledgeRouter = createTRPCRouter({
           chunkCount: chunks,
           isStale,
           hasErrors,
+          parserErrors: source.parserErrors || [],
           daysSinceUpdate: Math.floor(
             (Date.now() - source.updatedAt.getTime()) / (24 * 60 * 60 * 1000),
           ),
@@ -718,6 +729,7 @@ export const knowledgeRouter = createTRPCRouter({
         totalChunks,
         totalBytes,
         staleCount,
+        vectorize: await checkVectorizeHealth(),
         agents: Array.from(agentMap.values()).filter(
           (a) => a.sources.length > 0,
         ),
@@ -925,6 +937,149 @@ export const knowledgeRouter = createTRPCRouter({
         failed: results.filter((r) => !r.success).length,
         results,
       };
+    }),
+
+  bulkReindexByAgent: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+        experienceId: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await requireAgent(input.agentId);
+
+      if (input.experienceId) {
+        const [experience] = await db
+          .select({ id: agentExperience.id, agentId: agentExperience.agentId })
+          .from(agentExperience)
+          .where(eq(agentExperience.id, input.experienceId))
+          .limit(1);
+
+        if (!experience || experience.agentId !== input.agentId) {
+          throw new Error("Experience not found for this agent");
+        }
+      }
+
+      const rows = input.experienceId
+        ? await db
+            .select({ id: knowledgeSource.id })
+            .from(agentExperienceKnowledge)
+            .innerJoin(
+              knowledgeSource,
+              eq(
+                agentExperienceKnowledge.knowledgeSourceId,
+                knowledgeSource.id,
+              ),
+            )
+            .where(
+              eq(agentExperienceKnowledge.experienceId, input.experienceId),
+            )
+        : await db
+            .select({ id: knowledgeSource.id })
+            .from(knowledgeSource)
+            .where(eq(knowledgeSource.agentId, input.agentId));
+
+      const sourceIds = [...new Set(rows.map((row) => row.id))];
+
+      if (sourceIds.length === 0) {
+        return {
+          total: 0,
+          successful: 0,
+          failed: 0,
+          results: [],
+        };
+      }
+
+      const { env } = await import("cloudflare:workers");
+      const sources = await db
+        .select({
+          id: knowledgeSource.id,
+          agentId: knowledgeSource.agentId,
+          fileName: knowledgeSource.fileName,
+          r2Key: knowledgeSource.r2Key,
+        })
+        .from(knowledgeSource)
+        .where(inArray(knowledgeSource.id, sourceIds));
+
+      const results: {
+        sourceId: string;
+        success: boolean;
+        error?: string;
+      }[] = [];
+
+      for (const source of sources) {
+        try {
+          if (!source.r2Key) {
+            results.push({
+              sourceId: source.id,
+              success: false,
+              error: "No R2 file found",
+            });
+            continue;
+          }
+
+          await db
+            .update(knowledgeSource)
+            .set({
+              status: "processing",
+              progress: 0,
+              parserErrors: [],
+              updatedAt: new Date(),
+            })
+            .where(eq(knowledgeSource.id, source.id));
+
+          await env.KNOWLEDGE_INDEX_QUEUE.send({
+            sourceId: source.id,
+            agentId: source.agentId,
+          });
+
+          await audit(
+            ctx,
+            "knowledge.reindex.queued",
+            { type: "knowledge_source", id: source.id },
+            {
+              fileName: source.fileName,
+              bulk: true,
+              agentScoped: true,
+              experienceId: input.experienceId,
+            },
+          );
+
+          results.push({ sourceId: source.id, success: true });
+        } catch (error) {
+          results.push({
+            sourceId: source.id,
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      return {
+        total: sourceIds.length,
+        successful: results.filter((r) => r.success).length,
+        failed: results.filter((r) => !r.success).length,
+        results,
+      };
+    }),
+
+  vectorizeDiagnostics: adminProcedure
+    .input(
+      z.object({
+        namespace: z.string(),
+        query: z.string(),
+        sourceId: z.string().optional(),
+        topK: z.number().min(1).max(25).default(5),
+      }),
+    )
+    .query(async ({ input }) => {
+      return inspectVectorizeExperienceFiltering({
+        namespace: input.namespace,
+        query: input.query,
+        sourceId: input.sourceId,
+        topK: input.topK,
+      });
     }),
 
   /**

@@ -75,6 +75,15 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
+  vectorSearchMode?:
+    | "unfiltered"
+    | "direct_filtered_query"
+    | "broad_namespace_query"
+    | "broad_query_plus_app_filter";
+  vectorFilterCapability?: "unknown" | "available" | "unavailable";
+  vectorFilterApplied?: boolean;
+  vectorFilterReason?: string;
+  vectorFallbackTopK?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
   chunks?: Array<{
@@ -102,7 +111,7 @@ function Messages({
       messagesContainerRef.current.scrollTop =
         messagesContainerRef.current.scrollHeight;
     }
-  }, [messages]);
+  });
 
   if (!messages.length) {
     return null;
@@ -137,11 +146,12 @@ function Messages({
                 )}
                 <div className="flex-1">
                   {parts.map((part, index) => {
+                    const partKey = `${id}-${part.type}-${index}`;
                     if (part.type === "text") {
                       return (
                         <div
                           className="flex-1 min-w-0 prose dark:prose-invert max-w-none prose-sm"
-                          key={index}
+                          key={partKey}
                         >
                           <ReactMarkdown
                             rehypePlugins={[
@@ -159,7 +169,10 @@ function Messages({
                     if ((part as any).type === "image") {
                       const image = (part as any).image;
                       return (
-                        <div key={index} className="mb-4">
+                        <div
+                          key={`${partKey}-${image.url || image.fileName || "image"}`}
+                          className="mb-4"
+                        >
                           <img
                             src={image.url}
                             alt={
@@ -181,7 +194,7 @@ function Messages({
                       const output = part.output as { matches?: any[] };
                       const state = (part as any).state;
                       return (
-                        <div key={index} className="mb-4">
+                        <div key={partKey} className="mb-4">
                           <div className="bg-muted/50 rounded-lg p-3 mb-2">
                             <div className="text-xs text-muted-foreground mb-1">
                               Tool Call: getInformation {state && `(${state})`}
@@ -199,7 +212,10 @@ function Messages({
                                 <div className="space-y-2">
                                   {output.matches.map(
                                     (match: any, matchIndex: number) => (
-                                      <div key={matchIndex} className="text-sm">
+                                      <div
+                                        key={`${partKey}-${match.id || matchIndex}`}
+                                        className="text-sm"
+                                      >
                                         <div className="font-medium text-xs text-muted-foreground">
                                           Match {matchIndex + 1} (Score:{" "}
                                           {match.score?.toFixed(3)})

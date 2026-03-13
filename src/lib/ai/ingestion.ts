@@ -1,12 +1,13 @@
 import { eq } from "drizzle-orm";
 import { ulid } from "ulidx";
+import { extractText, getDocumentProxy } from "unpdf";
 import { db } from "@/db";
 import {
   documentChunks,
   type InsertKnowledgeSource,
   knowledgeSource,
 } from "@/db/schema";
-import { DEFAULT_MODELS } from "@/lib/ai/constants";
+import { CHUNKING_CONFIG, DEFAULT_MODELS } from "@/lib/ai/constants";
 import { generateChunks, generateEmbeddings } from "@/lib/ai/embedding";
 
 /**
@@ -567,6 +568,139 @@ function decodeToText(
   return String(content);
 }
 
+function toUint8Array(
+  content: string | ArrayBuffer | Buffer | Uint8Array,
+): Uint8Array {
+  if (content instanceof ArrayBuffer) {
+    return new Uint8Array(content);
+  }
+
+  if (ArrayBuffer.isView(content)) {
+    return new Uint8Array(
+      content.buffer,
+      content.byteOffset,
+      content.byteLength,
+    );
+  }
+
+  return new TextEncoder().encode(content);
+}
+
+function normalizePdfPageText(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00ad/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function hasMeaningfulPdfText(text: string): boolean {
+  const normalized = text
+    .replace(/page\s+\d+/gi, "")
+    .replace(/\s+/g, "")
+    .trim();
+  const letters = normalized.match(/\p{L}/gu) ?? [];
+  return letters.length >= 10;
+}
+
+async function parsePdfDocument(
+  content: ArrayBuffer | Buffer | Uint8Array,
+  mimeType: string,
+): Promise<ParsedDocument> {
+  const pdf = await getDocumentProxy(toUint8Array(content));
+  const { totalPages, text } = await extractText(pdf);
+
+  const pageChunks: Array<{
+    text: string;
+    metadata: Record<string, unknown>;
+  }> = [];
+  const mergedPages: string[] = [];
+
+  text.forEach((pageText, index) => {
+    const normalizedPageText = normalizePdfPageText(pageText);
+    if (!hasMeaningfulPdfText(normalizedPageText)) {
+      return;
+    }
+
+    const pageNumber = index + 1;
+    pageChunks.push({
+      text: normalizedPageText,
+      metadata: {
+        pageNumber,
+      },
+    });
+    mergedPages.push(`### Page ${pageNumber}\n${normalizedPageText}`);
+  });
+
+  const mergedText = mergedPages.join("\n\n").trim();
+
+  if (!mergedText) {
+    throw new Error("PDF text extraction returned no meaningful text");
+  }
+
+  return {
+    content: mergedText,
+    metadata: {
+      mimeType,
+      type: "text",
+      originalLength: mergedText.length,
+      totalPages,
+      extractedPages: pageChunks.length,
+      extractionMethod: "unpdf",
+    },
+    chunks: pageChunks,
+  };
+}
+
+async function expandStructuredChunks(
+  chunks: NonNullable<ParsedDocument["chunks"]>,
+  options: {
+    chunkSize: number;
+    chunkOverlap: number;
+    minChunkSize: number;
+    contentType: "markdown" | "text";
+  },
+): Promise<string[]> {
+  const expanded: string[] = [];
+
+  for (const chunk of chunks) {
+    const baseText = chunk.text.trim();
+    if (!baseText) continue;
+
+    const pageNumber =
+      typeof chunk.metadata?.pageNumber === "number"
+        ? chunk.metadata.pageNumber
+        : undefined;
+    const prefix = pageNumber ? `### Page ${pageNumber}` : "";
+
+    if (baseText.length <= options.chunkSize) {
+      expanded.push(prefix ? `${prefix}\n${baseText}` : baseText);
+      continue;
+    }
+
+    const splitChunkSize = Math.max(
+      CHUNKING_CONFIG.MIN_CHUNK_SIZE,
+      options.chunkSize - prefix.length - (prefix ? 1 : 0),
+    );
+    const splitOverlap = Math.min(options.chunkOverlap, splitChunkSize - 1);
+    const splitChunks = await generateChunks(baseText, {
+      chunkSize: splitChunkSize,
+      chunkOverlap: splitOverlap,
+      minChunkSize: options.minChunkSize,
+      contentType: options.contentType,
+    });
+
+    expanded.push(
+      ...splitChunks.map((part) => (prefix ? `${prefix}\n${part}` : part)),
+    );
+  }
+
+  return expanded;
+}
+
 /**
  * Parse text content from uploaded file
  * Handles plain text, markdown, and various document formats using Cloudflare's toMarkdown service
@@ -577,6 +711,20 @@ export async function parseDocument(
   filename?: string,
 ): Promise<ParsedDocument> {
   const lowerFilename = filename?.toLowerCase();
+
+  if (
+    (mimeType === "application/pdf" || lowerFilename?.endsWith(".pdf")) &&
+    typeof content !== "string"
+  ) {
+    try {
+      return await parsePdfDocument(content, mimeType);
+    } catch (error) {
+      console.warn(
+        "[Ingestion] unpdf extraction failed for PDF, falling back to toMarkdown:",
+        error,
+      );
+    }
+  }
 
   // Handle CSV/TSV as plain text to preserve original encoding and row layout.
   // Sending delimited text through toMarkdown can corrupt non-Latin characters.
@@ -770,10 +918,17 @@ export async function processKnowledgeSource(
 
     const contentType =
       parsed.metadata.type === "markdown" ? "markdown" : "text";
-    const chunkSize = options?.chunkSize || 1024;
-    const chunkOverlap = 200;
-    const minChunkSize = 100;
-    const structuredChunks = parsed.chunks?.map((chunk) => chunk.text) || [];
+    const chunkSize = options?.chunkSize || CHUNKING_CONFIG.CHUNK_SIZE;
+    const chunkOverlap = CHUNKING_CONFIG.CHUNK_OVERLAP;
+    const minChunkSize = CHUNKING_CONFIG.MIN_CHUNK_SIZE;
+    const structuredChunks = parsed.chunks
+      ? await expandStructuredChunks(parsed.chunks, {
+          chunkSize,
+          chunkOverlap,
+          minChunkSize,
+          contentType,
+        })
+      : [];
     const hasStructuredChunks = structuredChunks.length > 0;
     const useStreamingChunker =
       !hasStructuredChunks &&
@@ -968,17 +1123,24 @@ export async function processKnowledgeSource(
     });
 
     // Update status to failed
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const normalizedErrorMessage = errorMessage.includes(
+      "maximum context length",
+    )
+      ? `${errorMessage} Try reindexing after reducing chunk size.`
+      : errorMessage;
+
     await db
       .update(knowledgeSource)
       .set({
         status: "failed",
-        parserErrors: [error instanceof Error ? error.message : String(error)],
+        parserErrors: [normalizedErrorMessage],
         updatedAt: new Date(),
       })
       .where(eq(knowledgeSource.id, sourceId));
 
     await streamResponse({
-      error: error instanceof Error ? error.message : String(error),
+      error: normalizedErrorMessage,
     });
 
     throw error;

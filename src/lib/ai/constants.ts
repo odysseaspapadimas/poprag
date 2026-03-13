@@ -39,6 +39,13 @@ export const EMBEDDING_CONFIG = {
    * with <0.5% accuracy loss on MTEB (62.3 -> ~62.0)
    */
   DIMENSIONS: 768,
+
+  /** Conservative approx to stay under text-embedding-3-small token limit */
+  MAX_INPUT_CHARS: 24000,
+} as const;
+
+export const VECTORIZE_CONFIG = {
+  INDEX_NAME: "rag",
 } as const;
 
 /**
@@ -78,6 +85,11 @@ export const RAG_CONFIG = {
 
   /** K parameter for reciprocal rank fusion */
   RRF_K: 60,
+
+  /** Broad-query overfetch used only for experience-scoped fallback retrieval */
+  EXPERIENCE_FILTER_FALLBACK_MULTIPLIER: 8,
+  EXPERIENCE_FILTER_FALLBACK_MIN_TOP_K: 24,
+  EXPERIENCE_FILTER_FALLBACK_MAX_TOP_K: 60,
 } as const;
 
 /**

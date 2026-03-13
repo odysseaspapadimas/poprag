@@ -28,6 +28,15 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
+  vectorSearchMode?:
+    | "unfiltered"
+    | "direct_filtered_query"
+    | "broad_namespace_query"
+    | "broad_query_plus_app_filter";
+  vectorFilterCapability?: "unknown" | "available" | "unavailable";
+  vectorFilterApplied?: boolean;
+  vectorFilterReason?: string;
+  vectorFallbackTopK?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
   chunks?: Array<{
@@ -370,6 +379,26 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             </div>
+            {(debugInfo.vectorSearchMode ||
+              debugInfo.vectorFilterCapability) && (
+              <div className="pl-6 space-y-1 text-xs text-muted-foreground">
+                {debugInfo.vectorSearchMode && (
+                  <div>Vector mode: {debugInfo.vectorSearchMode}</div>
+                )}
+                {debugInfo.vectorFilterCapability && (
+                  <div>
+                    Filter capability: {debugInfo.vectorFilterCapability}
+                    {debugInfo.vectorFilterApplied ? " (direct)" : ""}
+                  </div>
+                )}
+                {debugInfo.vectorFallbackTopK && (
+                  <div>Fallback topK: {debugInfo.vectorFallbackTopK}</div>
+                )}
+                {debugInfo.vectorFilterReason && (
+                  <div>Reason: {debugInfo.vectorFilterReason}</div>
+                )}
+              </div>
+            )}
             {debugInfo.rerankEnabled && (
               <div className="pl-6">
                 <div className="flex items-center gap-2">

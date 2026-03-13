@@ -41,6 +41,43 @@ interface ResolvedEmbeddingConfig {
   abortSignal?: AbortSignal;
 }
 
+type VectorFilterMode =
+  | "unfiltered"
+  | "direct_filtered_query"
+  | "broad_namespace_query"
+  | "broad_query_plus_app_filter";
+
+export interface VectorSearchDiagnostics {
+  filterRequested: boolean;
+  filterApplied: boolean;
+  filterCapability: "unknown" | "available" | "unavailable";
+  filterReason?: string;
+  retrievalMode: VectorFilterMode;
+  fallbackTopK?: number;
+  rawResultCount: number;
+  preThresholdMatchCount: number;
+}
+
+const sourceIdFilterSupportCache = new Map<string, boolean>();
+
+function getSourceIdFilterSupport(namespace: string): boolean {
+  return sourceIdFilterSupportCache.get(namespace) ?? true;
+}
+
+function setSourceIdFilterSupport(namespace: string, supported: boolean): void {
+  sourceIdFilterSupportCache.set(namespace, supported);
+}
+
+function toFilterCapabilityLabel(
+  supported: boolean,
+): VectorSearchDiagnostics["filterCapability"] {
+  return supported ? "available" : "unavailable";
+}
+
+export function getSourceIdFilterSupportSnapshot(): Record<string, boolean> {
+  return Object.fromEntries(sourceIdFilterSupportCache.entries());
+}
+
 async function resolveEmbeddingConfig(
   options?: EmbeddingRequestOptions,
 ): Promise<ResolvedEmbeddingConfig> {
@@ -146,39 +183,46 @@ export async function generateChunks(
     contentType = "text",
   } = options || {};
 
+  const safeChunkSize = Math.min(chunkSize, EMBEDDING_CONFIG.MAX_INPUT_CHARS);
+  const safeMaxChunkSize = Math.min(
+    maxChunkSize,
+    EMBEDDING_CONFIG.MAX_INPUT_CHARS,
+  );
+  const safeChunkOverlap = Math.min(chunkOverlap, safeChunkSize - 1);
+
   // Use LangChain's RecursiveCharacterTextSplitter for intelligent splitting
   const splitter =
     contentType === "markdown"
       ? new MarkdownTextSplitter({
-          chunkSize,
-          chunkOverlap,
+          chunkSize: safeChunkSize,
+          chunkOverlap: safeChunkOverlap,
         })
       : new RecursiveCharacterTextSplitter({
-          chunkSize,
-          chunkOverlap,
+          chunkSize: safeChunkSize,
+          chunkOverlap: safeChunkOverlap,
         });
 
   const chunks = await splitter.splitText(input);
 
   // Resplit oversized chunks instead of truncating mid-sentence
   const fallbackOverlap = Math.min(
-    chunkOverlap,
-    Math.floor(maxChunkSize * 0.2),
+    safeChunkOverlap,
+    Math.floor(safeMaxChunkSize * 0.2),
   );
   const fallbackSplitter = new RecursiveCharacterTextSplitter({
-    chunkSize: maxChunkSize,
+    chunkSize: safeMaxChunkSize,
     chunkOverlap: fallbackOverlap,
   });
 
   const normalizedChunks: string[] = [];
   for (const chunk of chunks) {
-    if (chunk.length <= maxChunkSize) {
+    if (chunk.length <= safeMaxChunkSize) {
       normalizedChunks.push(chunk);
       continue;
     }
 
     console.warn(
-      `Chunk exceeds max size (${chunk.length} > ${maxChunkSize}), resplitting`,
+      `Chunk exceeds max size (${chunk.length} > ${safeMaxChunkSize}), resplitting`,
     );
     const subChunks = await fallbackSplitter.splitText(chunk);
     normalizedChunks.push(...subChunks);
@@ -188,7 +232,9 @@ export async function generateChunks(
   const filteredChunks = normalizedChunks
     .filter((chunk) => chunk.length >= minChunkSize)
     .map((chunk) =>
-      chunk.length > maxChunkSize ? chunk.substring(0, maxChunkSize) : chunk,
+      chunk.length > safeMaxChunkSize
+        ? chunk.substring(0, safeMaxChunkSize)
+        : chunk,
     );
 
   console.log(
@@ -302,9 +348,14 @@ export async function findRelevantContentWithEmbedding(
   options?: {
     topK?: number;
     minSimilarity?: number;
+    knowledgeSourceIds?: string[];
   },
 ) {
-  const { topK = 6, minSimilarity = RAG_CONFIG.MIN_SIMILARITY } = options || {};
+  const {
+    topK = 6,
+    minSimilarity = RAG_CONFIG.MIN_SIMILARITY,
+    knowledgeSourceIds,
+  } = options || {};
 
   try {
     // Preprocess query - remove noise and normalize
@@ -312,7 +363,28 @@ export async function findRelevantContentWithEmbedding(
 
     if (!cleanedQuery) {
       console.warn("[RAG] Empty query provided");
-      return { matches: [], query };
+      return {
+        matches: [],
+        query,
+        diagnostics: {
+          filterRequested: Boolean(
+            options?.knowledgeSourceIds &&
+              options.knowledgeSourceIds.length > 0,
+          ),
+          filterApplied: false,
+          filterCapability: toFilterCapabilityLabel(
+            options?.knowledgeSourceIds && options.knowledgeSourceIds.length > 0
+              ? getSourceIdFilterSupport(agentId)
+              : true,
+          ),
+          retrievalMode:
+            options?.knowledgeSourceIds && options.knowledgeSourceIds.length > 0
+              ? "broad_namespace_query"
+              : "unfiltered",
+          rawResultCount: 0,
+          preThresholdMatchCount: 0,
+        } satisfies VectorSearchDiagnostics,
+      };
     }
 
     console.log(
@@ -325,6 +397,12 @@ export async function findRelevantContentWithEmbedding(
       `[RAG] Query params: topK=${topK}, minSimilarity=${minSimilarity}`,
     );
 
+    if (knowledgeSourceIds && knowledgeSourceIds.length > 0) {
+      console.log(
+        `[RAG] Restricting vector search to ${knowledgeSourceIds.length} knowledge source(s)`,
+      );
+    }
+
     console.log(
       `[RAG] Query embedding provided: ${queryEmbedding.length} dimensions`,
     );
@@ -335,18 +413,111 @@ export async function findRelevantContentWithEmbedding(
       throw new Error("VECTORIZE binding not available");
     }
 
-    const results = await env.VECTORIZE.query(queryEmbedding, {
-      namespace: agentId, // Agent-based isolation
-      topK,
-      returnValues: false, // We don't need the vectors back
-      returnMetadata: "all", // Get all metadata including text
-    });
+    const vectorizeFilter =
+      knowledgeSourceIds && knowledgeSourceIds.length > 0
+        ? knowledgeSourceIds.length === 1
+          ? { sourceId: knowledgeSourceIds[0] }
+          : { sourceId: { $in: knowledgeSourceIds } }
+        : undefined;
 
-    console.log(
-      `[RAG] Vectorize returned ${results.matches?.length || 0} raw results`,
+    const filterRequested = Boolean(
+      vectorizeFilter && knowledgeSourceIds && knowledgeSourceIds.length > 0,
+    );
+    let filterCapability = toFilterCapabilityLabel(
+      filterRequested ? getSourceIdFilterSupport(agentId) : true,
     );
 
-    if (!results.matches || results.matches.length === 0) {
+    const baseQueryOptions = {
+      namespace: agentId, // Agent-based isolation
+      returnValues: false, // We don't need the vectors back
+      returnMetadata: "indexed" as const,
+    };
+
+    let rawMatches: VectorizeMatch[] = [];
+    let retrievalMode: VectorFilterMode = vectorizeFilter
+      ? "broad_namespace_query"
+      : "unfiltered";
+    let filterApplied = false;
+    let filterReason: string | undefined;
+    let fallbackTopK: number | undefined;
+
+    if (vectorizeFilter && filterCapability === "available") {
+      const results = await env.VECTORIZE.query(queryEmbedding, {
+        ...baseQueryOptions,
+        topK,
+        filter: vectorizeFilter,
+      });
+      rawMatches = results.matches || [];
+      retrievalMode = "direct_filtered_query";
+      filterApplied = true;
+      setSourceIdFilterSupport(agentId, true);
+      filterCapability = "available";
+
+      if (rawMatches.length === 0) {
+        console.warn(
+          "[RAG] vector_filter_zero_results_fallback_used: filtered vector search returned 0 results; retrying with broad namespace query and app-side sourceId filtering.",
+        );
+        filterReason = "filtered_query_returned_zero_results";
+      } else {
+        console.log(
+          `[RAG] vector_filter_applied: ${rawMatches.length} raw result(s) returned with sourceId filter`,
+        );
+      }
+    } else if (vectorizeFilter) {
+      filterReason = "sourceId_filter_capability_unavailable";
+      console.log(
+        `[RAG] vector_filter_skipped_no_metadata_index: ${filterReason}; using broad namespace query and app-side sourceId filtering`,
+      );
+    }
+
+    if (
+      vectorizeFilter &&
+      knowledgeSourceIds &&
+      knowledgeSourceIds.length > 0 &&
+      (!filterApplied || rawMatches.length === 0)
+    ) {
+      fallbackTopK = Math.min(
+        Math.max(
+          topK * RAG_CONFIG.EXPERIENCE_FILTER_FALLBACK_MULTIPLIER,
+          RAG_CONFIG.EXPERIENCE_FILTER_FALLBACK_MIN_TOP_K,
+        ),
+        RAG_CONFIG.EXPERIENCE_FILTER_FALLBACK_MAX_TOP_K,
+      );
+      const fallbackResults = await env.VECTORIZE.query(queryEmbedding, {
+        ...baseQueryOptions,
+        topK: fallbackTopK,
+        returnMetadata: "indexed",
+      });
+      const allowedIds = new Set(knowledgeSourceIds);
+
+      rawMatches = (fallbackResults.matches || []).filter((match) => {
+        const sourceId = match.metadata?.sourceId as string | undefined;
+        return sourceId ? allowedIds.has(sourceId) : false;
+      });
+      retrievalMode = "broad_query_plus_app_filter";
+
+      if (filterApplied && rawMatches.length > 0) {
+        setSourceIdFilterSupport(agentId, false);
+        filterCapability = "unavailable";
+        filterReason = "sourceId_metadata_index_missing_or_not_backfilled";
+      }
+
+      console.log(
+        `[RAG] Broad namespace fallback returned ${fallbackResults.matches?.length || 0} raw result(s), ${rawMatches.length} after app-side sourceId filtering`,
+      );
+    }
+
+    if (!vectorizeFilter) {
+      const results = await env.VECTORIZE.query(queryEmbedding, {
+        ...baseQueryOptions,
+        topK,
+      });
+      rawMatches = results.matches || [];
+    }
+
+    console.log(`[RAG] Vectorize returned ${rawMatches.length} raw results`);
+
+    if (rawMatches.length === 0) {
       console.warn(
         `[RAG] No matches found - namespace may be empty or embeddings not indexed yet`,
       );
@@ -354,12 +525,22 @@ export async function findRelevantContentWithEmbedding(
       return {
         matches: [],
         query,
+        diagnostics: {
+          filterRequested,
+          filterApplied,
+          filterCapability,
+          filterReason,
+          retrievalMode,
+          fallbackTopK,
+          rawResultCount: 0,
+          preThresholdMatchCount: 0,
+        } satisfies VectorSearchDiagnostics,
       };
     }
 
     // Debug: Log first raw match for inspection
-    if (results.matches.length > 0) {
-      const firstMatch = results.matches[0];
+    if (rawMatches.length > 0) {
+      const firstMatch = rawMatches[0];
       console.log(`[RAG] First raw match sample:`, {
         id: firstMatch.id,
         score: firstMatch.score,
@@ -373,7 +554,7 @@ export async function findRelevantContentWithEmbedding(
     // Transform and filter results using adaptive thresholding
     // OpenAI embeddings produce lower absolute scores than BGE models,
     // so we use both absolute and relative thresholds
-    const topScore = results.matches[0]?.score || 0;
+    const topScore = rawMatches[0]?.score || 0;
     const relativeThreshold = topScore * RAG_CONFIG.RELATIVE_SCORE_THRESHOLD;
     const effectiveThreshold = Math.max(minSimilarity, relativeThreshold);
 
@@ -381,27 +562,23 @@ export async function findRelevantContentWithEmbedding(
       `[RAG] Adaptive threshold: absolute=${minSimilarity.toFixed(3)}, relative=${relativeThreshold.toFixed(3)} (top=${topScore.toFixed(3)} * ${RAG_CONFIG.RELATIVE_SCORE_THRESHOLD}), effective=${effectiveThreshold.toFixed(3)}`,
     );
 
-    const matches = results.matches
-      .filter((match) => {
-        // Validate metadata structure
-        if (!match.metadata) {
-          console.warn(`[RAG] Match ${match.id} has no metadata object`);
-          return false;
-        }
+    const thresholdedMatches = rawMatches.filter((match) => {
+      // Validate metadata structure
+      // Check similarity threshold (using effective adaptive threshold)
+      const meetsThreshold = match.score >= effectiveThreshold;
+      if (!meetsThreshold) {
+        console.debug(
+          `[RAG] Match ${match.id} score ${match.score.toFixed(
+            3,
+          )} below effective threshold ${effectiveThreshold.toFixed(3)}`,
+        );
+        return false;
+      }
 
-        // Check similarity threshold (using effective adaptive threshold)
-        const meetsThreshold = match.score >= effectiveThreshold;
-        if (!meetsThreshold) {
-          console.debug(
-            `[RAG] Match ${match.id} score ${match.score.toFixed(
-              3,
-            )} below effective threshold ${effectiveThreshold.toFixed(3)}`,
-          );
-          return false;
-        }
+      return true;
+    });
 
-        return true;
-      })
+    const matches = thresholdedMatches
       .map((match) => {
         // Normalize score to 0-1 range for display (based on top score)
         const normalizedScore = topScore > 0 ? match.score / topScore : 0;
@@ -431,11 +608,11 @@ export async function findRelevantContentWithEmbedding(
 
     if (matches.length === 0) {
       console.warn(
-        `[RAG] All ${results.matches.length} results filtered out. Top raw score was ${topScore.toFixed(3)}, effective threshold was ${effectiveThreshold.toFixed(3)}.`,
+        `[RAG] All ${rawMatches.length} results filtered out. Top raw score was ${topScore.toFixed(3)}, effective threshold was ${effectiveThreshold.toFixed(3)}.`,
       );
     } else {
       console.log(
-        `[RAG] Returning ${matches.length} matches after filtering from ${results.matches.length} raw results`,
+        `[RAG] Returning ${matches.length} matches after filtering from ${rawMatches.length} raw results`,
       );
       console.log(
         `[RAG] Raw score range: ${matches[0].vectorScore.toFixed(3)} to ${matches[
@@ -449,6 +626,16 @@ export async function findRelevantContentWithEmbedding(
     return {
       matches,
       query,
+      diagnostics: {
+        filterRequested,
+        filterApplied,
+        filterCapability,
+        filterReason,
+        retrievalMode,
+        fallbackTopK,
+        rawResultCount: rawMatches.length,
+        preThresholdMatchCount: thresholdedMatches.length,
+      } satisfies VectorSearchDiagnostics,
     };
   } catch (error) {
     console.error("[RAG] Critical error querying Vectorize:", error);
@@ -463,6 +650,23 @@ export async function findRelevantContentWithEmbedding(
       matches: [],
       query,
       error: error instanceof Error ? error.message : String(error),
+      diagnostics: {
+        filterRequested: Boolean(
+          options?.knowledgeSourceIds && options.knowledgeSourceIds.length > 0,
+        ),
+        filterApplied: false,
+        filterCapability: toFilterCapabilityLabel(
+          options?.knowledgeSourceIds && options.knowledgeSourceIds.length > 0
+            ? getSourceIdFilterSupport(agentId)
+            : true,
+        ),
+        retrievalMode:
+          options?.knowledgeSourceIds && options.knowledgeSourceIds.length > 0
+            ? "broad_namespace_query"
+            : "unfiltered",
+        rawResultCount: 0,
+        preThresholdMatchCount: 0,
+      } satisfies VectorSearchDiagnostics,
     };
   }
 }
@@ -482,6 +686,13 @@ export async function searchDocumentChunksFTS(
   const { limit = 5, knowledgeSourceIds } = options || {};
 
   try {
+    const normalizeKeyword = (term: string) =>
+      term
+        .normalize("NFD")
+        .replace(/\p{M}+/gu, "")
+        .replace(/ς/g, "σ")
+        .toLowerCase();
+
     // Sanitize and filter search terms, then combine into a single compound OR query
     // This reduces N D1 round trips to 1 for better FTS latency
     // NOTE: Use Unicode-aware regex (\p{L}) to preserve non-ASCII characters (Greek, Cyrillic, etc.)
@@ -539,7 +750,67 @@ export async function searchDocumentChunksFTS(
     }>;
 
     // Sort by rank (FTS5 rank is negative, lower = better match)
-    return results.sort((a, b) => b.rank - a.rank).slice(0, limit * 2); // Return more for fusion
+    const sortedResults = results
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, limit * 2);
+
+    if (sortedResults.length > 0) {
+      return sortedResults;
+    }
+
+    const normalizedTerms = sanitizedTerms
+      .map(normalizeKeyword)
+      .filter((term) => term.length >= 3);
+
+    if (normalizedTerms.length === 0) {
+      return [];
+    }
+
+    const normalizedText = sql`
+      replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(lower(document_chunks.text), 'ά', 'α'), 'έ', 'ε'), 'ή', 'η'), 'ί', 'ι'), 'ϊ', 'ι'), 'ΐ', 'ι'), 'ό', 'ο'), 'ύ', 'υ'), 'ϋ', 'υ'), 'ΰ', 'υ'), 'ώ', 'ω'), 'ς', 'σ')
+    `;
+    const sourceFilterForScan =
+      knowledgeSourceIds && knowledgeSourceIds.length > 0
+        ? sql`AND document_chunks.source_id IN (${sql.join(
+            knowledgeSourceIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})`
+        : sql``;
+    const matchClauses = normalizedTerms.map(
+      (term) => sql`${normalizedText} LIKE ${`%${term}%`}`,
+    );
+    const keywordHitClauses = normalizedTerms.map(
+      (term) =>
+        sql`CASE WHEN ${normalizedText} LIKE ${`%${term}%`} THEN 1 ELSE 0 END`,
+    );
+
+    const scanQuery = sql`
+      SELECT
+        document_chunks.id,
+        document_chunks.text,
+        (${sql.join(keywordHitClauses, sql` + `)}) * 1.0 AS rank
+      FROM document_chunks
+      WHERE document_chunks.agent_id = ${agentId}
+        ${sourceFilterForScan}
+        AND (${sql.join(matchClauses, sql` OR `)})
+      ORDER BY rank DESC, length(document_chunks.text) ASC
+      LIMIT ${limit * 2}
+    `;
+
+    const scanResult = await db.run(scanQuery);
+    const scanMatches = (scanResult.results || []) as Array<{
+      id: string;
+      text: string;
+      rank: number;
+    }>;
+
+    if (scanMatches.length > 0) {
+      console.log(
+        `[FTS] No FTS matches. Text-scan fallback returned ${scanMatches.length} result(s) for agent ${agentId}`,
+      );
+    }
+
+    return scanMatches;
   } catch (error) {
     console.error("[FTS] Error searching document chunks:", error);
     console.warn(
@@ -562,6 +833,7 @@ export async function findRelevantContent(
   options?: {
     topK?: number;
     minSimilarity?: number;
+    knowledgeSourceIds?: string[];
   },
 ) {
   const cleanedQuery = userQuery.trim();

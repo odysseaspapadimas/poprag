@@ -13,6 +13,7 @@ import {
   Database,
   FileText,
   HardDrive,
+  Info,
   Loader2,
   RefreshCw,
 } from "lucide-react";
@@ -148,6 +149,22 @@ function KnowledgeHealthPage() {
       },
     }),
   );
+
+  const vectorizeStatus = healthData.vectorize;
+  const vectorizeIndexName =
+    vectorizeStatus?.status === "healthy" ? vectorizeStatus.indexName : "rag";
+  const metadataFilteringReady =
+    vectorizeStatus?.status === "healthy"
+      ? vectorizeStatus.sourceIdMetadataIndexConfigured
+      : null;
+  const vectorizeFilterCapability =
+    vectorizeStatus?.status === "healthy"
+      ? vectorizeStatus.sourceIdFilterCapability
+      : "unknown";
+  const processedMutation =
+    vectorizeStatus?.status === "healthy"
+      ? vectorizeStatus.processedUpToMutation
+      : null;
 
   const toggleSource = (sourceId: string) => {
     const newSelected = new Set(selectedSources);
@@ -339,6 +356,19 @@ function KnowledgeHealthPage() {
         </div>
       )}
 
+      {metadataFilteringReady === false && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>Vectorize Metadata Filtering Not Ready</AlertTitle>
+          <AlertDescription>
+            Experience-scoped retrieval is currently using broad namespace
+            fallback because the `sourceId` metadata index is not marked ready.
+            Create the metadata index, then reindex affected sources to enable
+            direct Vectorize filtering.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Bulk Actions */}
       {selectedSources.size > 0 && (
         <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
@@ -364,6 +394,43 @@ function KnowledgeHealthPage() {
           </Button>
         </div>
       )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Vectorize</CardTitle>
+          <CardDescription>
+            Current index health and metadata-filter readiness
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-xs text-muted-foreground">Index</div>
+            <div className="mt-1 font-medium">{vectorizeIndexName}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-xs text-muted-foreground">Metadata Index</div>
+            <div className="mt-1 font-medium">
+              {metadataFilteringReady === null
+                ? "Unknown"
+                : metadataFilteringReady
+                  ? "Configured"
+                  : "Missing / disabled"}
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-xs text-muted-foreground">
+              Filter Capability
+            </div>
+            <div className="mt-1 font-medium">{vectorizeFilterCapability}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-xs text-muted-foreground">
+              Processed Mutation
+            </div>
+            <div className="mt-1 font-medium">{processedMutation ?? "-"}</div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Sources by Agent */}
       {healthData.agents.length === 0 ? (
@@ -511,6 +578,11 @@ function KnowledgeHealthPage() {
                               </Badge>
                             )}
                           </div>
+                          {source.hasErrors && source.parserErrors?.[0] && (
+                            <p className="mt-1 max-w-md truncate text-xs text-red-600 dark:text-red-400">
+                              {source.parserErrors[0]}
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Button

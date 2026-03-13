@@ -19,6 +19,7 @@ import {
   generateEmbeddings,
   rerank,
   searchDocumentChunksFTS,
+  type VectorSearchDiagnostics,
 } from "./embedding";
 import { resolveAndCreateModel } from "./helpers";
 
@@ -66,6 +67,15 @@ export interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
+  vectorSearchMode?:
+    | "unfiltered"
+    | "direct_filtered_query"
+    | "broad_namespace_query"
+    | "broad_query_plus_app_filter";
+  vectorFilterCapability?: "unknown" | "available" | "unavailable";
+  vectorFilterApplied?: boolean;
+  vectorFilterReason?: string;
+  vectorFallbackTopK?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
   chunks?: Array<{
@@ -396,6 +406,13 @@ function extractBasicKeywords(
   query: string,
   maxKeywords: number = 10,
 ): string[] {
+  const normalizeKeyword = (token: string) =>
+    token
+      .normalize("NFD")
+      .replace(/\p{M}+/gu, "")
+      .replace(/ς/g, "σ")
+      .toLowerCase();
+
   // Split on whitespace + common punctuation, keep Unicode word chars
   const tokens = query
     .split(/[\s,;:!?()[\]{}"«»\-–—]+/)
@@ -406,9 +423,9 @@ function extractBasicKeywords(
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const token of tokens) {
-    const lower = token.toLowerCase();
-    if (!seen.has(lower)) {
-      seen.add(lower);
+    const normalized = normalizeKeyword(token);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
       unique.push(token);
     }
   }
@@ -451,6 +468,7 @@ export async function hybridSearch(
   results: HybridSearchResult[];
   vectorCount: number;
   ftsCount: number;
+  vectorDiagnostics?: VectorSearchDiagnostics;
   timing: {
     vectorSearchMs: number;
     ftsSearchMs: number;
@@ -462,6 +480,7 @@ export async function hybridSearch(
       results: [],
       vectorCount: 0,
       ftsCount: 0,
+      vectorDiagnostics: undefined,
       timing: {
         vectorSearchMs: 0,
         ftsSearchMs: 0,
@@ -483,6 +502,7 @@ export async function hybridSearch(
       {
         topK: topKPerQuery,
         minSimilarity: minSimilarity / 100, // Convert percentage to 0-1
+        knowledgeSourceIds: experienceKnowledgeIds,
       },
     ),
   );
@@ -490,19 +510,9 @@ export async function hybridSearch(
   const vectorResults = await Promise.all(vectorSearchPromises);
   const vectorSearchMs = Date.now() - vectorSearchStart;
 
-  // Post-filter vector results by experience knowledge source IDs
-  // Vector search returns results with metadata.sourceId, which maps to knowledgeSource.id
   if (experienceKnowledgeIds && experienceKnowledgeIds.length > 0) {
-    const allowedIds = new Set(experienceKnowledgeIds);
-    for (const result of vectorResults) {
-      result.matches = result.matches.filter((match) => {
-        const sourceId = (match.metadata as Record<string, unknown>)
-          ?.sourceId as string | undefined;
-        return sourceId && allowedIds.has(sourceId);
-      });
-    }
     console.log(
-      `[Hybrid Search] Filtered vector results to experience knowledge sources (${experienceKnowledgeIds.length} allowed)`,
+      `[Hybrid Search] Scoped vector search to experience knowledge sources (${experienceKnowledgeIds.length} allowed)`,
     );
   }
 
@@ -510,10 +520,20 @@ export async function hybridSearch(
     (sum, r) => sum + r.matches.length,
     0,
   );
+  const vectorDiagnostics = vectorResults[0]?.diagnostics;
 
   console.log(
     `[Hybrid Search] Vector search: ${totalVectorResults} results (${topKPerQuery} per query) in ${vectorSearchMs}ms`,
   );
+
+  if (vectorDiagnostics) {
+    console.log(
+      `[Hybrid Search] Vector retrieval mode: ${vectorDiagnostics.retrievalMode}` +
+        (vectorDiagnostics.filterRequested
+          ? ` (filter capability: ${vectorDiagnostics.filterCapability})`
+          : ""),
+    );
+  }
 
   // Step 2: Always run FTS when keywords are available
   // FTS adds ~5-15ms latency but improves recall by surfacing exact keyword matches
@@ -549,7 +569,7 @@ export async function hybridSearch(
   const ftsMatches = ftsResults.map((r) => ({
     id: r.id,
     content: r.text,
-    score: -r.rank, // FTS rank is negative, convert to positive score
+    score: r.rank,
     vectorScore: undefined, // FTS results don't have vector scores
     metadata: {},
   }));
@@ -568,6 +588,7 @@ export async function hybridSearch(
     results: fusedResults.slice(0, topK * 2),
     vectorCount: totalVectorResults,
     ftsCount: ftsResults.length,
+    vectorDiagnostics,
     timing: {
       vectorSearchMs,
       ftsSearchMs,
@@ -816,6 +837,18 @@ export async function performRAGRetrieval(
 
   debugInfo.vectorResultsCount = searchResult.vectorCount;
   debugInfo.ftsResultsCount = searchResult.ftsCount;
+  debugInfo.vectorSearchMode = searchResult.vectorDiagnostics?.retrievalMode;
+  debugInfo.vectorFilterCapability =
+    searchResult.vectorDiagnostics?.filterCapability;
+  debugInfo.vectorFilterApplied = searchResult.vectorDiagnostics?.filterApplied;
+  debugInfo.vectorFilterReason = searchResult.vectorDiagnostics?.filterReason;
+  debugInfo.vectorFallbackTopK = searchResult.vectorDiagnostics?.fallbackTopK;
+
+  if (searchResult.vectorDiagnostics) {
+    console.log(
+      `[RAG Pipeline] Final vector candidates came from ${searchResult.vectorDiagnostics.retrievalMode}`,
+    );
+  }
 
   // Step 4: Enrich with full text from D1 BEFORE reranking
   // Vector results have empty content (Vectorize metadata no longer stores text)

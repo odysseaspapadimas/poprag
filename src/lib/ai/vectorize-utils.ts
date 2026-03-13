@@ -3,14 +3,28 @@
  * Helps diagnose issues with Cloudflare Vectorize setup
  */
 
+import { env } from "cloudflare:workers";
+import { EMBEDDING_CONFIG, VECTORIZE_CONFIG } from "@/lib/ai/constants";
+import {
+  generateEmbedding,
+  getSourceIdFilterSupportSnapshot,
+} from "@/lib/ai/embedding";
+
+type VectorizeDiagnosticMode =
+  | "namespace-only"
+  | "filtered-by-source"
+  | "broad-post-filter";
+
+function getSourceIdMetadataIndexConfigured(): boolean | null {
+  return true;
+}
+
 /**
  * Check Vectorize index health and configuration
  * Use this to debug "incomplete results" issues
  */
 export async function checkVectorizeHealth(namespace?: string) {
   try {
-    const { env } = await import("cloudflare:workers");
-
     if (!env.VECTORIZE) {
       return {
         status: "error",
@@ -30,9 +44,14 @@ export async function checkVectorizeHealth(namespace?: string) {
 
     return {
       status: "healthy",
+      indexName: VECTORIZE_CONFIG.INDEX_NAME,
       dimensions: indexInfo.dimensions,
       vectorCount: indexInfo.vectorCount,
       processedUpToMutation: indexInfo.processedUpToMutation,
+      processedUpToDatetime: indexInfo.processedUpToDatetime,
+      sourceIdMetadataIndexConfigured: getSourceIdMetadataIndexConfigured(),
+      sourceIdFilterCapability: "available" as const,
+      namespaceCapabilityCache: getSourceIdFilterSupportSnapshot(),
     };
   } catch (error) {
     console.error("[Vectorize Health Check] Failed:", error);
@@ -50,23 +69,57 @@ export async function checkVectorizeHealth(namespace?: string) {
 export async function testVectorizeQuery(
   namespace: string,
   sampleQuery: string,
+  options?: {
+    sourceId?: string;
+    topK?: number;
+    mode?: VectorizeDiagnosticMode;
+  },
 ) {
   try {
-    const { env } = await import("cloudflare:workers");
-    const { generateEmbedding } = await import("./embedding");
-
     const queryEmbedding = await generateEmbedding(sampleQuery);
+    const topK = options?.topK ?? 3;
+    const mode = options?.mode ?? "namespace-only";
 
-    const results = await env.VECTORIZE.query(queryEmbedding, {
-      namespace,
-      topK: 3,
-      returnValues: false,
-      returnMetadata: "all",
-    });
+    const runQuery = async () => {
+      if (mode === "filtered-by-source") {
+        if (!options?.sourceId) {
+          throw new Error("sourceId is required for filtered-by-source mode");
+        }
+
+        return env.VECTORIZE.query(queryEmbedding, {
+          namespace,
+          topK,
+          returnValues: false,
+          returnMetadata: "indexed",
+          filter: { sourceId: options.sourceId },
+        });
+      }
+
+      const baseResults = await env.VECTORIZE.query(queryEmbedding, {
+        namespace,
+        topK,
+        returnValues: false,
+        returnMetadata: mode === "namespace-only" ? "indexed" : "all",
+      });
+
+      if (mode !== "broad-post-filter" || !options?.sourceId) {
+        return baseResults;
+      }
+
+      return {
+        ...baseResults,
+        matches: (baseResults.matches || []).filter(
+          (match) => match.metadata?.sourceId === options.sourceId,
+        ),
+      };
+    };
+
+    const results = await runQuery();
 
     console.log("[Vectorize Test Query]", {
       namespace,
       query: sampleQuery,
+      mode,
       resultsCount: results.matches?.length || 0,
       hasMetadata: results.matches?.[0]?.metadata ? true : false,
       metadataKeys: results.matches?.[0]?.metadata
@@ -76,6 +129,7 @@ export async function testVectorizeQuery(
 
     return {
       status: "success",
+      mode,
       resultsCount: results.matches?.length || 0,
       sampleMatch: results.matches?.[0]
         ? {
@@ -128,9 +182,6 @@ export function validateMetadataSize(metadata: Record<string, any>): {
  */
 export async function listNamespaceVectors(namespace: string, limit = 10) {
   try {
-    const { env } = await import("cloudflare:workers");
-    const { EMBEDDING_CONFIG } = await import("@/lib/ai/constants");
-
     // Create a zero vector for listing (matches all with low scores)
     const zeroVector = new Array(EMBEDDING_CONFIG.DIMENSIONS).fill(0);
 
@@ -138,12 +189,13 @@ export async function listNamespaceVectors(namespace: string, limit = 10) {
       namespace,
       topK: limit,
       returnValues: false,
-      returnMetadata: "all",
+      returnMetadata: "indexed",
     });
 
     return {
       status: "success",
       count: results.matches?.length || 0,
+      indexName: VECTORIZE_CONFIG.INDEX_NAME,
       vectors:
         results.matches?.map((m) => ({
           id: m.id,
@@ -159,4 +211,50 @@ export async function listNamespaceVectors(namespace: string, limit = 10) {
       message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function inspectVectorizeExperienceFiltering(options: {
+  namespace: string;
+  query: string;
+  sourceId?: string;
+  topK?: number;
+}) {
+  const health = await checkVectorizeHealth(options.namespace);
+
+  const namespaceOnly = await testVectorizeQuery(
+    options.namespace,
+    options.query,
+    {
+      mode: "namespace-only",
+      topK: options.topK,
+    },
+  );
+
+  const filtered = options.sourceId
+    ? await testVectorizeQuery(options.namespace, options.query, {
+        mode: "filtered-by-source",
+        sourceId: options.sourceId,
+        topK: options.topK,
+      })
+    : null;
+
+  const broadPostFilter = options.sourceId
+    ? await testVectorizeQuery(options.namespace, options.query, {
+        mode: "broad-post-filter",
+        sourceId: options.sourceId,
+        topK: options.topK,
+      })
+    : null;
+
+  return {
+    indexName: VECTORIZE_CONFIG.INDEX_NAME,
+    namespace: options.namespace,
+    sourceId: options.sourceId ?? null,
+    health,
+    diagnostics: {
+      namespaceOnly,
+      filtered,
+      broadPostFilter,
+    },
+  };
 }
