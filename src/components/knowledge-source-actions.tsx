@@ -45,13 +45,15 @@ export function KnowledgeSourceActions({
         // Show persistent toast during re-indexing
         toast.loading(`Queueing re-index for ${source.fileName}...`, {
           id: `reindex-${source.id}`,
-          description: "This may take a moment.",
+          description:
+            "Progress will appear live in the list once the worker starts.",
         });
       },
       onSuccess: () => {
         toast.success(`Re-index queued for ${source.fileName}`, {
           id: `reindex-${source.id}`,
-          description: "Processing continues in the background.",
+          description:
+            "Watch the source row for progress, retries, and any failure details.",
         });
         queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),

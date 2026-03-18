@@ -8,17 +8,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertCircle,
   AlertTriangle,
-  CheckCircle2,
-  Clock,
   Database,
-  FileText,
   HardDrive,
   Info,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { KnowledgeSourceProgress } from "@/components/knowledge-source-progress";
 import { KnowledgeSourceViewer } from "@/components/knowledge-source-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -67,45 +64,6 @@ function formatBytes(bytes: number): string {
   return `${Number.parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, { color: string; icon: React.ReactNode }> = {
-    indexed: {
-      color:
-        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-      icon: <CheckCircle2 className="h-3 w-3" />,
-    },
-    parsed: {
-      color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-      icon: <FileText className="h-3 w-3" />,
-    },
-    uploaded: {
-      color:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-      icon: <Clock className="h-3 w-3" />,
-    },
-    processing: {
-      color:
-        "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-      icon: <Loader2 className="h-3 w-3 animate-spin" />,
-    },
-    failed: {
-      color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-      icon: <AlertCircle className="h-3 w-3" />,
-    },
-  };
-
-  const variant = variants[status] || variants.uploaded;
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${variant.color}`}
-    >
-      {variant.icon}
-      {status}
-    </span>
-  );
-}
-
 function KnowledgeHealthPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -119,9 +77,18 @@ function KnowledgeHealthPage() {
   } | null>(null);
   const [detailSourceId, setDetailSourceId] = useState<string | null>(null);
 
-  const { data: healthData } = useSuspenseQuery(
-    trpc.knowledge.healthOverview.queryOptions({}),
-  );
+  const { data: healthData } = useSuspenseQuery({
+    ...trpc.knowledge.healthOverview.queryOptions({}),
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const hasProcessingSources = data?.agents.some((agent) =>
+        agent.sources.some((source) => source.status === "processing"),
+      );
+      return hasProcessingSources ? 1500 : false;
+    },
+    refetchIntervalInBackground: true,
+  });
 
   const { data: detailData, isLoading: isLoadingDetail } = useQuery(
     trpc.knowledge.healthDetail.queryOptions(
@@ -542,7 +509,7 @@ function KnowledgeHealthPage() {
                           </p>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={source.status} />
+                          <KnowledgeSourceProgress source={source} compact />
                         </TableCell>
                         <TableCell>{source.chunkCount}</TableCell>
                         <TableCell>{formatBytes(source.bytes || 0)}</TableCell>
@@ -564,6 +531,14 @@ function KnowledgeHealthPage() {
                                 Failed
                               </Badge>
                             )}
+                            {source.status === "processing" && (
+                              <Badge
+                                variant="outline"
+                                className="text-xs text-amber-700 dark:text-amber-300"
+                              >
+                                In Progress
+                              </Badge>
+                            )}
                             {source.isStale && (
                               <Badge
                                 variant="outline"
@@ -578,6 +553,12 @@ function KnowledgeHealthPage() {
                               </Badge>
                             )}
                           </div>
+                          {source.status === "processing" &&
+                            source.progressMessage && (
+                              <p className="mt-1 max-w-md truncate text-xs text-muted-foreground">
+                                {source.progressMessage}
+                              </p>
+                            )}
                           {source.hasErrors && source.parserErrors?.[0] && (
                             <p className="mt-1 max-w-md truncate text-xs text-red-600 dark:text-red-400">
                               {source.parserErrors[0]}
@@ -633,7 +614,7 @@ function KnowledgeHealthPage() {
                   <p className="text-sm font-medium text-muted-foreground">
                     Status
                   </p>
-                  <StatusBadge status={detailData.source.status} />
+                  <KnowledgeSourceProgress source={detailData.source} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">

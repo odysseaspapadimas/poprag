@@ -1,6 +1,6 @@
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
 import AgentMetrics from "@/components/agent-metrics";
@@ -8,6 +8,7 @@ import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
 import { ExperienceList } from "@/components/experiences/ExperienceList";
 import { KnowledgeSourceActions } from "@/components/knowledge-source-actions";
+import { KnowledgeSourceProgress } from "@/components/knowledge-source-progress";
 import { KnowledgeSourceViewer } from "@/components/knowledge-source-viewer";
 import { KnowledgeUploadDialog } from "@/components/knowledge-upload-dialog";
 import { ModelPolicyEditor } from "@/components/model-policy-editor";
@@ -93,9 +94,17 @@ function AgentDetailPage() {
     trpc.agent.get.queryOptions({ id: agentId }),
   );
 
-  const { data: knowledgeSources } = useSuspenseQuery(
-    trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
-  );
+  const { data: knowledgeSources } = useSuspenseQuery({
+    ...trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const sources = query.state.data;
+      return sources?.some((source) => source.status === "processing")
+        ? 1500
+        : false;
+    },
+    refetchIntervalInBackground: true,
+  });
 
   const { data: indexPin } = useSuspenseQuery(
     trpc.agent.getIndexPin.queryOptions({ agentId }),
@@ -111,6 +120,10 @@ function AgentDetailPage() {
 
   const { data: setupStatus } = useSuspenseQuery(
     trpc.agent.getSetupStatus.queryOptions({ agentId }),
+  );
+
+  const processingKnowledgeSources = knowledgeSources.filter(
+    (source) => source.status === "processing",
   );
 
   if (!agent) {
@@ -367,14 +380,25 @@ function AgentDetailPage() {
                 <h2 className="text-xl font-semibold mb-4">
                   Knowledge Sources ({knowledgeSources.length})
                 </h2>
+                {processingKnowledgeSources.length > 0 && (
+                  <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Indexing in progress</AlertTitle>
+                    <AlertDescription>
+                      {processingKnowledgeSources.length} source
+                      {processingKnowledgeSources.length === 1 ? "" : "s"} are
+                      updating. Progress refreshes automatically.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {knowledgeSources.length > 0 ? (
                   <div className="space-y-2">
                     {knowledgeSources.slice(0, 5).map((source) => (
                       <div
                         key={source.id}
-                        className="flex justify-between items-center p-3 bg-muted rounded"
+                        className="flex flex-col gap-3 rounded bg-muted p-3 sm:flex-row sm:items-start sm:justify-between"
                       >
-                        <div>
+                        <div className="min-w-0">
                           <button
                             type="button"
                             onClick={() =>
@@ -393,21 +417,11 @@ function AgentDetailPage() {
                             {((source.bytes ?? 0) / 1024).toFixed(2)} KB
                           </p>
                         </div>
-                        <span
-                          className={`px-2 py-1 rounded text-xs ${
-                            source.status === "indexed"
-                              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                              : source.status === "parsed"
-                                ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                                : source.status === "failed"
-                                  ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                  : source.status === "processing"
-                                    ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                                    : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
-                          }`}
-                        >
-                          {source.status}
-                        </span>
+                        <KnowledgeSourceProgress
+                          source={source}
+                          compact
+                          className="sm:w-72"
+                        />
                       </div>
                     ))}
                     {knowledgeSources.length > 5 && (
@@ -499,9 +513,9 @@ function AgentDetailPage() {
                 {knowledgeSources.map((source) => (
                   <div
                     key={source.id}
-                    className="flex justify-between items-center p-4 border rounded"
+                    className="flex flex-col gap-3 rounded border p-4 sm:flex-row sm:items-start sm:justify-between"
                   >
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <button
                         type="button"
                         onClick={() =>
@@ -520,23 +534,13 @@ function AgentDetailPage() {
                         {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
                         {formatDate(source.createdAt)}
                       </p>
+                      <KnowledgeSourceProgress
+                        source={source}
+                        compact
+                        className="mt-2 max-w-xl"
+                      />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          source.status === "indexed"
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                            : source.status === "parsed"
-                              ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                              : source.status === "failed"
-                                ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                : source.status === "processing"
-                                  ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                                  : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
-                        }`}
-                      >
-                        {source.status}
-                      </span>
+                    <div className="flex items-center gap-2 self-end sm:self-start">
                       <KnowledgeSourceActions
                         source={source}
                         agentId={agentId}

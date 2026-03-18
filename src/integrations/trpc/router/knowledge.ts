@@ -54,7 +54,7 @@ export const knowledgeRouter = createTRPCRouter({
           ),
       }),
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input }) => {
       // Verify agent exists
       await requireAgent(input.agentId);
 
@@ -198,6 +198,10 @@ export const knowledgeRouter = createTRPCRouter({
         .update(knowledgeSource)
         .set({
           status: "uploaded",
+          progress: 0,
+          progressMessage: null,
+          retryCount: 0,
+          parserErrors: [],
           checksum: input.checksum,
           updatedAt: new Date(),
         })
@@ -242,6 +246,7 @@ export const knowledgeRouter = createTRPCRouter({
         .update(knowledgeSource)
         .set({
           status: "failed",
+          progressMessage: input.error ?? "Upload failed",
           parserErrors: input.error ? [input.error] : [],
           updatedAt: new Date(),
         })
@@ -336,6 +341,8 @@ export const knowledgeRouter = createTRPCRouter({
         .set({
           status: "processing",
           progress: 0,
+          progressMessage: "Queued for background indexing",
+          retryCount: 0,
           parserErrors: [],
           updatedAt: new Date(),
         })
@@ -382,6 +389,8 @@ export const knowledgeRouter = createTRPCRouter({
         throw new Error("Source not found");
       }
 
+      await requireAgent(source.agentId);
+
       return source;
     }),
 
@@ -396,9 +405,9 @@ export const knowledgeRouter = createTRPCRouter({
         topK: z.number().default(5),
       }),
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input }) => {
       // Verify agent exists
-      const agentData = await requireAgent(input.agentId);
+      await requireAgent(input.agentId);
 
       // Generate embedding for the query
       const queryEmbedding = await generateEmbedding(input.query);
@@ -445,7 +454,7 @@ export const knowledgeRouter = createTRPCRouter({
           .optional(),
       }),
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
       // Verify agent exists
       await requireAgent(input.agentId);
 
@@ -494,6 +503,8 @@ export const knowledgeRouter = createTRPCRouter({
         .set({
           status: "processing",
           progress: 0,
+          progressMessage: "Queued for background re-indexing",
+          retryCount: 0,
           parserErrors: [],
           updatedAt: new Date(),
         })
@@ -560,7 +571,7 @@ export const knowledgeRouter = createTRPCRouter({
    */
   getDownloadUrl: protectedProcedure
     .input(z.object({ sourceId: z.string() }))
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
       const [source] = await db
         .select()
         .from(knowledgeSource)
@@ -904,6 +915,8 @@ export const knowledgeRouter = createTRPCRouter({
             .set({
               status: "processing",
               progress: 0,
+              progressMessage: "Queued for background re-indexing",
+              retryCount: 0,
               parserErrors: [],
               updatedAt: new Date(),
             })
@@ -1024,6 +1037,8 @@ export const knowledgeRouter = createTRPCRouter({
             .set({
               status: "processing",
               progress: 0,
+              progressMessage: "Queued for background re-indexing",
+              retryCount: 0,
               parserErrors: [],
               updatedAt: new Date(),
             })

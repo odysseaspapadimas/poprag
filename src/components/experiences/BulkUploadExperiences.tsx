@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useTRPC } from "@/integrations/trpc/react";
 import { MAX_KNOWLEDGE_FILE_SIZE } from "@/lib/ai/constants";
+import { generateUnicodeSlug } from "@/lib/slug";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,25 +89,8 @@ function filenameToName(filename: string): string {
     .join(" ");
 }
 
-/**
- * Convert a filename to a URL-safe slug.
- * Preserves Greek and all other Unicode letters/numbers using \p{L} / \p{N}.
- *
- * Examples:
- *   "Η Ιλιάδα.pdf"           → "η-ιλιάδα"
- *   "The Great Gatsby.pdf"   → "the-great-gatsby"
- *   "01_αδελφοί_καραμάζοφ.pdf" → "01-αδελφοί-καραμάζοφ"
- */
 function filenameToSlug(filename: string): string {
-  const slug = filename
-    .replace(/\.[^/.]+$/, "") // strip extension
-    .toLowerCase()
-    .replace(/[\s_]+/g, "-") // spaces / underscores → hyphens
-    .replace(/[^\p{L}\p{N}-]/gu, "") // keep letters, digits, hyphens (Unicode-aware)
-    .replace(/-+/g, "-") // collapse multiple hyphens
-    .replace(/^-|-$/g, ""); // trim leading/trailing hyphens
-
-  return slug || "experience"; // fallback if nothing remains
+  return generateUnicodeSlug(filename.replace(/\.[^/.]+$/, ""));
 }
 
 const STATUS_LABELS: Record<FileStatus, string> = {

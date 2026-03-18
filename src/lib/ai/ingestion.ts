@@ -27,6 +27,160 @@ const EMBEDDING_BATCH_SIZE = 20;
 const LARGE_DOCUMENT_STREAMING_THRESHOLD_CHARS = 1_000_000;
 const DEFAULT_RETRY_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 400;
+const INDEXING_PROGRESS = {
+  PARSING: 5,
+  PARSING_COMPLETE: 12,
+  CHUNKS_READY: 20,
+  INDEXING_START: 25,
+  INDEXING_END: 92,
+  FINALIZING: 97,
+  COMPLETE: 100,
+} as const;
+
+type KnowledgeSourceIndexStatus =
+  | "uploaded"
+  | "parsed"
+  | "processing"
+  | "indexed"
+  | "failed";
+
+const RESOURCE_ERROR_HINTS = [
+  "out of memory",
+  "memory limit",
+  "memory quota",
+  "insufficient memory",
+  "resource exhausted",
+  "resources exhausted",
+  "worker exceeded memory",
+  "heap out of memory",
+  "allocation failed",
+  "oom",
+];
+
+const RETRYABLE_ERROR_HINTS = [
+  "terminated",
+  "abort",
+  "aborted",
+  "timeout",
+  "timed out",
+  "socket",
+  "network",
+  "connection reset",
+  "econnreset",
+  "temporarily unavailable",
+  "service unavailable",
+  "internal error",
+  "rate limit",
+  "too many requests",
+  "429",
+  "503",
+  ...RESOURCE_ERROR_HINTS,
+];
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function clampProgress(progress: number): number {
+  return Math.max(0, Math.min(100, progress));
+}
+
+function getBatchIndexingProgress(
+  processedChunks: number,
+  totalChunksEstimate: number,
+): number {
+  const denominator = Math.max(totalChunksEstimate, processedChunks, 1);
+  const ratio = processedChunks / denominator;
+
+  return (
+    INDEXING_PROGRESS.INDEXING_START +
+    ratio * (INDEXING_PROGRESS.INDEXING_END - INDEXING_PROGRESS.INDEXING_START)
+  );
+}
+
+function describeRetryableFailure(error: unknown): string {
+  const message = getErrorMessage(error).toLowerCase();
+
+  if (isResourceExhaustionError(error)) {
+    return "resource pressure";
+  }
+
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return "a timeout";
+  }
+
+  if (
+    message.includes("socket") ||
+    message.includes("network") ||
+    message.includes("connection reset") ||
+    message.includes("econnreset")
+  ) {
+    return "a network issue";
+  }
+
+  if (
+    message.includes("rate limit") ||
+    message.includes("too many requests") ||
+    message.includes("429")
+  ) {
+    return "rate limiting";
+  }
+
+  return "a transient failure";
+}
+
+async function updateKnowledgeSourceIndexState(
+  sourceId: string,
+  update: {
+    status?: KnowledgeSourceIndexStatus;
+    progress?: number;
+    progressMessage?: string | null;
+    parserErrors?: string[];
+    vectorizeIds?: string[] | null;
+    retryCount?: number;
+  },
+): Promise<void> {
+  const payload: {
+    status?: KnowledgeSourceIndexStatus;
+    progress?: number;
+    progressMessage?: string | null;
+    parserErrors?: string[];
+    vectorizeIds?: string[] | null;
+    retryCount?: number;
+    updatedAt: Date;
+  } = {
+    updatedAt: new Date(),
+  };
+
+  if (update.status !== undefined) {
+    payload.status = update.status;
+  }
+
+  if (update.progress !== undefined) {
+    payload.progress = Math.round(clampProgress(update.progress));
+  }
+
+  if (update.progressMessage !== undefined) {
+    payload.progressMessage = update.progressMessage;
+  }
+
+  if (update.parserErrors !== undefined) {
+    payload.parserErrors = update.parserErrors;
+  }
+
+  if (update.vectorizeIds !== undefined) {
+    payload.vectorizeIds = update.vectorizeIds;
+  }
+
+  if (update.retryCount !== undefined) {
+    payload.retryCount = update.retryCount;
+  }
+
+  await db
+    .update(knowledgeSource)
+    .set(payload)
+    .where(eq(knowledgeSource.id, sourceId));
+}
 
 function estimateChunkCount(
   inputLength: number,
@@ -85,17 +239,29 @@ function* streamChunkBatches(
   }
 }
 
-function isRetryableError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("terminated") ||
-    message.includes("abort") ||
-    message.includes("aborted") ||
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    message.includes("socket")
-  );
+export function isResourceExhaustionError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return RESOURCE_ERROR_HINTS.some((hint) => message.includes(hint));
+}
+
+export function isRetryableIngestionError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return RETRYABLE_ERROR_HINTS.some((hint) => message.includes(hint));
+}
+
+export function normalizeKnowledgeIngestionError(error: unknown): string {
+  const errorMessage = getErrorMessage(error);
+  const lowerMessage = errorMessage.toLowerCase();
+
+  if (lowerMessage.includes("maximum context length")) {
+    return `${errorMessage} Try reindexing after reducing chunk size.`;
+  }
+
+  if (isResourceExhaustionError(error)) {
+    return `${errorMessage} Automatic retries were exhausted; try reindexing again or split the file into smaller parts.`;
+  }
+
+  return errorMessage;
 }
 
 function assertNotAborted(signal?: AbortSignal): void {
@@ -113,6 +279,14 @@ async function withRetry<T>(
     baseDelayMs?: number;
     label?: string;
     abortSignal?: AbortSignal;
+    onRetry?: (details: {
+      failedAttempt: number;
+      nextAttempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      error: unknown;
+      label?: string;
+    }) => Promise<void> | void;
   },
 ): Promise<T> {
   const retries = options?.retries ?? DEFAULT_RETRY_ATTEMPTS;
@@ -124,7 +298,7 @@ async function withRetry<T>(
     try {
       return await operation();
     } catch (error) {
-      if (!isRetryableError(error) || attempt >= retries) {
+      if (!isRetryableIngestionError(error) || attempt >= retries) {
         throw error;
       }
 
@@ -136,6 +310,14 @@ async function withRetry<T>(
         }/${retries + 1}). Retrying in ${backoff}ms...`,
         error,
       );
+      await options?.onRetry?.({
+        failedAttempt: attempt + 1,
+        nextAttempt: attempt + 2,
+        maxAttempts: retries + 1,
+        delayMs: backoff,
+        error,
+        label: options?.label,
+      });
       await new Promise((resolve) => setTimeout(resolve, backoff));
     }
   }
@@ -183,7 +365,7 @@ export type StreamResponseCallback = (message: {
  * Wait for a Vectorize mutation to be processed
  */
 export async function waitForMutation(
-  vectorize: any,
+  vectorize: { describe: () => Promise<{ processedUpToMutation: number }> },
   mutationId: string,
   maxWaitMs: number = 30000,
   pollIntervalMs: number = 1000,
@@ -193,7 +375,7 @@ export async function waitForMutation(
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const status = await vectorize.describe();
-      if (status.processedUpToMutation >= parseInt(mutationId)) {
+      if (status.processedUpToMutation >= Number.parseInt(mutationId, 10)) {
         console.log(`Mutation ${mutationId} processed successfully`);
         return;
       }
@@ -209,12 +391,12 @@ export async function waitForMutation(
   );
 }
 export async function checkMutationStatus(
-  vectorize: any,
+  vectorize: { describe: () => Promise<{ processedUpToMutation: number }> },
   mutationId: string,
 ): Promise<boolean> {
   try {
     const status = await vectorize.describe();
-    return status.processedUpToMutation >= parseInt(mutationId);
+    return status.processedUpToMutation >= Number.parseInt(mutationId, 10);
   } catch (error) {
     console.error(`Error checking mutation status: ${error}`);
     return false;
@@ -876,6 +1058,9 @@ export async function processKnowledgeSource(
   content: string | ArrayBuffer | Buffer | Uint8Array,
   options?: {
     chunkSize?: number;
+    embeddingBatchSize?: number;
+    retryCount?: number;
+    persistFailureState?: boolean;
     streamResponse?: StreamResponseCallback;
     abortSignal?: AbortSignal;
   },
@@ -896,13 +1081,53 @@ export async function processKnowledgeSource(
 
   const streamResponse = options?.streamResponse || (async () => {});
   const abortSignal = options?.abortSignal;
+  const retryCount = options?.retryCount ?? source.retryCount ?? 0;
+  const persistFailureState = options?.persistFailureState ?? true;
+
+  const reportProgress = async (update: {
+    status?: KnowledgeSourceIndexStatus;
+    progress?: number;
+    message?: string;
+    parserErrors?: string[];
+    vectorizeIds?: string[] | null;
+    retryCount?: number;
+    chunksProcessed?: number;
+    vectorsInserted?: number;
+  }) => {
+    await updateKnowledgeSourceIndexState(sourceId, {
+      status: update.status,
+      progress: update.progress,
+      progressMessage: update.message,
+      parserErrors: update.parserErrors,
+      vectorizeIds: update.vectorizeIds,
+      retryCount: update.retryCount ?? retryCount,
+    });
+
+    await streamResponse({
+      status: update.status,
+      progress:
+        update.progress !== undefined
+          ? clampProgress(update.progress)
+          : undefined,
+      message: update.message,
+      parserErrors: update.parserErrors,
+      retryCount: update.retryCount ?? retryCount,
+      chunksProcessed: update.chunksProcessed,
+      vectorsInserted: update.vectorsInserted,
+    });
+  };
 
   try {
-    // Update status to parsing
-    await db
-      .update(knowledgeSource)
-      .set({ status: "parsed", updatedAt: new Date() })
-      .where(eq(knowledgeSource.id, sourceId));
+    const parseMessage =
+      retryCount > 0
+        ? `Retry ${retryCount}: parsing document with lighter settings`
+        : "Parsing document";
+    await reportProgress({
+      status: "processing",
+      progress: INDEXING_PROGRESS.PARSING,
+      message: parseMessage,
+      parserErrors: [],
+    });
 
     assertNotAborted(abortSignal);
     // Parse document
@@ -911,16 +1136,24 @@ export async function processKnowledgeSource(
       source.mime || "text/plain",
       source.fileName || undefined,
     );
-    await streamResponse({
+    await reportProgress({
+      status: "processing",
+      progress: INDEXING_PROGRESS.PARSING_COMPLETE,
       message: "Document parsed successfully",
-      metadata: parsed.metadata,
     });
 
     const contentType =
       parsed.metadata.type === "markdown" ? "markdown" : "text";
     const chunkSize = options?.chunkSize || CHUNKING_CONFIG.CHUNK_SIZE;
-    const chunkOverlap = CHUNKING_CONFIG.CHUNK_OVERLAP;
+    const chunkOverlap = Math.min(
+      CHUNKING_CONFIG.CHUNK_OVERLAP,
+      Math.max(chunkSize - 1, 0),
+    );
     const minChunkSize = CHUNKING_CONFIG.MIN_CHUNK_SIZE;
+    const embeddingBatchSize = Math.max(
+      1,
+      options?.embeddingBatchSize || EMBEDDING_BATCH_SIZE,
+    );
     const structuredChunks = parsed.chunks
       ? await expandStructuredChunks(parsed.chunks, {
           chunkSize,
@@ -940,8 +1173,10 @@ export async function processKnowledgeSource(
     assertNotAborted(abortSignal);
     if (hasStructuredChunks) {
       totalChunksEstimate = structuredChunks.length;
-      chunkBatchIterator = chunkArray(structuredChunks, EMBEDDING_BATCH_SIZE);
-      await streamResponse({
+      chunkBatchIterator = chunkArray(structuredChunks, embeddingBatchSize);
+      await reportProgress({
+        status: "processing",
+        progress: INDEXING_PROGRESS.CHUNKS_READY,
         message: `Prepared ${structuredChunks.length} structured rows`,
       });
       console.log(
@@ -957,10 +1192,12 @@ export async function processKnowledgeSource(
         chunkSize,
         chunkOverlap,
         minChunkSize,
-        batchSize: EMBEDDING_BATCH_SIZE,
+        batchSize: embeddingBatchSize,
       });
 
-      await streamResponse({
+      await reportProgress({
+        status: "processing",
+        progress: INDEXING_PROGRESS.CHUNKS_READY,
         message: `Large document detected. Streaming chunking (~${totalChunksEstimate} chunks)`,
       });
       console.log(
@@ -974,14 +1211,18 @@ export async function processKnowledgeSource(
         contentType,
       });
       totalChunksEstimate = chunks.length;
-      await streamResponse({ message: `Split into ${chunks.length} chunks` });
+      await reportProgress({
+        status: "processing",
+        progress: INDEXING_PROGRESS.CHUNKS_READY,
+        message: `Split into ${chunks.length} chunks`,
+      });
       console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
-      chunkBatchIterator = chunkArray(chunks, EMBEDDING_BATCH_SIZE);
+      chunkBatchIterator = chunkArray(chunks, embeddingBatchSize);
     }
 
     const totalBatchEstimate = Math.max(
       1,
-      Math.ceil(Math.max(totalChunksEstimate, 1) / EMBEDDING_BATCH_SIZE),
+      Math.ceil(Math.max(totalChunksEstimate, 1) / embeddingBatchSize),
     );
 
     const vectorizeIds: string[] = [];
@@ -989,10 +1230,24 @@ export async function processKnowledgeSource(
     let processedChunks = 0;
     let batchIdx = 0;
 
+    await reportProgress({
+      status: "processing",
+      progress: INDEXING_PROGRESS.INDEXING_START,
+      message:
+        totalChunksEstimate > 0
+          ? `Starting embeddings for ${totalChunksEstimate} chunks`
+          : "Starting embeddings",
+    });
+
     // Process each batch
     for (const batch of chunkBatchIterator) {
       batchIdx += 1;
       assertNotAborted(abortSignal);
+
+      const batchProgress = getBatchIndexingProgress(
+        processedChunks,
+        totalChunksEstimate,
+      );
 
       // Generate embeddings for this batch using platform-wide model
       const startTime = Date.now();
@@ -1005,6 +1260,13 @@ export async function processKnowledgeSource(
         {
           label: `embedding batch ${batchIdx}`,
           abortSignal,
+          onRetry: async ({ nextAttempt, maxAttempts, delayMs, error }) => {
+            await reportProgress({
+              status: "processing",
+              progress: batchProgress,
+              message: `Embedding batch ${batchIdx}/${totalBatchEstimate} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
+            });
+          },
         },
       );
       const embeddingTime = Date.now() - startTime;
@@ -1068,6 +1330,13 @@ export async function processKnowledgeSource(
         {
           label: `vectorize insert batch ${batchIdx}`,
           abortSignal,
+          onRetry: async ({ nextAttempt, maxAttempts, delayMs, error }) => {
+            await reportProgress({
+              status: "processing",
+              progress: batchProgress,
+              message: `Writing vector batch ${batchIdx}/${totalBatchEstimate} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
+            });
+          },
         },
       );
       const vectorizeTime = Date.now() - vectorizeStartTime;
@@ -1075,15 +1344,20 @@ export async function processKnowledgeSource(
       console.log(`Batch ${batchIdx} vectorize insert took ${vectorizeTime}ms`);
 
       processedChunks += batch.length;
-      const progressDenominator = Math.max(
+      const progressPercent = getBatchIndexingProgress(
+        processedChunks,
+        totalChunksEstimate,
+      );
+      const indexedChunkGoal = Math.max(
         totalChunksEstimate,
         processedChunks,
         1,
       );
-      const progressPercent = (processedChunks / progressDenominator) * 100;
-      await streamResponse({
-        message: `Embedding... (${progressPercent.toFixed(1)}%)`,
+      await reportProgress({
+        status: "processing",
+        message: `Indexed ${processedChunks}/${indexedChunkGoal} chunks (batch ${batchIdx}/${totalBatchEstimate})`,
         progress: progressPercent,
+        chunksProcessed: processedChunks,
       });
 
       console.log(
@@ -1091,18 +1365,20 @@ export async function processKnowledgeSource(
       );
     }
 
-    // Store vectorize IDs and mark as indexed in a single update
-    await db
-      .update(knowledgeSource)
-      .set({
-        vectorizeIds: vectorizeIds,
-        status: "indexed",
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeSource.id, sourceId));
+    await reportProgress({
+      status: "processing",
+      progress: INDEXING_PROGRESS.FINALIZING,
+      message: "Finalizing indexed data",
+      chunksProcessed: processedChunks,
+    });
 
-    await streamResponse({
-      message: "Inserted vectors into database",
+    // Store vectorize IDs and mark as indexed in a single update
+    await reportProgress({
+      status: "indexed",
+      progress: INDEXING_PROGRESS.COMPLETE,
+      message: `Indexed ${processedChunks} chunk${processedChunks === 1 ? "" : "s"}`,
+      vectorizeIds: vectorizeIds,
+      parserErrors: [],
       chunksProcessed: processedChunks,
       vectorsInserted: vectorizeIds.length,
     });
@@ -1123,25 +1399,21 @@ export async function processKnowledgeSource(
     });
 
     // Update status to failed
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const normalizedErrorMessage = errorMessage.includes(
-      "maximum context length",
-    )
-      ? `${errorMessage} Try reindexing after reducing chunk size.`
-      : errorMessage;
+    const normalizedErrorMessage = normalizeKnowledgeIngestionError(error);
 
-    await db
-      .update(knowledgeSource)
-      .set({
+    if (persistFailureState) {
+      await reportProgress({
         status: "failed",
+        message: normalizedErrorMessage,
         parserErrors: [normalizedErrorMessage],
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeSource.id, sourceId));
+        retryCount,
+      });
 
-    await streamResponse({
-      error: normalizedErrorMessage,
-    });
+      await streamResponse({
+        error: normalizedErrorMessage,
+        retryCount,
+      });
+    }
 
     throw error;
   }

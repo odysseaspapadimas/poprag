@@ -35,7 +35,7 @@ export function AgentBulkReindexButton({
             description:
               result.failed > 0
                 ? `${result.failed} source${result.failed === 1 ? "" : "s"} could not be queued.`
-                : "Processing continues in the background.",
+                : "Watch each source row for live progress and retry details.",
           },
         );
 

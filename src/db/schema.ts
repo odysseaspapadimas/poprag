@@ -310,6 +310,8 @@ export const knowledgeSource = sqliteTable(
       .default("uploaded")
       .notNull(),
     progress: integer("progress").default(0),
+    progressMessage: text("progress_message"),
+    retryCount: integer("retry_count").default(0).notNull(),
     parserErrors: text("parser_errors", { mode: "json" }).$type<string[]>(),
     vectorizeIds: text("vectorize_ids", { mode: "json" }).$type<
       string[] | null

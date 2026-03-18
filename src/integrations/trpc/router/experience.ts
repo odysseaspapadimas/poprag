@@ -10,19 +10,7 @@ import { db } from "@/db";
 import { agentExperience, agentExperienceKnowledge } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
-
-/**
- * Generate a URL-safe slug from a name
- */
-function generateSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "") // Remove non-word chars (except spaces and hyphens)
-    .replace(/[\s_]+/g, "-") // Replace spaces/underscores with hyphens
-    .replace(/-+/g, "-") // Collapse multiple hyphens
-    .replace(/^-|-$/g, ""); // Trim leading/trailing hyphens
-}
+import { generateUnicodeSlug } from "@/lib/slug";
 
 export const experienceRouter = createTRPCRouter({
   /**
@@ -117,7 +105,7 @@ export const experienceRouter = createTRPCRouter({
       await requireAgent(input.agentId);
 
       const id = nanoid();
-      const slug = input.slug || generateSlug(input.name);
+      const slug = input.slug || generateUnicodeSlug(input.name);
 
       // Check for slug uniqueness within agent
       const [existing] = await db
@@ -356,7 +344,7 @@ export const experienceRouter = createTRPCRouter({
 
       for (const exp of input.experiences) {
         const id = nanoid();
-        let slug = exp.slug || generateSlug(exp.name);
+        let slug = exp.slug || generateUnicodeSlug(exp.name);
 
         // Ensure unique slug by appending suffix if needed
         let suffix = 1;

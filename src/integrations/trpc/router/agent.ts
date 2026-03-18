@@ -378,6 +378,8 @@ export const agentRouter = createTRPCRouter({
   getKnowledgeSources: protectedProcedure
     .input(z.object({ agentId: z.string() }))
     .query(async ({ input }) => {
+      await requireAgent(input.agentId);
+
       return await db
         .select()
         .from(knowledgeSource)
@@ -637,7 +639,7 @@ export const agentRouter = createTRPCRouter({
       }
 
       // Update policy
-      const updates: any = {};
+      const updates: Partial<typeof agentModelPolicy.$inferInsert> = {};
       // Validate modelAlias existence if provided
       if (input.modelAlias !== undefined) {
         const [alias] = await db
@@ -715,7 +717,7 @@ export const agentRouter = createTRPCRouter({
         .orderBy(desc(agentModelPolicy.effectiveFrom))
         .limit(1);
 
-      const hasModelAlias = !!(policy && policy.modelAlias);
+      const hasModelAlias = !!policy?.modelAlias;
 
       // Check if any prompt has a 'prod' labeled version
       const [prodPromptVersion] = await db
