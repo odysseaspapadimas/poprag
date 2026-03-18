@@ -107,19 +107,19 @@ const AppAgentsAgentIdChatRoute = AppAgentsAgentIdChatRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof AppIndexRoute
   '/auth': typeof AuthRouteRouteWithChildren
   '/users': typeof AppUsersRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
-  '/': typeof AppIndexRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chat/$agentSlug': typeof ApiChatAgentSlugRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload/image': typeof ApiUploadImageRoute
-  '/agents': typeof AppAgentsIndexRoute
-  '/knowledge': typeof AppKnowledgeIndexRoute
-  '/models': typeof AppModelsIndexRoute
+  '/agents/': typeof AppAgentsIndexRoute
+  '/knowledge/': typeof AppKnowledgeIndexRoute
+  '/models/': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
   '/agents/$agentId/': typeof AppAgentsAgentIdIndexRoute
 }
@@ -161,19 +161,19 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/auth'
     | '/users'
     | '/auth/sign-in'
     | '/auth/sign-up'
-    | '/'
     | '/agents/$agentId'
     | '/api/auth/$'
     | '/api/chat/$agentSlug'
     | '/api/trpc/$'
     | '/api/upload/image'
-    | '/agents'
-    | '/knowledge'
-    | '/models'
+    | '/agents/'
+    | '/knowledge/'
+    | '/models/'
     | '/agents/$agentId/chat'
     | '/agents/$agentId/'
   fileRoutesByTo: FileRoutesByTo
@@ -233,7 +233,7 @@ declare module '@tanstack/react-router' {
     '/_app': {
       id: '/_app'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof AppRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -268,21 +268,21 @@ declare module '@tanstack/react-router' {
     '/_app/models/': {
       id: '/_app/models/'
       path: '/models'
-      fullPath: '/models'
+      fullPath: '/models/'
       preLoaderRoute: typeof AppModelsIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/knowledge/': {
       id: '/_app/knowledge/'
       path: '/knowledge'
-      fullPath: '/knowledge'
+      fullPath: '/knowledge/'
       preLoaderRoute: typeof AppKnowledgeIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/agents/': {
       id: '/_app/agents/'
       path: '/agents'
-      fullPath: '/agents'
+      fullPath: '/agents/'
       preLoaderRoute: typeof AppAgentsIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }

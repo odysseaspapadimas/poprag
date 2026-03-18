@@ -1,5 +1,7 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
@@ -17,45 +19,8 @@ import { RAGSettings } from "@/components/rag-settings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
+import type { AppRouter } from "@/integrations/trpc/router";
 import { formatDate, formatDateTime } from "@/lib/utils";
-
-export const Route = createFileRoute("/_app/agents/$agentId/")({
-  component: AgentDetailPage,
-  validateSearch: (search) => ({
-    tab: (search.tab as Tab) || "overview",
-  }),
-  loader: async ({ context, params }) => {
-    const agentId = params.agentId as string;
-    // Prefetch all data for this agent
-    await Promise.all([
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.get.queryOptions({ id: agentId }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.prompt.list.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.getIndexPin.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.getModelPolicy.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(context.trpc.model.list.queryOptions()),
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
-      ),
-      context.queryClient.prefetchQuery(
-        context.trpc.experience.list.queryOptions({ agentId }),
-      ),
-    ]);
-  },
-});
 
 type Tab =
   | "overview"
@@ -67,6 +32,129 @@ type Tab =
   | "analytics"
   | "audit";
 
+type SourceViewerState = {
+  id: string;
+  fileName: string;
+  mime: string | null;
+};
+
+const DEFAULT_TAB: Tab = "overview";
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "prompts", label: "Prompts" },
+  { id: "models", label: "Models & Knobs" },
+  { id: "knowledge", label: "Knowledge" },
+  { id: "experiences", label: "Experiences" },
+  { id: "rag", label: "RAG Settings" },
+  { id: "analytics", label: "Analytics" },
+  { id: "audit", label: "Audit Log" },
+];
+
+function isTab(value: unknown): value is Tab {
+  return tabs.some((tab) => tab.id === value);
+}
+
+type AgentDetailLoaderContext = {
+  queryClient: QueryClient;
+  trpc: TRPCOptionsProxy<AppRouter>;
+};
+
+export const Route = createFileRoute("/_app/agents/$agentId/")({
+  component: AgentDetailPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: isTab(search.tab) ? search.tab : DEFAULT_TAB,
+  }),
+  loaderDeps: ({ search }: { search: { tab: Tab } }) => ({ tab: search.tab }),
+  loader: async (opts: {
+    context: AgentDetailLoaderContext;
+    params: { agentId: string };
+    deps: { tab: Tab };
+  }) => {
+    const { context, params, deps } = opts;
+    const { agentId } = params;
+
+    const commonQueries = [
+      context.queryClient.prefetchQuery(
+        context.trpc.agent.get.queryOptions({ id: agentId }),
+      ),
+      context.queryClient.prefetchQuery(
+        context.trpc.agent.getSetupStatus.queryOptions({ agentId }),
+      ),
+    ];
+
+    const activeTabQueries = (() => {
+      switch (deps.tab) {
+        case "overview":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
+            ),
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getIndexPin.queryOptions({ agentId }),
+            ),
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getModelPolicy.queryOptions({ agentId }),
+            ),
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getAuditLog.queryOptions({
+                agentId,
+                limit: 20,
+              }),
+            ),
+          ];
+        case "prompts":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.prompt.list.queryOptions({ agentId }),
+            ),
+          ];
+        case "models":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getModelPolicy.queryOptions({ agentId }),
+            ),
+            context.queryClient.prefetchQuery(
+              context.trpc.model.list.queryOptions(),
+            ),
+          ];
+        case "knowledge":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
+            ),
+          ];
+        case "experiences":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.experience.list.queryOptions({ agentId }),
+            ),
+          ];
+        case "rag":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.model.list.queryOptions(),
+            ),
+          ];
+        case "audit":
+          return [
+            context.queryClient.prefetchQuery(
+              context.trpc.agent.getAuditLog.queryOptions({
+                agentId,
+                limit: 20,
+              }),
+            ),
+          ];
+        case "analytics":
+        default:
+          return [];
+      }
+    })();
+
+    await Promise.all([...commonQueries, ...activeTabQueries]);
+  },
+});
+
 function AgentDetailPage() {
   const { agentId } = Route.useParams();
   const { tab: activeTab } = Route.useSearch();
@@ -74,11 +162,9 @@ function AgentDetailPage() {
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [viewingSource, setViewingSource] = useState<{
-    id: string;
-    fileName: string;
-    mime: string | null;
-  } | null>(null);
+  const [viewingSource, setViewingSource] = useState<SourceViewerState | null>(
+    null,
+  );
   const [isChatVisible, setIsChatVisible] = useState(true);
 
   // Callback to invalidate analytics when a chat message is completed
@@ -94,36 +180,8 @@ function AgentDetailPage() {
     trpc.agent.get.queryOptions({ id: agentId }),
   );
 
-  const { data: knowledgeSources } = useSuspenseQuery({
-    ...trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
-    staleTime: 0,
-    refetchInterval: (query) => {
-      const sources = query.state.data;
-      return sources?.some((source) => source.status === "processing")
-        ? 1500
-        : false;
-    },
-    refetchIntervalInBackground: true,
-  });
-
-  const { data: indexPin } = useSuspenseQuery(
-    trpc.agent.getIndexPin.queryOptions({ agentId }),
-  );
-
-  const { data: modelPolicy } = useSuspenseQuery(
-    trpc.agent.getModelPolicy.queryOptions({ agentId }),
-  );
-
-  const { data: auditLog } = useSuspenseQuery(
-    trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
-  );
-
   const { data: setupStatus } = useSuspenseQuery(
     trpc.agent.getSetupStatus.queryOptions({ agentId }),
-  );
-
-  const processingKnowledgeSources = knowledgeSources.filter(
-    (source) => source.status === "processing",
   );
 
   if (!agent) {
@@ -142,17 +200,6 @@ function AgentDetailPage() {
       </div>
     );
   }
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "prompts", label: "Prompts" },
-    { id: "models", label: "Models & Knobs" },
-    { id: "knowledge", label: "Knowledge" },
-    { id: "experiences", label: "Experiences" },
-    { id: "rag", label: "RAG Settings" },
-    { id: "analytics", label: "Analytics" },
-    { id: "audit", label: "Audit Log" },
-  ];
 
   return (
     <div>
@@ -309,170 +356,11 @@ function AgentDetailPage() {
         {/* Tab Content */}
         <div>
           {activeTab === "overview" && (
-            <div className="space-y-6">
-              <div className="bg-card border rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">
-                  Agent Information
-                </h2>
-                <dl className="grid grid-cols-2 gap-4">
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">
-                      ID
-                    </dt>
-                    <dd className="text-sm font-mono">{agent.id}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">
-                      Visibility
-                    </dt>
-                    <dd className="text-sm">{agent.visibility}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">
-                      Model Alias
-                    </dt>
-                    <dd className="text-sm">
-                      {modelPolicy?.modelAlias ?? "-"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">
-                      Created
-                    </dt>
-                    <dd className="text-sm">{formatDate(agent.createdAt)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">
-                      Last Updated
-                    </dt>
-                    <dd className="text-sm">{formatDate(agent.updatedAt)}</dd>
-                  </div>
-                  {(() => {
-                    const lastUpdateLog = auditLog.find(
-                      (log) =>
-                        log.eventType === "agent.updated" &&
-                        log.targetType === "agent" &&
-                        log.targetId === agent.id,
-                    );
-                    return lastUpdateLog ? (
-                      <div>
-                        <dt className="text-sm font-medium text-muted-foreground">
-                          Updated By
-                        </dt>
-                        <dd className="text-sm">
-                          {lastUpdateLog.actorName || lastUpdateLog.actorEmail}
-                        </dd>
-                      </div>
-                    ) : null;
-                  })()}
-                  {indexPin && (
-                    <div>
-                      <dt className="text-sm font-medium text-muted-foreground">
-                        Active Index Version
-                      </dt>
-                      <dd className="text-sm">v{indexPin.indexVersion}</dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-
-              <div className="bg-card border rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">
-                  Knowledge Sources ({knowledgeSources.length})
-                </h2>
-                {processingKnowledgeSources.length > 0 && (
-                  <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Indexing in progress</AlertTitle>
-                    <AlertDescription>
-                      {processingKnowledgeSources.length} source
-                      {processingKnowledgeSources.length === 1 ? "" : "s"} are
-                      updating. Progress refreshes automatically.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {knowledgeSources.length > 0 ? (
-                  <div className="space-y-2">
-                    {knowledgeSources.slice(0, 5).map((source) => (
-                      <div
-                        key={source.id}
-                        className="flex flex-col gap-3 rounded bg-muted p-3 sm:flex-row sm:items-start sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setViewingSource({
-                                id: source.id,
-                                fileName: source.fileName || "Unknown",
-                                mime: source.mime,
-                              })
-                            }
-                            className="text-sm font-medium hover:text-primary transition-colors text-left"
-                          >
-                            {source.fileName}
-                          </button>
-                          <p className="text-xs text-muted-foreground">
-                            {source.mime} •{" "}
-                            {((source.bytes ?? 0) / 1024).toFixed(2)} KB
-                          </p>
-                        </div>
-                        <KnowledgeSourceProgress
-                          source={source}
-                          compact
-                          className="sm:w-72"
-                        />
-                      </div>
-                    ))}
-                    {knowledgeSources.length > 5 && (
-                      <p className="text-sm text-muted-foreground text-center pt-2">
-                        +{knowledgeSources.length - 5} more
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No knowledge sources yet
-                  </p>
-                )}
-              </div>
-
-              <div className="bg-card border rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">
-                  Recent Activity ({auditLog.length})
-                </h2>
-                {auditLog.length > 0 ? (
-                  <div className="space-y-2">
-                    {auditLog.slice(0, 5).map((log) => (
-                      <div key={log.id} className="p-3 bg-muted rounded">
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">
-                              {log.eventType}
-                            </p>
-                            <p className="text-xs text-muted-foreground overflow-wrap-anywhere">
-                              by {log.actorName || log.actorEmail}
-                            </p>
-                          </div>
-                          <div className="text-xs text-muted-foreground shrink-0">
-                            {formatDateTime(log.createdAt)}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {auditLog.length > 5 && (
-                      <p className="text-sm text-muted-foreground text-center pt-2">
-                        +{auditLog.length - 5} more
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No activity yet
-                  </p>
-                )}
-              </div>
-            </div>
+            <AgentOverviewTab
+              agent={agent}
+              agentId={agentId}
+              onViewSource={setViewingSource}
+            />
           )}
 
           {activeTab === "prompts" && <PromptManagement agentId={agentId} />}
@@ -486,75 +374,11 @@ function AgentDetailPage() {
           )}
 
           {activeTab === "knowledge" && (
-            <div className="bg-card border rounded-lg p-6">
-              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold">
-                    Knowledge Management
-                  </h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Upload new sources or re-index everything attached to this
-                    agent.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <AgentBulkReindexButton
-                    agentId={agentId}
-                    agentName={agent.name}
-                    knowledgeSourceCount={knowledgeSources.length}
-                  />
-                  <KnowledgeUploadDialog
-                    agentId={agentId}
-                    trigger={<Button>Upload Knowledge Source</Button>}
-                  />
-                </div>
-              </div>
-              <div className="space-y-4">
-                {knowledgeSources.map((source) => (
-                  <div
-                    key={source.id}
-                    className="flex flex-col gap-3 rounded border p-4 sm:flex-row sm:items-start sm:justify-between"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setViewingSource({
-                            id: source.id,
-                            fileName: source.fileName || "Unknown",
-                            mime: source.mime,
-                          })
-                        }
-                        className="font-medium hover:text-primary transition-colors text-left"
-                      >
-                        {source.fileName}
-                      </button>
-                      <p className="text-sm text-muted-foreground">
-                        {source.mime} •{" "}
-                        {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
-                        {formatDate(source.createdAt)}
-                      </p>
-                      <KnowledgeSourceProgress
-                        source={source}
-                        compact
-                        className="mt-2 max-w-xl"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 self-end sm:self-start">
-                      <KnowledgeSourceActions
-                        source={source}
-                        agentId={agentId}
-                      />
-                    </div>
-                  </div>
-                ))}
-                {knowledgeSources.length === 0 && (
-                  <p className="text-center text-muted-foreground py-8">
-                    No knowledge sources. Upload files to get started.
-                  </p>
-                )}
-              </div>
-            </div>
+            <KnowledgeTab
+              agentId={agentId}
+              agentName={agent.name}
+              onViewSource={setViewingSource}
+            />
           )}
 
           {activeTab === "experiences" && (
@@ -578,42 +402,7 @@ function AgentDetailPage() {
             </div>
           )}
 
-          {activeTab === "audit" && (
-            <div className="bg-card border rounded-lg p-6">
-              <h2 className="text-xl font-semibold mb-4">Audit Log</h2>
-              <div className="space-y-2">
-                {auditLog.map((log) => (
-                  <div key={log.id} className="p-3 bg-muted rounded space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">{log.eventType}</p>
-                        <p className="text-xs text-muted-foreground mt-1 overflow-wrap-anywhere">
-                          by {log.actorName || log.actorEmail} •{" "}
-                          {log.targetType} •{" "}
-                          <span className="font-mono text-xs">
-                            {log.targetId.slice(0, 8)}...
-                          </span>
-                        </p>
-                      </div>
-                      <div className="text-xs text-muted-foreground shrink-0">
-                        {formatDateTime(log.createdAt)}
-                      </div>
-                    </div>
-                    {log.diff && (
-                      <pre className="text-xs mt-2 bg-background p-2 rounded overflow-x-auto max-w-full">
-                        {JSON.stringify(log.diff, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-                {auditLog.length === 0 && (
-                  <p className="text-center text-muted-foreground py-8">
-                    No audit log entries yet
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
+          {activeTab === "audit" && <AuditLogTab agentId={agentId} />}
         </div>
 
         {/* Chat */}
@@ -638,6 +427,327 @@ function AgentDetailPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function useKnowledgeSources(agentId: string) {
+  const trpc = useTRPC();
+
+  return useSuspenseQuery({
+    ...trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const sources = query.state.data;
+      return sources?.some((source) => source.status === "processing")
+        ? 1500
+        : false;
+    },
+    refetchIntervalInBackground: true,
+  });
+}
+
+function AgentOverviewTab({
+  agent,
+  agentId,
+  onViewSource,
+}: {
+  agent: {
+    id: string;
+    visibility: string;
+    createdAt: Date | number;
+    updatedAt: Date | number;
+  };
+  agentId: string;
+  onViewSource: (source: SourceViewerState) => void;
+}) {
+  const trpc = useTRPC();
+  const { data: knowledgeSources } = useKnowledgeSources(agentId);
+  const { data: indexPin } = useSuspenseQuery(
+    trpc.agent.getIndexPin.queryOptions({ agentId }),
+  );
+  const { data: modelPolicy } = useSuspenseQuery(
+    trpc.agent.getModelPolicy.queryOptions({ agentId }),
+  );
+  const { data: auditLog } = useSuspenseQuery(
+    trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
+  );
+
+  const processingKnowledgeSources = knowledgeSources.filter(
+    (source) => source.status === "processing",
+  );
+  const lastUpdateLog = auditLog.find(
+    (log) =>
+      log.eventType === "agent.updated" &&
+      log.targetType === "agent" &&
+      log.targetId === agent.id,
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border rounded-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">Agent Information</h2>
+        <dl className="grid grid-cols-2 gap-4">
+          <div>
+            <dt className="text-sm font-medium text-muted-foreground">ID</dt>
+            <dd className="text-sm font-mono">{agent.id}</dd>
+          </div>
+          <div>
+            <dt className="text-sm font-medium text-muted-foreground">
+              Visibility
+            </dt>
+            <dd className="text-sm">{agent.visibility}</dd>
+          </div>
+          <div>
+            <dt className="text-sm font-medium text-muted-foreground">
+              Model Alias
+            </dt>
+            <dd className="text-sm">{modelPolicy?.modelAlias ?? "-"}</dd>
+          </div>
+          <div>
+            <dt className="text-sm font-medium text-muted-foreground">
+              Created
+            </dt>
+            <dd className="text-sm">{formatDate(agent.createdAt)}</dd>
+          </div>
+          <div>
+            <dt className="text-sm font-medium text-muted-foreground">
+              Last Updated
+            </dt>
+            <dd className="text-sm">{formatDate(agent.updatedAt)}</dd>
+          </div>
+          {lastUpdateLog ? (
+            <div>
+              <dt className="text-sm font-medium text-muted-foreground">
+                Updated By
+              </dt>
+              <dd className="text-sm">
+                {lastUpdateLog.actorName || lastUpdateLog.actorEmail}
+              </dd>
+            </div>
+          ) : null}
+          {indexPin ? (
+            <div>
+              <dt className="text-sm font-medium text-muted-foreground">
+                Active Index Version
+              </dt>
+              <dd className="text-sm">v{indexPin.indexVersion}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </div>
+
+      <div className="bg-card border rounded-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">
+          Knowledge Sources ({knowledgeSources.length})
+        </h2>
+        {processingKnowledgeSources.length > 0 ? (
+          <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Indexing in progress</AlertTitle>
+            <AlertDescription>
+              {processingKnowledgeSources.length} source
+              {processingKnowledgeSources.length === 1 ? "" : "s"} are updating.
+              Progress refreshes automatically.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {knowledgeSources.length > 0 ? (
+          <div className="space-y-2">
+            {knowledgeSources.slice(0, 5).map((source) => (
+              <div
+                key={source.id}
+                className="flex flex-col gap-3 rounded bg-muted p-3 sm:flex-row sm:items-start sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onViewSource({
+                        id: source.id,
+                        fileName: source.fileName || "Unknown",
+                        mime: source.mime,
+                      })
+                    }
+                    className="text-sm font-medium hover:text-primary transition-colors text-left"
+                  >
+                    {source.fileName}
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    {source.mime} • {((source.bytes ?? 0) / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+                <KnowledgeSourceProgress
+                  source={source}
+                  compact
+                  className="sm:w-72"
+                />
+              </div>
+            ))}
+            {knowledgeSources.length > 5 ? (
+              <p className="text-sm text-muted-foreground text-center pt-2">
+                +{knowledgeSources.length - 5} more
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No knowledge sources yet
+          </p>
+        )}
+      </div>
+
+      <div className="bg-card border rounded-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">
+          Recent Activity ({auditLog.length})
+        </h2>
+        {auditLog.length > 0 ? (
+          <div className="space-y-2">
+            {auditLog.slice(0, 5).map((log) => (
+              <div key={log.id} className="p-3 bg-muted rounded">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{log.eventType}</p>
+                    <p className="text-xs text-muted-foreground overflow-wrap-anywhere">
+                      by {log.actorName || log.actorEmail}
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground shrink-0">
+                    {formatDateTime(log.createdAt)}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {auditLog.length > 5 ? (
+              <p className="text-sm text-muted-foreground text-center pt-2">
+                +{auditLog.length - 5} more
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No activity yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeTab({
+  agentId,
+  agentName,
+  onViewSource,
+}: {
+  agentId: string;
+  agentName: string;
+  onViewSource: (source: SourceViewerState) => void;
+}) {
+  const { data: knowledgeSources } = useKnowledgeSources(agentId);
+
+  return (
+    <div className="bg-card border rounded-lg p-6">
+      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">Knowledge Management</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Upload new sources or re-index everything attached to this agent.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <AgentBulkReindexButton
+            agentId={agentId}
+            agentName={agentName}
+            knowledgeSourceCount={knowledgeSources.length}
+          />
+          <KnowledgeUploadDialog
+            agentId={agentId}
+            trigger={<Button>Upload Knowledge Source</Button>}
+          />
+        </div>
+      </div>
+      <div className="space-y-4">
+        {knowledgeSources.map((source) => (
+          <div
+            key={source.id}
+            className="flex flex-col gap-3 rounded border p-4 sm:flex-row sm:items-start sm:justify-between"
+          >
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() =>
+                  onViewSource({
+                    id: source.id,
+                    fileName: source.fileName || "Unknown",
+                    mime: source.mime,
+                  })
+                }
+                className="font-medium hover:text-primary transition-colors text-left"
+              >
+                {source.fileName}
+              </button>
+              <p className="text-sm text-muted-foreground">
+                {source.mime} • {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
+                {formatDate(source.createdAt)}
+              </p>
+              <KnowledgeSourceProgress
+                source={source}
+                compact
+                className="mt-2 max-w-xl"
+              />
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-start">
+              <KnowledgeSourceActions source={source} agentId={agentId} />
+            </div>
+          </div>
+        ))}
+        {knowledgeSources.length === 0 ? (
+          <p className="text-center text-muted-foreground py-8">
+            No knowledge sources. Upload files to get started.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AuditLogTab({ agentId }: { agentId: string }) {
+  const trpc = useTRPC();
+  const { data: auditLog } = useSuspenseQuery(
+    trpc.agent.getAuditLog.queryOptions({ agentId, limit: 20 }),
+  );
+
+  return (
+    <div className="bg-card border rounded-lg p-6">
+      <h2 className="text-xl font-semibold mb-4">Audit Log</h2>
+      <div className="space-y-2">
+        {auditLog.map((log) => (
+          <div key={log.id} className="p-3 bg-muted rounded space-y-2">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{log.eventType}</p>
+                <p className="text-xs text-muted-foreground mt-1 overflow-wrap-anywhere">
+                  by {log.actorName || log.actorEmail} • {log.targetType} •{" "}
+                  <span className="font-mono text-xs">
+                    {log.targetId.slice(0, 8)}...
+                  </span>
+                </p>
+              </div>
+              <div className="text-xs text-muted-foreground shrink-0">
+                {formatDateTime(log.createdAt)}
+              </div>
+            </div>
+            {log.diff ? (
+              <pre className="text-xs mt-2 bg-background p-2 rounded overflow-x-auto max-w-full">
+                {JSON.stringify(log.diff, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        ))}
+        {auditLog.length === 0 ? (
+          <p className="text-center text-muted-foreground py-8">
+            No audit log entries yet
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
