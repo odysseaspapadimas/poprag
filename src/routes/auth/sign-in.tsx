@@ -1,15 +1,13 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
 import { authClient } from "@/auth/client";
 import { Button } from "@/components/ui/button";
+import { createFileRoute } from "@tanstack/react-router";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth/sign-in")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const navigate = useNavigate();
-
   const handleGoogleSignIn = async () => {
     try {
       await authClient.signIn.social({
@@ -37,13 +35,6 @@ function RouteComponent() {
           Sign in with Google
         </Button>
       </div>
-
-      <p className="text-sm text-muted-foreground">
-        Don't have an account?{" "}
-        <Link to="/auth/sign-up" className="text-primary hover:underline">
-          Sign up
-        </Link>
-      </p>
     </main>
   );
 }
