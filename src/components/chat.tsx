@@ -314,6 +314,7 @@ export function Chat({
   });
 
   const supportsImageUpload = modelCapabilities?.supportsImage ?? false;
+  const isInspectingSavedConversation = !!initialConversationId || !!initialRunId;
 
   const isFullySetUp =
     setupStatus?.hasModelAlias &&
@@ -566,7 +567,7 @@ export function Chat({
           className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-md"
         >
           <Trash2 className="w-4 h-4" />
-          Clear chat
+          {isInspectingSavedConversation ? "Clear view" : "Clear chat"}
         </button>
       </div>
 
@@ -578,7 +579,12 @@ export function Chat({
         />
 
         <Layout>
-          {isFullySetUp ? (
+          {isInspectingSavedConversation ? (
+            <div className="text-center text-sm text-muted-foreground">
+              Inspecting a saved conversation. This view is read-only and will
+              not modify the original chat.
+            </div>
+          ) : isFullySetUp ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();

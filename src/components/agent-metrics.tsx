@@ -705,7 +705,7 @@ function OpenConversationButton({
         }}
       >
         <MessageSquare className="h-4 w-4" />
-        Open in chat
+        Inspect conversation
       </Link>
     </Button>
   );

@@ -68,7 +68,7 @@ function ChatPage() {
             <h1 className="text-3xl font-bold">Chat with {agent.name}</h1>
             <p className="text-muted-foreground mt-1">
               {conversationId || runId
-                ? "Loaded saved conversation"
+                ? "Inspecting saved conversation"
                 : "Ask questions about your knowledge base"}
             </p>
           </div>
