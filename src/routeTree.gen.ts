@@ -17,6 +17,7 @@ import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppModelsIndexRouteImport } from './routes/_app/models/index'
 import { Route as AppKnowledgeIndexRouteImport } from './routes/_app/knowledge/index'
+import { Route as AppAnalyticsIndexRouteImport } from './routes/_app/analytics/index'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as ApiUploadImageRouteImport } from './routes/api/upload.image'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc.$'
@@ -63,6 +64,11 @@ const AppModelsIndexRoute = AppModelsIndexRouteImport.update({
 const AppKnowledgeIndexRoute = AppKnowledgeIndexRouteImport.update({
   id: '/knowledge/',
   path: '/knowledge/',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppAnalyticsIndexRoute = AppAnalyticsIndexRouteImport.update({
+  id: '/analytics/',
+  path: '/analytics/',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppAgentsIndexRoute = AppAgentsIndexRouteImport.update({
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload/image': typeof ApiUploadImageRoute
   '/agents/': typeof AppAgentsIndexRoute
+  '/analytics/': typeof AppAnalyticsIndexRoute
   '/knowledge/': typeof AppKnowledgeIndexRoute
   '/models/': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload/image': typeof ApiUploadImageRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/analytics': typeof AppAnalyticsIndexRoute
   '/knowledge': typeof AppKnowledgeIndexRoute
   '/models': typeof AppModelsIndexRoute
   '/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/api/upload/image': typeof ApiUploadImageRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/analytics/': typeof AppAnalyticsIndexRoute
   '/_app/knowledge/': typeof AppKnowledgeIndexRoute
   '/_app/models/': typeof AppModelsIndexRoute
   '/_app/agents/$agentId/chat': typeof AppAgentsAgentIdChatRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload/image'
     | '/agents/'
+    | '/analytics/'
     | '/knowledge/'
     | '/models/'
     | '/agents/$agentId/chat'
@@ -188,6 +198,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload/image'
     | '/agents'
+    | '/analytics'
     | '/knowledge'
     | '/models'
     | '/agents/$agentId/chat'
@@ -206,6 +217,7 @@ export interface FileRouteTypes {
     | '/api/trpc/$'
     | '/api/upload/image'
     | '/_app/agents/'
+    | '/_app/analytics/'
     | '/_app/knowledge/'
     | '/_app/models/'
     | '/_app/agents/$agentId/chat'
@@ -277,6 +289,13 @@ declare module '@tanstack/react-router' {
       path: '/knowledge'
       fullPath: '/knowledge/'
       preLoaderRoute: typeof AppKnowledgeIndexRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/analytics/': {
+      id: '/_app/analytics/'
+      path: '/analytics'
+      fullPath: '/analytics/'
+      preLoaderRoute: typeof AppAnalyticsIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/agents/': {
@@ -358,6 +377,7 @@ interface AppRouteRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppAgentsAgentIdRouteRoute: typeof AppAgentsAgentIdRouteRouteWithChildren
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppAnalyticsIndexRoute: typeof AppAnalyticsIndexRoute
   AppKnowledgeIndexRoute: typeof AppKnowledgeIndexRoute
   AppModelsIndexRoute: typeof AppModelsIndexRoute
 }
@@ -367,6 +387,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppAgentsAgentIdRouteRoute: AppAgentsAgentIdRouteRouteWithChildren,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppAnalyticsIndexRoute: AppAnalyticsIndexRoute,
   AppKnowledgeIndexRoute: AppKnowledgeIndexRoute,
   AppModelsIndexRoute: AppModelsIndexRoute,
 }

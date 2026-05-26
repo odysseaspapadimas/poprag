@@ -3,7 +3,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
 import AgentMetrics from "@/components/agent-metrics";
 import { Chat } from "@/components/chat";
@@ -62,10 +62,23 @@ type AgentDetailLoaderContext = {
 
 export const Route = createFileRoute("/_app/agents/$agentId/")({
   component: AgentDetailPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    tab: isTab(search.tab) ? search.tab : DEFAULT_TAB,
-  }),
-  loaderDeps: ({ search }: { search: { tab: Tab } }) => ({ tab: search.tab }),
+  validateSearch: (search: Record<string, unknown>) => {
+    const parsed: { tab: Tab; conversationId?: string; runId?: string } = {
+      tab: isTab(search.tab) ? search.tab : DEFAULT_TAB,
+    };
+    if (typeof search.conversationId === "string") {
+      parsed.conversationId = search.conversationId;
+    }
+    if (typeof search.runId === "string") {
+      parsed.runId = search.runId;
+    }
+    return parsed;
+  },
+  loaderDeps: ({
+    search,
+  }: {
+    search: { tab: Tab; conversationId?: string; runId?: string };
+  }) => ({ tab: search.tab }),
   loader: async (opts: {
     context: AgentDetailLoaderContext;
     params: { agentId: string };
@@ -157,7 +170,7 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
 
 function AgentDetailPage() {
   const { agentId } = Route.useParams();
-  const { tab: activeTab } = Route.useSearch();
+  const { tab: activeTab, conversationId, runId } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 
   const trpc = useTRPC();
@@ -166,6 +179,12 @@ function AgentDetailPage() {
     null,
   );
   const [isChatVisible, setIsChatVisible] = useState(true);
+
+  useEffect(() => {
+    if (conversationId || runId) {
+      setIsChatVisible(true);
+    }
+  }, [conversationId, runId]);
 
   // Callback to invalidate analytics when a chat message is completed
   const handleMessageComplete = () => {
@@ -408,7 +427,13 @@ function AgentDetailPage() {
         {/* Chat */}
         {isChatVisible && (
           <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex flex-col">
-            <Chat agentId={agentId} onMessageComplete={handleMessageComplete} />
+            <Chat
+              agentId={agentId}
+              initialConversationId={conversationId}
+              initialRunId={runId}
+              showDedicatedChatLink
+              onMessageComplete={handleMessageComplete}
+            />
           </div>
         )}
       </div>

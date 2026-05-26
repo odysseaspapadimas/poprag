@@ -5,9 +5,10 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
-import { ImageIcon, Send, Trash2, X } from "lucide-react";
+import { ExternalLink, ImageIcon, Send, Trash2, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -25,10 +26,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTRPC } from "@/integrations/trpc/react";
 
 interface ChatProps {
   agentId: string;
+  initialConversationId?: string;
+  initialRunId?: string;
+  showDedicatedChatLink?: boolean;
   onMessageComplete?: () => void;
 }
 
@@ -275,7 +284,13 @@ function Messages({
   );
 }
 
-export function Chat({ agentId, onMessageComplete }: ChatProps) {
+export function Chat({
+  agentId,
+  initialConversationId,
+  initialRunId,
+  showDedicatedChatLink = false,
+  onMessageComplete,
+}: ChatProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: session } = useSuspenseQuery(
@@ -330,8 +345,20 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
   const [ragDebugInfo, setRagDebugInfo] = useState<
     Map<string, RAGDebugInfo | null>
   >(new Map());
-  const [conversationId] = useState(() => nanoid());
+  const [conversationId, setConversationId] = useState(
+    () => initialConversationId ?? nanoid(),
+  );
   const lastMessageIdRef = useRef<string | null>(null);
+  const lastLoadedConversationRef = useRef<string | null>(null);
+
+  const { data: loadedConversation } = useQuery({
+    ...trpc.chat.getConversation.queryOptions({
+      agentId,
+      conversationId: initialConversationId,
+      runId: initialRunId,
+    }),
+    enabled: !!initialConversationId || !!initialRunId,
+  });
 
   const { messages, sendMessage, setMessages, status } = useChat({
     transport: new DefaultChatTransport({
@@ -368,6 +395,29 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
     },
   });
 
+  const [input, setInput] = useState("");
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!loadedConversation) return;
+    if (lastLoadedConversationRef.current === loadedConversation.conversationId)
+      return;
+
+    setConversationId(loadedConversation.conversationId);
+    setMessages(loadedConversation.messages as UIMessage[]);
+    setAttachedImages([]);
+    setRagDebugInfo(
+      new Map(
+        Object.entries(loadedConversation.ragDebugInfo).map(([key, value]) => [
+          key,
+          value as RAGDebugInfo,
+        ]),
+      ),
+    );
+    lastLoadedConversationRef.current = loadedConversation.conversationId;
+  }, [loadedConversation, setMessages]);
+
   const isLoading = status === "submitted";
 
   // Sync debug info with messages when they update
@@ -382,15 +432,8 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       }
     }
   }, [messages]);
-  const [input, setInput] = useState("");
-  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const handleImageUpload = async (file: File) => {
     try {
-      // Generate a conversation ID if we don't have messages yet
-      const conversationId = messages.length > 0 ? "default" : nanoid();
-
       const uploadResult = await uploadImageStart.mutateAsync({
         agentId,
         conversationId,
@@ -467,7 +510,28 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
       {/* Chat Header */}
       <div className="flex justify-between items-center p-2.5 border-b border-border/50 gap-2">
         {/* Experience Selector - only shown when agent has experiences */}
-        <div className="flex-1 min-w-0">
+        <div className="flex flex-1 items-center gap-2 min-w-0">
+          {showDedicatedChatLink && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/agents/$agentId/chat"
+                  params={{ agentId }}
+                  search={{
+                    conversationId,
+                    runId: undefined,
+                  }}
+                  aria-label="Open dedicated chat page"
+                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Open dedicated chat page
+              </TooltipContent>
+            </Tooltip>
+          )}
           {activeExperiences.length > 0 && (
             <Select
               value={selectedExperienceSlug ?? "__all__"}
@@ -494,6 +558,9 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
           onClick={() => {
             setMessages([]);
             setAttachedImages([]);
+            setRagDebugInfo(new Map());
+            setConversationId(nanoid());
+            lastLoadedConversationRef.current = null;
           }}
           disabled={messages.length === 0}
           className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-md"
@@ -539,13 +606,15 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                 if (parts.length > 0) {
                   sendMessage(
                     { parts },
-                    selectedExperienceSlug
-                      ? {
-                          body: {
-                            experienceSlug: selectedExperienceSlug,
-                          },
-                        }
-                      : undefined,
+                    {
+                      body: {
+                        conversationId,
+                        initiatedBy: session?.user?.id,
+                        ...(selectedExperienceSlug
+                          ? { experienceSlug: selectedExperienceSlug }
+                          : {}),
+                      },
+                    },
                   );
                   setInput("");
                   setAttachedImages([]);
@@ -612,13 +681,15 @@ export function Chat({ agentId, onMessageComplete }: ChatProps) {
                       if (parts.length > 0) {
                         sendMessage(
                           { parts },
-                          selectedExperienceSlug
-                            ? {
-                                body: {
-                                  experienceSlug: selectedExperienceSlug,
-                                },
-                              }
-                            : undefined,
+                          {
+                            body: {
+                              conversationId,
+                              initiatedBy: session?.user?.id,
+                              ...(selectedExperienceSlug
+                                ? { experienceSlug: selectedExperienceSlug }
+                                : {}),
+                            },
+                          },
                         );
                         setInput("");
                         setAttachedImages([]);

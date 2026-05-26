@@ -1,7 +1,13 @@
 "use client";
 
 import { Link } from "@tanstack/react-router";
-import { Bot, BotMessageSquare, Database, SquareTerminal } from "lucide-react";
+import {
+  Bot,
+  BotMessageSquare,
+  ChartNoAxesColumnIncreasing,
+  Database,
+  SquareTerminal,
+} from "lucide-react";
 import type * as React from "react";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
@@ -35,6 +41,11 @@ const data = {
       icon: Database,
     },
     {
+      title: "Analytics",
+      url: "/analytics",
+      icon: ChartNoAxesColumnIncreasing,
+    },
+    {
       title: "Models",
       url: "/models",
       icon: SquareTerminal,
@@ -47,10 +58,16 @@ const data = {
   ],
 };
 
+type SidebarUser = {
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+};
+
 export function AppSidebar({
   user,
   ...props
-}: React.ComponentProps<typeof Sidebar> & { user?: any }) {
+}: React.ComponentProps<typeof Sidebar> & { user?: SidebarUser }) {
   const userData = user
     ? {
         name: user.name || "User",

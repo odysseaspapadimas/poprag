@@ -1,5 +1,5 @@
 import { AwsClient } from "aws4fetch";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
@@ -10,6 +10,36 @@ import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
 /**
  * Chat management router
  */
+function getMessageParts(message: unknown): Array<Record<string, unknown>> {
+  const parts = (message as { parts?: unknown })?.parts;
+  if (Array.isArray(parts)) {
+    return parts.filter(
+      (part): part is Record<string, unknown> =>
+        part != null && typeof part === "object",
+    );
+  }
+
+  const content = (message as { content?: unknown })?.content;
+  if (typeof content === "string" && content.trim().length > 0) {
+    return [{ type: "text", text: content }];
+  }
+
+  return [];
+}
+
+function findLastUserMessage(messages: unknown[]): unknown | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i] as { role?: unknown };
+    if (message?.role === "user") return message;
+  }
+  return null;
+}
+
+function getResponseText(response: Record<string, unknown> | null) {
+  const text = response?.text;
+  return typeof text === "string" && text.trim().length > 0 ? text : null;
+}
+
 export const chatRouter = createTRPCRouter({
   /**
    * Initiate image upload for chat
@@ -248,5 +278,107 @@ export const chatRouter = createTRPCRouter({
       const ragDebug = request.ragDebug as any;
 
       return ragDebug || null;
+    }),
+
+  /**
+   * Load a saved conversation so it can be continued in the chat UI.
+   */
+  getConversation: protectedProcedure
+    .input(
+      z.object({
+        agentId: z.string(),
+        conversationId: z.string().optional(),
+        runId: z.string().optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      if (!input.conversationId && !input.runId) {
+        throw new Error("Must provide either conversationId or runId");
+      }
+
+      await requireAgent(input.agentId);
+
+      let conversationId = input.conversationId;
+
+      if (!conversationId && input.runId) {
+        const [runTranscript] = await db
+          .select({
+            conversationId: transcript.conversationId,
+          })
+          .from(transcript)
+          .where(
+            and(
+              eq(transcript.agentId, input.agentId),
+              eq(transcript.runId, input.runId),
+            ),
+          )
+          .limit(1);
+
+        conversationId = runTranscript?.conversationId;
+      }
+
+      if (!conversationId) {
+        return null;
+      }
+
+      const transcripts = await db
+        .select()
+        .from(transcript)
+        .where(
+          and(
+            eq(transcript.agentId, input.agentId),
+            eq(transcript.conversationId, conversationId),
+          ),
+        )
+        .orderBy(asc(transcript.createdAt));
+
+      if (!transcripts.length) {
+        return null;
+      }
+
+      const messages: Array<{
+        id: string;
+        role: "user" | "assistant";
+        parts: Array<Record<string, unknown>>;
+      }> = [];
+      const ragDebugInfo: Record<string, unknown> = {};
+
+      for (const item of transcripts) {
+        const request = item.request as Record<string, unknown> | null;
+        const requestMessages = request?.messages;
+        const lastUserMessage = Array.isArray(requestMessages)
+          ? findLastUserMessage(requestMessages)
+          : null;
+        const userParts = getMessageParts(lastUserMessage);
+
+        if (userParts.length > 0) {
+          messages.push({
+            id: `${item.runId}-user`,
+            role: "user",
+            parts: userParts,
+          });
+        }
+
+        const responseText = getResponseText(item.response ?? null);
+        if (responseText) {
+          const assistantMessageId = `${item.runId}-assistant`;
+          messages.push({
+            id: assistantMessageId,
+            role: "assistant",
+            parts: [{ type: "text", text: responseText }],
+          });
+
+          const ragDebug = request?.ragDebug;
+          if (ragDebug) {
+            ragDebugInfo[assistantMessageId] = ragDebug;
+          }
+        }
+      }
+
+      return {
+        conversationId,
+        messages,
+        ragDebugInfo,
+      };
     }),
 });

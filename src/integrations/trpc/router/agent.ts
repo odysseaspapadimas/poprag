@@ -555,8 +555,18 @@ export const agentRouter = createTRPCRouter({
         sinceMs: z.number().optional(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      const visibilityCondition = or(
+        eq(agent.visibility, "public"),
+        and(
+          eq(agent.visibility, "private"),
+          eq(agent.createdBy, ctx.session.user.id),
+        ),
+      );
       const conditions: SQL[] = [eq(runMetric.agentId, input.agentId)];
+      if (visibilityCondition) {
+        conditions.push(visibilityCondition);
+      }
       if (input.sinceMs) {
         conditions.push(sql`${runMetric.createdAt} >= ${input.sinceMs}`);
       }
@@ -565,6 +575,8 @@ export const agentRouter = createTRPCRouter({
         .select({
           id: runMetric.id,
           agentId: runMetric.agentId,
+          agentName: agent.name,
+          agentSlug: agent.slug,
           runId: runMetric.runId,
           conversationId: sql<
             string | null
@@ -591,6 +603,7 @@ export const agentRouter = createTRPCRouter({
           response: transcript.response,
         })
         .from(runMetric)
+        .innerJoin(agent, eq(agent.id, runMetric.agentId))
         .leftJoin(transcript, eq(transcript.runId, runMetric.runId))
         .leftJoin(
           user,
@@ -605,6 +618,85 @@ export const agentRouter = createTRPCRouter({
 
       // Apply limit if specified, otherwise return all matching rows
       if (input.limit) {
+        return await query.limit(input.limit);
+      }
+      return await query;
+    }),
+
+  /**
+   * Get run metrics across all agents visible to the current user
+   */
+  getAllRunMetrics: protectedProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().min(1).max(25000).optional(),
+          sinceMs: z.number().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const visibilityCondition = or(
+        eq(agent.visibility, "public"),
+        and(
+          eq(agent.visibility, "private"),
+          eq(agent.createdBy, ctx.session.user.id),
+        ),
+      );
+      const conditions: SQL[] = [];
+      if (visibilityCondition) {
+        conditions.push(visibilityCondition);
+      }
+      if (input?.sinceMs) {
+        conditions.push(sql`${runMetric.createdAt} >= ${input.sinceMs}`);
+      }
+
+      const query = db
+        .select({
+          id: runMetric.id,
+          agentId: runMetric.agentId,
+          agentName: agent.name,
+          agentSlug: agent.slug,
+          runId: runMetric.runId,
+          conversationId: sql<
+            string | null
+          >`coalesce(${runMetric.conversationId}, ${transcript.conversationId})`,
+          initiatedBy: sql<
+            string | null
+          >`coalesce(${runMetric.initiatedBy}, ${transcript.initiatedBy})`,
+          initiatedByName: user.name,
+          initiatedByEmail: user.email,
+          firebaseUid: runMetric.firebaseUid,
+          firebaseUserName: firebaseUser.displayName,
+          firebaseUserEmail: firebaseUser.email,
+          modelAlias: runMetric.modelAlias,
+          promptTokens: runMetric.promptTokens,
+          completionTokens: runMetric.completionTokens,
+          totalTokens: runMetric.totalTokens,
+          tokens: runMetric.tokens,
+          costMicrocents: runMetric.costMicrocents,
+          latencyMs: runMetric.latencyMs,
+          timeToFirstTokenMs: runMetric.timeToFirstTokenMs,
+          errorType: runMetric.errorType,
+          createdAt: runMetric.createdAt,
+          request: transcript.request,
+          response: transcript.response,
+        })
+        .from(runMetric)
+        .innerJoin(agent, eq(agent.id, runMetric.agentId))
+        .leftJoin(transcript, eq(transcript.runId, runMetric.runId))
+        .leftJoin(
+          user,
+          or(
+            eq(user.id, runMetric.initiatedBy),
+            eq(user.id, transcript.initiatedBy),
+          ),
+        )
+        .leftJoin(firebaseUser, eq(firebaseUser.uid, runMetric.firebaseUid))
+        .where(and(...conditions))
+        .orderBy(desc(runMetric.createdAt));
+
+      if (input?.limit) {
         return await query.limit(input.limit);
       }
       return await query;

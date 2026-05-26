@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   type ColumnDef,
   type ExpandedState,
@@ -12,7 +13,7 @@ import {
   type Table as TableInstance,
   useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { Fragment, useMemo, useState } from "react";
 import {
@@ -52,7 +53,7 @@ import { useTRPC } from "@/integrations/trpc/react";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
 interface Props {
-  agentId: string;
+  agentId?: string;
 }
 
 type TimePeriod = "1h" | "24h" | "7d" | "30d" | "all";
@@ -79,6 +80,8 @@ type RagChunk = NonNullable<NonNullable<RagDebugInfo>["chunks"]>[number];
 type RunMetricRow = {
   id: string;
   agentId: string;
+  agentName?: string | null;
+  agentSlug?: string | null;
   runId: string;
   conversationId: string | null;
   initiatedBy: string | null;
@@ -124,6 +127,21 @@ type UserSummary = {
   initiatedBy: string | null;
   initiatedByName: string | null;
   initiatedByEmail: string | null;
+  runCount: number;
+  totalTokens: number;
+  totalCostMicrocents: number;
+  avgLatencyMs: number | null;
+  avgTtftMs: number | null;
+  errorCount: number;
+  lastSeen: number;
+  runs: RunMetricRow[];
+};
+
+type AgentSummary = {
+  id: string;
+  agentId: string;
+  agentName: string;
+  agentSlug: string | null;
   runCount: number;
   totalTokens: number;
   totalCostMicrocents: number;
@@ -659,7 +677,49 @@ function MetricsTable<T>({
   );
 }
 
-function RunDetails({ run }: { run: RunMetricRow }) {
+function OpenConversationButton({
+  agentId,
+  conversationId,
+  runId,
+  size = "sm",
+}: {
+  agentId?: string;
+  conversationId?: string | null;
+  runId?: string | null;
+  size?: ComponentProps<typeof Button>["size"];
+}) {
+  const targetConversationId =
+    conversationId && conversationId !== "unknown" ? conversationId : null;
+
+  if (!agentId || (!targetConversationId && !runId)) return null;
+
+  return (
+    <Button asChild variant="outline" size={size}>
+      <Link
+        to="/agents/$agentId"
+        params={{ agentId }}
+        search={{
+          tab: "analytics",
+          conversationId: targetConversationId ?? undefined,
+          runId: targetConversationId ? undefined : (runId ?? undefined),
+        }}
+      >
+        <MessageSquare className="h-4 w-4" />
+        Open in chat
+      </Link>
+    </Button>
+  );
+}
+
+function RunDetails({
+  agentId,
+  run,
+  showAgent = false,
+}: {
+  agentId?: string;
+  run: RunMetricRow;
+  showAgent?: boolean;
+}) {
   const ragDebug = getRagDebugInfo(run.request);
   const ragEnabled = Boolean(
     (ragDebug as { enabled?: boolean } | null)?.enabled,
@@ -672,7 +732,25 @@ function RunDetails({ run }: { run: RunMetricRow }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <OpenConversationButton
+          agentId={agentId ?? run.agentId}
+          conversationId={run.conversationId}
+          runId={run.runId}
+        />
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        {showAgent && run.agentName && (
+          <div className="rounded-md border bg-card p-3">
+            <div className="text-xs text-muted-foreground">Agent</div>
+            <div className="text-xs">
+              {run.agentName}
+              {run.agentSlug ? (
+                <span className="text-muted-foreground"> /{run.agentSlug}</span>
+              ) : null}
+            </div>
+          </div>
+        )}
         <div className="rounded-md border bg-card p-3">
           <div className="text-xs text-muted-foreground">Run</div>
           <div className="text-xs font-mono break-all">{run.runId}</div>
@@ -765,16 +843,36 @@ function RunDetails({ run }: { run: RunMetricRow }) {
   );
 }
 
-function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
+function AggregateDetails({
+  agentId,
+  conversationId,
+  runs,
+  showAgent = false,
+}: {
+  agentId?: string;
+  conversationId?: string | null;
+  runs: RunMetricRow[];
+  showAgent?: boolean;
+}) {
   const rows = runs.slice(0, 10);
+  const shouldShowAgent = showAgent && rows.some((run) => run.agentName);
+  const targetAgentId = agentId ?? rows[0]?.agentId;
 
   return (
     <div className="space-y-3">
-      <div className="text-xs text-muted-foreground">Latest runs</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-muted-foreground">Latest runs</div>
+        <OpenConversationButton
+          agentId={targetAgentId}
+          conversationId={conversationId}
+          runId={rows[0]?.runId}
+        />
+      </div>
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              {shouldShowAgent && <TableHead>Agent</TableHead>}
               <TableHead>Date</TableHead>
               <TableHead>Tokens</TableHead>
               <TableHead>Cost</TableHead>
@@ -786,6 +884,9 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
           <TableBody>
             {rows.map((run) => (
               <TableRow key={run.id}>
+                {shouldShowAgent && (
+                  <TableCell>{run.agentName ?? "-"}</TableCell>
+                )}
                 <TableCell>{formatDateTime(run.createdAt)}</TableCell>
                 <TableCell>{formatNumber(getRunTotalTokens(run))}</TableCell>
                 <TableCell>{formatCurrency(run.costMicrocents)}</TableCell>
@@ -814,6 +915,7 @@ function AggregateDetails({ runs }: { runs: RunMetricRow[] }) {
 
 export function AgentMetrics({ agentId }: Props) {
   const trpc = useTRPC();
+  const isAllAgents = agentId == null;
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("7d");
   const [isRagOpen, setIsRagOpen] = useState(false);
 
@@ -825,8 +927,13 @@ export function AgentMetrics({ agentId }: Props) {
     // Only recompute when timePeriod changes, not on every render
   }, [timePeriod]);
 
+  const metricsQueryOptions =
+    agentId != null
+      ? trpc.agent.getRunMetrics.queryOptions({ agentId, sinceMs })
+      : trpc.agent.getAllRunMetrics.queryOptions({ sinceMs, limit: 10000 });
+
   const { data: metrics, isFetching: isMetricsFetching } = useQuery({
-    ...trpc.agent.getRunMetrics.queryOptions({ agentId, sinceMs }),
+    ...metricsQueryOptions,
     placeholderData: (previous) => previous,
   });
 
@@ -971,14 +1078,16 @@ export function AgentMetrics({ agentId }: Props) {
   const ragDailyData = useMemo(() => aggregateRagByDay(ragRuns), [ragRuns]);
 
   const [activeView, setActiveView] = useState<
-    "runs" | "conversations" | "users"
-  >("runs");
+    "agents" | "runs" | "conversations" | "users"
+  >(isAllAgents ? "agents" : "runs");
 
   const conversationRows = useMemo(() => {
     const grouped = new Map<string, ConversationSummary>();
     rows.forEach((metric) => {
       const conversationId = metric.conversationId ?? "unknown";
-      const key = conversationId;
+      const key = isAllAgents
+        ? `${metric.agentId}:${conversationId}`
+        : conversationId;
       const timestamp = new Date(metric.createdAt).getTime();
       const userLabel = formatUserLabel(
         metric.initiatedByName ?? metric.firebaseUserName,
@@ -1027,7 +1136,7 @@ export function AgentMetrics({ agentId }: Props) {
         ),
       }))
       .sort((a, b) => b.lastSeen - a.lastSeen);
-  }, [rows]);
+  }, [rows, isAllAgents]);
 
   const userRows = useMemo(() => {
     const grouped = new Map<string, UserSummary>();
@@ -1081,8 +1190,53 @@ export function AgentMetrics({ agentId }: Props) {
       .sort((a, b) => b.lastSeen - a.lastSeen);
   }, [rows]);
 
-  const runColumns = useMemo<ColumnDef<RunMetricRow>[]>(
-    () => [
+  const agentRows = useMemo(() => {
+    const grouped = new Map<string, AgentSummary>();
+    rows.forEach((metric) => {
+      const timestamp = new Date(metric.createdAt).getTime();
+      const existing = grouped.get(metric.agentId);
+      const totalTokensForRun = getRunTotalTokens(metric) ?? 0;
+      const costForRun = metric.costMicrocents ?? 0;
+
+      if (!existing) {
+        grouped.set(metric.agentId, {
+          id: metric.agentId,
+          agentId: metric.agentId,
+          agentName: metric.agentName ?? metric.agentId,
+          agentSlug: metric.agentSlug ?? null,
+          runCount: 1,
+          totalTokens: totalTokensForRun,
+          totalCostMicrocents: costForRun,
+          avgLatencyMs: null,
+          avgTtftMs: null,
+          errorCount: metric.errorType ? 1 : 0,
+          lastSeen: timestamp,
+          runs: [metric],
+        });
+        return;
+      }
+
+      existing.runCount += 1;
+      existing.totalTokens += totalTokensForRun;
+      existing.totalCostMicrocents += costForRun;
+      existing.errorCount += metric.errorType ? 1 : 0;
+      existing.lastSeen = Math.max(existing.lastSeen, timestamp);
+      existing.runs.push(metric);
+    });
+
+    return Array.from(grouped.values())
+      .map((summary) => ({
+        ...summary,
+        avgLatencyMs: computeAverage(summary.runs.map((run) => run.latencyMs)),
+        avgTtftMs: computeAverage(
+          summary.runs.map((run) => run.timeToFirstTokenMs),
+        ),
+      }))
+      .sort((a, b) => b.lastSeen - a.lastSeen);
+  }, [rows]);
+
+  const runColumns = useMemo<ColumnDef<RunMetricRow>[]>(() => {
+    const columns: ColumnDef<RunMetricRow>[] = [
       {
         id: "expander",
         header: "",
@@ -1100,6 +1254,17 @@ export function AgentMetrics({ agentId }: Props) {
           </Button>
         ),
       },
+    ];
+
+    if (isAllAgents) {
+      columns.push({
+        accessorKey: "agentName",
+        header: "Agent",
+        cell: ({ row }) => row.original.agentName ?? row.original.agentId,
+      });
+    }
+
+    columns.push(
       {
         accessorKey: "createdAt",
         header: "Date",
@@ -1154,9 +1319,21 @@ export function AgentMetrics({ agentId }: Props) {
         header: "Error",
         cell: ({ row }) => row.original.errorType ?? "-",
       },
-    ],
-    [],
-  );
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          <OpenConversationButton
+            agentId={agentId ?? row.original.agentId}
+            conversationId={row.original.conversationId}
+            runId={row.original.runId}
+          />
+        ),
+      },
+    );
+
+    return columns;
+  }, [agentId, isAllAgents]);
 
   const conversationColumns = useMemo<ColumnDef<ConversationSummary>[]>(
     () => [
@@ -1216,8 +1393,18 @@ export function AgentMetrics({ agentId }: Props) {
         accessorKey: "errorCount",
         header: "Errors",
       },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          <OpenConversationButton
+            agentId={agentId ?? row.original.runs[0]?.agentId}
+            conversationId={row.original.conversationId}
+          />
+        ),
+      },
     ],
-    [],
+    [agentId],
   );
 
   const userColumns = useMemo<ColumnDef<UserSummary>[]>(
@@ -1278,6 +1465,70 @@ export function AgentMetrics({ agentId }: Props) {
     [],
   );
 
+  const agentColumns = useMemo<ColumnDef<AgentSummary>[]>(
+    () => [
+      {
+        id: "expander",
+        header: "",
+        cell: ({ row }) => (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={row.getToggleExpandedHandler()}
+          >
+            {row.getIsExpanded() ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </Button>
+        ),
+      },
+      {
+        accessorKey: "agentName",
+        header: "Agent",
+      },
+      {
+        accessorKey: "agentSlug",
+        header: "Slug",
+        cell: ({ row }) =>
+          row.original.agentSlug ? `/${row.original.agentSlug}` : "-",
+      },
+      {
+        accessorKey: "runCount",
+        header: "Runs",
+      },
+      {
+        accessorKey: "totalTokens",
+        header: "Tokens",
+        cell: ({ row }) => formatNumber(row.original.totalTokens),
+      },
+      {
+        accessorKey: "totalCostMicrocents",
+        header: "Cost",
+        cell: ({ row }) => formatCurrency(row.original.totalCostMicrocents),
+      },
+      {
+        accessorKey: "avgLatencyMs",
+        header: "Avg Latency",
+        cell: ({ row }) =>
+          row.original.avgLatencyMs != null
+            ? `${row.original.avgLatencyMs} ms`
+            : "-",
+      },
+      {
+        accessorKey: "lastSeen",
+        header: "Last Seen",
+        cell: ({ row }) => formatDateTime(row.original.lastSeen),
+      },
+      {
+        accessorKey: "errorCount",
+        header: "Errors",
+      },
+    ],
+    [],
+  );
+
   const [runSorting, setRunSorting] = useState<SortingState>([
     { id: "createdAt", desc: true },
   ]);
@@ -1293,6 +1544,23 @@ export function AgentMetrics({ agentId }: Props) {
     getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowCanExpand: () => true,
+  });
+
+  const [agentSorting, setAgentSorting] = useState<SortingState>([
+    { id: "lastSeen", desc: true },
+  ]);
+  const [agentExpanded, setAgentExpanded] = useState<ExpandedState>({});
+  const agentTable = useReactTable({
+    data: agentRows,
+    columns: agentColumns,
+    state: { sorting: agentSorting, expanded: agentExpanded },
+    onSortingChange: setAgentSorting,
+    onExpandedChange: setAgentExpanded,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getRowCanExpand: (row) => row.original.runs.length > 0,
   });
 
   const [conversationSorting, setConversationSorting] = useState<SortingState>([
@@ -1331,6 +1599,7 @@ export function AgentMetrics({ agentId }: Props) {
   });
 
   const viewControls = [
+    ...(isAllAgents ? [{ id: "agents", label: "Agents" } as const] : []),
     { id: "runs", label: "Runs" },
     { id: "conversations", label: "Conversations" },
     { id: "users", label: "Users" },
@@ -1339,7 +1608,14 @@ export function AgentMetrics({ agentId }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold">Analytics</h2>
+        <div>
+          <h2 className="text-xl font-semibold">Analytics</h2>
+          {isAllAgents && (
+            <p className="text-sm text-muted-foreground">
+              Usage, cost, latency, and RAG quality across all visible agents.
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Time period:</span>
           <Select
@@ -1367,6 +1643,11 @@ export function AgentMetrics({ agentId }: Props) {
         <div className="bg-card border rounded-lg p-4">
           <div className="text-sm text-muted-foreground">Runs</div>
           <div className="text-xl font-semibold">{totalRuns}</div>
+          {isAllAgents && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Across {agentRows.length} agents
+            </div>
+          )}
         </div>
         <div className="bg-card border rounded-lg p-4">
           <div className="text-sm text-muted-foreground">Tokens (total)</div>
@@ -1559,7 +1840,26 @@ export function AgentMetrics({ agentId }: Props) {
           <MetricsTable
             table={runTable}
             emptyMessage="No metrics recorded yet."
-            renderExpanded={(row) => <RunDetails run={row.original} />}
+            renderExpanded={(row) => (
+              <RunDetails
+                agentId={agentId ?? row.original.agentId}
+                run={row.original}
+                showAgent={isAllAgents}
+              />
+            )}
+          />
+        )}
+
+        {activeView === "agents" && (
+          <MetricsTable
+            table={agentTable}
+            emptyMessage="No agent metrics recorded yet."
+            renderExpanded={(row) => (
+              <AggregateDetails
+                agentId={row.original.agentId}
+                runs={row.original.runs}
+              />
+            )}
           />
         )}
 
@@ -1568,7 +1868,12 @@ export function AgentMetrics({ agentId }: Props) {
             table={conversationTable}
             emptyMessage="No conversations recorded yet."
             renderExpanded={(row) => (
-              <AggregateDetails runs={row.original.runs} />
+              <AggregateDetails
+                agentId={agentId ?? row.original.runs[0]?.agentId}
+                conversationId={row.original.conversationId}
+                runs={row.original.runs}
+                showAgent={isAllAgents}
+              />
             )}
           />
         )}
@@ -1578,7 +1883,11 @@ export function AgentMetrics({ agentId }: Props) {
             table={userTable}
             emptyMessage="No users recorded yet."
             renderExpanded={(row) => (
-              <AggregateDetails runs={row.original.runs} />
+              <AggregateDetails
+                agentId={agentId}
+                runs={row.original.runs}
+                showAgent={isAllAgents}
+              />
             )}
           />
         )}

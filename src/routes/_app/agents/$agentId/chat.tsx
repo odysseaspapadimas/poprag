@@ -6,11 +6,21 @@ import { useTRPC } from "@/integrations/trpc/react";
 
 export const Route = createFileRoute("/_app/agents/$agentId/chat")({
   component: ChatPage,
-  validateSearch: () => ({}),
+  validateSearch: (search: Record<string, unknown>) => {
+    const parsed: { conversationId?: string; runId?: string } = {};
+    if (typeof search.conversationId === "string") {
+      parsed.conversationId = search.conversationId;
+    }
+    if (typeof search.runId === "string") {
+      parsed.runId = search.runId;
+    }
+    return parsed;
+  },
 });
 
 function ChatPage() {
   const { agentId } = Route.useParams();
+  const { conversationId, runId } = Route.useSearch();
   const trpc = useTRPC();
   const { data: agent } = useSuspenseQuery(
     trpc.agent.get.queryOptions({ id: agentId }),
@@ -57,7 +67,9 @@ function ChatPage() {
           <div>
             <h1 className="text-3xl font-bold">Chat with {agent.name}</h1>
             <p className="text-muted-foreground mt-1">
-              Ask questions about your knowledge base
+              {conversationId || runId
+                ? "Loaded saved conversation"
+                : "Ask questions about your knowledge base"}
             </p>
           </div>
           <Button asChild variant="outline">
@@ -74,7 +86,11 @@ function ChatPage() {
 
       {/* Chat Container */}
       <div className="bg-card border rounded-lg overflow-hidden flex-1">
-        <Chat agentId={agentId} />
+        <Chat
+          agentId={agentId}
+          initialConversationId={conversationId}
+          initialRunId={runId}
+        />
       </div>
     </div>
   );
