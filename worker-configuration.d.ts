@@ -23,6 +23,7 @@ declare namespace Cloudflare {
 		VECTORIZE: Vectorize;
 		AI: Ai;
 		KNOWLEDGE_INDEX_QUEUE: Queue<{ sourceId: string; agentId: string }>;
+		CATALOG_SYNC_WORKFLOW: Workflow<{ configId?: string; trigger?: "manual" | "scheduled"; mode?: "auto" | "diff" | "snapshot" } | undefined>;
 	}
 }
 interface Env extends Cloudflare.Env {}

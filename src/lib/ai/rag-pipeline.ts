@@ -12,6 +12,7 @@ import { generateText } from "ai";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks, knowledgeSource } from "@/db/schema";
+import { findCatalogExactMatches } from "@/lib/catalog/sync";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -76,6 +77,7 @@ export interface RAGDebugInfo {
   vectorFilterApplied?: boolean;
   vectorFilterReason?: string;
   vectorFallbackTopK?: number;
+  catalogExactMatchCount?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
   chunks?: Array<{
@@ -96,6 +98,7 @@ export interface RAGDebugInfo {
     vectorSearchMs?: number;
     ftsSearchMs?: number;
     hybridSearchMs?: number;
+    catalogExactSearchMs?: number;
     rerankMs?: number;
     enrichmentMs?: number;
     totalRagMs?: number;
@@ -130,6 +133,8 @@ interface MatchMetadata {
   sourceId?: string;
   chunkIndex?: number;
   documentId?: string;
+  productId?: string;
+  catalogProduct?: boolean;
   [key: string]: unknown;
 }
 
@@ -822,6 +827,22 @@ export async function performRAGRetrieval(
   // Step 3: Hybrid search (uses platform-wide embedding model)
   const topK = config.topK || RAG_CONFIG.TOP_K;
   const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
+  const catalogExactSearchStart = Date.now();
+  const catalogExactMatches = await findCatalogExactMatches({
+    query: effectiveQuery,
+    agentId,
+    knowledgeSourceIds: config.experienceKnowledgeIds,
+    limit: topK,
+  });
+  debugInfo.timing!.catalogExactSearchMs = Date.now() - catalogExactSearchStart;
+  debugInfo.catalogExactMatchCount = catalogExactMatches.length;
+
+  if (catalogExactMatches.length > 0) {
+    console.log(
+      `[RAG Pipeline] Catalog exact lookup returned ${catalogExactMatches.length} product match(es)`,
+    );
+  }
+
   const hybridSearchStart = Date.now();
   const searchResult = await hybridSearch(
     queries,
@@ -853,7 +874,11 @@ export async function performRAGRetrieval(
   // Step 4: Enrich with full text from D1 BEFORE reranking
   // Vector results have empty content (Vectorize metadata no longer stores text)
   // The reranker needs actual text content to score, so enrichment must come first
-  let topMatches = searchResult.results.slice(0, 20); // Candidates for reranking
+  const exactIds = new Set(catalogExactMatches.map((match) => match.id));
+  let topMatches = [
+    ...catalogExactMatches,
+    ...searchResult.results.filter((match) => !exactIds.has(match.id)),
+  ].slice(0, 20); // Candidates for reranking
   debugInfo.rerankEnabled = config.rerank;
 
   if (topMatches.length > 0) {
@@ -879,6 +904,14 @@ export async function performRAGRetrieval(
   } else if (topMatches.length > 0) {
     // No reranking, just take top results
     topMatches = topMatches.slice(0, topK);
+  }
+
+  if (catalogExactMatches.length > 0) {
+    const currentIds = new Set(catalogExactMatches.map((match) => match.id));
+    topMatches = [
+      ...catalogExactMatches,
+      ...topMatches.filter((match) => !currentIds.has(match.id)),
+    ].slice(0, topK);
   }
 
   // Step 6: Expand with neighbor chunks
@@ -971,6 +1004,9 @@ async function enrichWithFullText(
         text: documentChunks.text,
         documentId: documentChunks.documentId,
         chunkIndex: documentChunks.chunkIndex,
+        productId: documentChunks.productId,
+        recordKey: documentChunks.recordKey,
+        chunkMetadata: documentChunks.metadata,
         fileName: knowledgeSource.fileName,
       })
       .from(documentChunks)
@@ -1005,6 +1041,9 @@ async function enrichWithFullText(
             sourceId: row.documentId,
             documentId: row.documentId,
             chunkIndex: row.chunkIndex,
+            productId: row.productId,
+            recordKey: row.recordKey,
+            ...(row.chunkMetadata ?? {}),
           },
         });
         continue;
@@ -1041,15 +1080,18 @@ async function expandWithNeighborChunks(
     (match) =>
       match.metadata?.sourceId && match.metadata?.chunkIndex !== undefined,
   );
+  const neighborEligibleMatches = baseMatches.filter(
+    (match) => !match.metadata?.catalogProduct && !match.metadata?.productId,
+  );
 
-  if (baseMatches.length === 0) return matches;
+  if (neighborEligibleMatches.length === 0) return matches;
 
   type NeighborKey = `${string}:${number}`;
   const baseByKey = new Map<NeighborKey, HybridSearchResult>();
   const neighborTargetSet = new Set<NeighborKey>();
   const neighborTargets: Array<{ documentId: string; chunkIndex: number }> = [];
 
-  baseMatches.forEach((match) => {
+  neighborEligibleMatches.forEach((match) => {
     const metadata = match.metadata as MatchMetadata;
     const documentId = metadata.documentId || metadata.sourceId;
     const chunkIndex = metadata.chunkIndex;

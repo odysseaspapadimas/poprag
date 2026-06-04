@@ -6,6 +6,7 @@ import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
 import AgentMetrics from "@/components/agent-metrics";
+import { CatalogSyncDialog } from "@/components/catalog-sync-dialog";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
 import { ExperienceList } from "@/components/experiences/ExperienceList";
@@ -17,6 +18,7 @@ import { ModelPolicyEditor } from "@/components/model-policy-editor";
 import { PromptManagement } from "@/components/prompt-management";
 import { RAGSettings } from "@/components/rag-settings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/integrations/trpc/react";
 import type { AppRouter } from "@/integrations/trpc/router";
@@ -136,6 +138,9 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
             context.queryClient.prefetchQuery(
               context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
             ),
+            context.queryClient.prefetchQuery(
+              context.trpc.catalogSync.list.queryOptions({ agentId }),
+            ),
           ];
         case "experiences":
           return [
@@ -158,7 +163,6 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
               }),
             ),
           ];
-        case "analytics":
         default:
           return [];
       }
@@ -667,6 +671,21 @@ function KnowledgeTab({
   onViewSource: (source: SourceViewerState) => void;
 }) {
   const { data: knowledgeSources } = useKnowledgeSources(agentId);
+  const trpc = useTRPC();
+  const { data: catalogConfigs } = useSuspenseQuery({
+    ...trpc.catalogSync.list.queryOptions({ agentId }),
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const configs = query.state.data;
+      return configs?.some((config) => config.lastRunStatus === "running")
+        ? 1500
+        : false;
+    },
+    refetchIntervalInBackground: true,
+  });
+  const catalogConfigBySource = new Map(
+    catalogConfigs.map((config) => [config.knowledgeSourceId, config]),
+  );
 
   return (
     <div className="bg-card border rounded-lg p-6">
@@ -683,6 +702,10 @@ function KnowledgeTab({
             agentName={agentName}
             knowledgeSourceCount={knowledgeSources.length}
           />
+          <CatalogSyncDialog
+            agentId={agentId}
+            trigger={<Button variant="outline">Add Catalog Sync</Button>}
+          />
           <KnowledgeUploadDialog
             agentId={agentId}
             trigger={<Button>Upload Knowledge Source</Button>}
@@ -690,40 +713,71 @@ function KnowledgeTab({
         </div>
       </div>
       <div className="space-y-4">
-        {knowledgeSources.map((source) => (
-          <div
-            key={source.id}
-            className="flex flex-col gap-3 rounded border p-4 sm:flex-row sm:items-start sm:justify-between"
-          >
-            <div className="min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() =>
-                  onViewSource({
-                    id: source.id,
-                    fileName: source.fileName || "Unknown",
-                    mime: source.mime,
-                  })
-                }
-                className="font-medium hover:text-primary transition-colors text-left"
-              >
-                {source.fileName}
-              </button>
-              <p className="text-sm text-muted-foreground">
-                {source.mime} • {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
-                {formatDate(source.createdAt)}
-              </p>
-              <KnowledgeSourceProgress
-                source={source}
-                compact
-                className="mt-2 max-w-xl"
-              />
+        {knowledgeSources.map((source) => {
+          const catalogConfig = catalogConfigBySource.get(source.id);
+          return (
+            <div
+              key={source.id}
+              className="flex flex-col gap-3 rounded border p-4 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onViewSource({
+                      id: source.id,
+                      fileName: source.fileName || "Unknown",
+                      mime: source.mime,
+                    })
+                  }
+                  className="font-medium hover:text-primary transition-colors text-left"
+                >
+                  {source.fileName}
+                </button>
+                <p className="text-sm text-muted-foreground">
+                  {source.mime} • {((source.bytes ?? 0) / 1024).toFixed(2)} KB •{" "}
+                  {formatDate(source.createdAt)}
+                </p>
+                {catalogConfig ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">Catalog</Badge>
+                    <Badge
+                      variant={
+                        catalogConfig.lastRunStatus === "failed"
+                          ? "destructive"
+                          : "outline"
+                      }
+                    >
+                      {catalogConfig.lastRunStatus ?? "not synced"}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {catalogConfig.productCounts.active} active /{" "}
+                      {catalogConfig.productCounts.total} total products
+                    </span>
+                    {catalogConfig.lastSuccessfulSyncAt ? (
+                      <span className="text-xs text-muted-foreground">
+                        Last sync:{" "}
+                        {formatDateTime(catalogConfig.lastSuccessfulSyncAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <KnowledgeSourceProgress
+                  source={source}
+                  compact
+                  className="mt-2 max-w-xl"
+                />
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-start">
+                <KnowledgeSourceActions
+                  source={source}
+                  agentId={agentId}
+                  catalogConfig={catalogConfig}
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2 self-end sm:self-start">
-              <KnowledgeSourceActions source={source} agentId={agentId} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {knowledgeSources.length === 0 ? (
           <p className="text-center text-muted-foreground py-8">
             No knowledge sources. Upload files to get started.

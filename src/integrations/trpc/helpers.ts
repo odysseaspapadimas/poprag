@@ -32,6 +32,10 @@ export type AuditEventType =
   | "knowledge.reindexed"
   | "knowledge.deleted"
   | "knowledge.failed"
+  | "knowledge.catalog_sync.created"
+  | "knowledge.catalog_sync.updated"
+  | "knowledge.catalog_sync.disabled"
+  | "knowledge.catalog_sync.queued"
   // Prompt events
   | "prompt.version_created"
   | "prompt.version_updated"

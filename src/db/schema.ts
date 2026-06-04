@@ -5,6 +5,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable(
@@ -330,6 +331,45 @@ export const knowledgeSource = sqliteTable(
   ],
 );
 
+export const catalogProduct = sqliteTable(
+  "catalog_product",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    recordKey: text("record_key").notNull(),
+    recordHash: text("record_hash").notNull(),
+    title: text("title"),
+    searchText: text("search_text"),
+    data: text("data", { mode: "json" }).$type<Record<string, unknown>>(),
+    status: text("status", { enum: ["active", "inactive"] })
+      .default("active")
+      .notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+    deactivatedAt: integer("deactivated_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("catalog_product_source_record_key_idx").on(
+      table.sourceId,
+      table.recordKey,
+    ),
+    index("catalog_product_agent_idx").on(table.agentId),
+    index("catalog_product_source_status_idx").on(table.sourceId, table.status),
+    index("catalog_product_record_key_idx").on(table.recordKey),
+  ],
+);
+
 export const documentChunks = sqliteTable(
   "document_chunks",
   {
@@ -341,6 +381,14 @@ export const documentChunks = sqliteTable(
     sessionId: text("agent_id").notNull(), // Maps to agent_id column in database
     chunkIndex: integer("chunk_index").notNull(),
     vectorizeId: text("vectorize_id"), // Link to Vectorize vector
+    productId: text("product_id").references(() => catalogProduct.id, {
+      onDelete: "set null",
+    }),
+    recordKey: text("record_key"),
+    recordHash: text("record_hash"),
+    metadata: text("metadata", { mode: "json" }).$type<
+      Record<string, unknown>
+    >(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -348,6 +396,11 @@ export const documentChunks = sqliteTable(
   (table) => [
     index("document_chunks_document_idx").on(table.documentId),
     index("document_chunks_session_idx").on(table.sessionId),
+    index("document_chunks_product_idx").on(table.productId),
+    index("document_chunks_record_key_idx").on(
+      table.documentId,
+      table.recordKey,
+    ),
   ],
 );
 
@@ -547,6 +600,121 @@ export const agentExperienceKnowledge = sqliteTable(
   ],
 );
 
+export const catalogSyncConfig = sqliteTable(
+  "catalog_sync_config",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    knowledgeSourceId: text("knowledge_source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" })
+      .unique(),
+    experienceId: text("experience_id").references(() => agentExperience.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+    snapshotUrl: text("snapshot_url").notNull(),
+    diffUrl: text("diff_url").notNull(),
+    authHeaderName: text("auth_header_name"),
+    authSecretName: text("auth_secret_name"),
+    updatedSinceParam: text("updated_since_param")
+      .default("effectiveUpdatedAfter")
+      .notNull(),
+    itemPath: text("item_path").default("").notNull(),
+    stableKeyField: text("stable_key_field").notNull(),
+    updatedAtField: text("updated_at_field"),
+    deletionField: text("deletion_field"),
+    deletionInactiveValues: text("deletion_inactive_values", {
+      mode: "json",
+    }).$type<string[]>(),
+    titleField: text("title_field").notNull(),
+    searchableFields: text("searchable_fields", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
+    exactMatchFields: text("exact_match_fields", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
+    syncIntervalDays: integer("sync_interval_days").default(7).notNull(),
+    scheduleWeekdayUtc: integer("schedule_weekday_utc").default(1).notNull(),
+    scheduleHourUtc: integer("schedule_hour_utc").default(3).notNull(),
+    nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }),
+    cursorLastSuccessfulAt: integer("cursor_last_successful_at", {
+      mode: "timestamp_ms",
+    }),
+    lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
+    lastSuccessfulSyncAt: integer("last_successful_sync_at", {
+      mode: "timestamp_ms",
+    }),
+    lastRunId: text("last_run_id"),
+    lastRunStatus: text("last_run_status", {
+      enum: ["queued", "running", "succeeded", "failed", "skipped"],
+    }),
+    lastRunError: text("last_run_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("catalog_sync_config_agent_idx").on(table.agentId),
+    index("catalog_sync_config_due_idx").on(table.enabled, table.nextRunAt),
+    index("catalog_sync_config_source_idx").on(table.knowledgeSourceId),
+  ],
+);
+
+export const catalogSyncRun = sqliteTable(
+  "catalog_sync_run",
+  {
+    id: text("id").primaryKey(),
+    configId: text("config_id")
+      .notNull()
+      .references(() => catalogSyncConfig.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    knowledgeSourceId: text("knowledge_source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    workflowInstanceId: text("workflow_instance_id"),
+    trigger: text("trigger", { enum: ["manual", "scheduled"] })
+      .default("manual")
+      .notNull(),
+    mode: text("mode", { enum: ["auto", "diff", "snapshot"] })
+      .default("auto")
+      .notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "succeeded", "failed", "skipped"],
+    })
+      .default("queued")
+      .notNull(),
+    checkedSince: integer("checked_since", { mode: "timestamp_ms" }),
+    nextCursorAt: integer("next_cursor_at", { mode: "timestamp_ms" }),
+    rawR2Key: text("raw_r2_key"),
+    stats: text("stats", { mode: "json" }).$type<Record<string, unknown>>(),
+    error: text("error"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("catalog_sync_run_config_idx").on(table.configId, table.createdAt),
+    index("catalog_sync_run_source_idx").on(table.knowledgeSourceId),
+    index("catalog_sync_run_status_idx").on(table.status),
+  ],
+);
+
 // ─────────────────────────────────────────────────────
 // Agent Type exports
 // ─────────────────────────────────────────────────────
@@ -567,6 +735,9 @@ export type InsertPromptVersion = typeof promptVersion.$inferInsert;
 
 export type KnowledgeSource = typeof knowledgeSource.$inferSelect;
 export type InsertKnowledgeSource = typeof knowledgeSource.$inferInsert;
+
+export type CatalogProduct = typeof catalogProduct.$inferSelect;
+export type InsertCatalogProduct = typeof catalogProduct.$inferInsert;
 
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type InsertDocumentChunk = typeof documentChunks.$inferInsert;
@@ -596,6 +767,11 @@ export type AgentExperienceKnowledge =
   typeof agentExperienceKnowledge.$inferSelect;
 export type InsertAgentExperienceKnowledge =
   typeof agentExperienceKnowledge.$inferInsert;
+
+export type CatalogSyncConfig = typeof catalogSyncConfig.$inferSelect;
+export type InsertCatalogSyncConfig = typeof catalogSyncConfig.$inferInsert;
+export type CatalogSyncRun = typeof catalogSyncRun.$inferSelect;
+export type InsertCatalogSyncRun = typeof catalogSyncRun.$inferInsert;
 
 // ─────────────────────────────────────────────────────
 // Firebase User (for external API authentication)

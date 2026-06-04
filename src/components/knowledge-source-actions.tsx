@@ -1,7 +1,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import {
+  DatabaseZap,
+  History,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CatalogSyncDialog } from "@/components/catalog-sync-dialog";
+import { CatalogSyncRunsDialog } from "@/components/catalog-sync-runs-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,13 +37,38 @@ import { useTRPC } from "@/integrations/trpc/react";
 interface KnowledgeSourceActionsProps {
   source: KnowledgeSource;
   agentId: string;
+  catalogConfig?: {
+    id: string;
+    name: string;
+    experienceId: string | null;
+    snapshotUrl: string;
+    diffUrl: string;
+    authHeaderName: string | null;
+    authSecretName: string | null;
+    updatedSinceParam: string;
+    itemPath: string;
+    stableKeyField: string;
+    updatedAtField: string | null;
+    deletionField: string | null;
+    deletionInactiveValues: string[] | null;
+    titleField: string;
+    searchableFields: string[] | null;
+    exactMatchFields: string[] | null;
+    syncIntervalDays: number;
+    scheduleWeekdayUtc: number;
+    scheduleHourUtc: number;
+    enabled: boolean;
+  };
 }
 
 export function KnowledgeSourceActions({
   source,
   agentId,
+  catalogConfig,
 }: KnowledgeSourceActionsProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editCatalogOpen, setEditCatalogOpen] = useState(false);
+  const [runsOpen, setRunsOpen] = useState(false);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -82,6 +117,32 @@ export function KnowledgeSourceActions({
     }),
   );
 
+  const runCatalogSyncMutation = useMutation(
+    trpc.catalogSync.run.mutationOptions({
+      onMutate: () => {
+        toast.loading(`Queueing catalog sync for ${source.fileName}...`, {
+          id: `catalog-sync-${source.id}`,
+        });
+      },
+      onSuccess: () => {
+        toast.success(`Catalog sync queued for ${source.fileName}`, {
+          id: `catalog-sync-${source.id}`,
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.catalogSync.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
+        });
+      },
+      onError: (error) => {
+        toast.error(`Catalog sync failed to queue: ${error.message}`, {
+          id: `catalog-sync-${source.id}`,
+        });
+      },
+    }),
+  );
+
   const handleReindex = () => {
     reindexMutation.mutate({
       sourceId: source.id,
@@ -94,7 +155,16 @@ export function KnowledgeSourceActions({
     });
   };
 
-  const isReindexing = reindexMutation.isPending;
+  const handleRunCatalogSync = () => {
+    if (!catalogConfig) return;
+    runCatalogSyncMutation.mutate({
+      configId: catalogConfig.id,
+      mode: "auto",
+    });
+  };
+
+  const isReindexing =
+    reindexMutation.isPending || runCatalogSyncMutation.isPending;
 
   return (
     <>
@@ -118,6 +188,25 @@ export function KnowledgeSourceActions({
               <RefreshCw className="mr-2 h-4 w-4" />
               Re-index
             </DropdownMenuItem>
+            {catalogConfig ? (
+              <>
+                <DropdownMenuItem
+                  onClick={handleRunCatalogSync}
+                  disabled={runCatalogSyncMutation.isPending}
+                >
+                  <DatabaseZap className="mr-2 h-4 w-4" />
+                  Run sync
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditCatalogOpen(true)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit sync
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setRunsOpen(true)}>
+                  <History className="mr-2 h-4 w-4" />
+                  Sync runs
+                </DropdownMenuItem>
+              </>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => setDeleteDialogOpen(true)}
@@ -152,6 +241,23 @@ export function KnowledgeSourceActions({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {catalogConfig ? (
+        <>
+          <CatalogSyncDialog
+            agentId={agentId}
+            config={catalogConfig}
+            open={editCatalogOpen}
+            onOpenChange={setEditCatalogOpen}
+          />
+          <CatalogSyncRunsDialog
+            configId={catalogConfig.id}
+            name={catalogConfig.name}
+            open={runsOpen}
+            onOpenChange={setRunsOpen}
+          />
+        </>
+      ) : null}
     </>
   );
 }

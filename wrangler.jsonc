@@ -50,6 +50,14 @@
       },
     ],
   },
+  "workflows": [
+    {
+      "name": "catalog-sync-workflow",
+      "binding": "CATALOG_SYNC_WORKFLOW",
+      "class_name": "CatalogSyncWorkflow",
+      "schedules": ["0 * * * *"],
+    },
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

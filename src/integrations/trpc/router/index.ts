@@ -5,6 +5,7 @@ import {
 import { userRouter } from "@/integrations/trpc/router/user";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
+import { catalogSyncRouter } from "./catalog-sync";
 import { chatRouter } from "./chat";
 import { experienceRouter } from "./experience";
 import { knowledgeRouter } from "./knowledge";
@@ -20,6 +21,7 @@ export const appRouter = createTRPCRouter({
   model: modelRouter,
   chat: chatRouter,
   experience: experienceRouter,
+  catalogSync: catalogSyncRouter,
 });
 
 export type AppRouter = typeof appRouter;

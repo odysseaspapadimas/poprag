@@ -28,6 +28,7 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
+  catalogExactMatchCount?: number;
   vectorSearchMode?:
     | "unfiltered"
     | "direct_filtered_query"
@@ -56,6 +57,7 @@ interface RAGDebugInfo {
     vectorSearchMs?: number;
     ftsSearchMs?: number;
     hybridSearchMs?: number;
+    catalogExactSearchMs?: number;
     rerankMs?: number;
     enrichmentMs?: number;
     totalRagMs?: number;
@@ -363,7 +365,15 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <BarChart3 className="h-4 w-4" />
               <span>Search Results</span>
             </div>
-            <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="pl-6 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="bg-background border rounded p-2">
+                <div className="text-xs text-muted-foreground">
+                  Catalog Exact
+                </div>
+                <div className="text-lg font-semibold">
+                  {debugInfo.catalogExactMatchCount ?? 0}
+                </div>
+              </div>
               <div className="bg-background border rounded p-2">
                 <div className="text-xs text-muted-foreground">
                   Vector Results
@@ -561,6 +571,19 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.queryRewriteMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.catalogExactSearchMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Catalog Exact
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.catalogExactSearchMs}
                         <span className="text-xs font-normal text-muted-foreground">
                           ms
                         </span>
