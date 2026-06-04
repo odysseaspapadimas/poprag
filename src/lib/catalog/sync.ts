@@ -1,4 +1,14 @@
-import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -48,6 +58,25 @@ export interface CatalogExactMatch {
   content: string;
   metadata: Record<string, unknown>;
 }
+
+export type CatalogStructuredIntent = "count" | "list";
+
+export interface CatalogStructuredQueryResult {
+  intent: CatalogStructuredIntent;
+  totalActiveProducts: number;
+  returnedProducts: number;
+  match: CatalogExactMatch;
+}
+
+type CatalogStructuredProductRow = {
+  productId: string;
+  sourceId: string;
+  recordKey: string;
+  title: string | null;
+  data: Record<string, unknown> | null;
+  exactMatchFields: string[] | null;
+  fileName: string | null;
+};
 
 type CatalogSyncConfigRow = CatalogSyncConfig & {
   sourceFileName: string | null;
@@ -574,6 +603,198 @@ export async function findCatalogExactMatches(options: {
       },
     };
   });
+}
+
+export async function countActiveCatalogProducts(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+}): Promise<number> {
+  const [row] = await db
+    .select({ total: count() })
+    .from(catalogProduct)
+    .innerJoin(
+      catalogSyncConfig,
+      eq(catalogSyncConfig.knowledgeSourceId, catalogProduct.sourceId),
+    )
+    .innerJoin(knowledgeSource, eq(knowledgeSource.id, catalogProduct.sourceId))
+    .where(buildActiveCatalogProductWhere(options));
+
+  return Number(row?.total ?? 0);
+}
+
+export async function findCatalogStructuredQueryResult(options: {
+  intent: CatalogStructuredIntent;
+  agentId: string;
+  knowledgeSourceIds?: string[];
+  limit?: number;
+}): Promise<CatalogStructuredQueryResult | null> {
+  const totalActiveProducts = await countActiveCatalogProducts(options);
+  if (totalActiveProducts === 0) return null;
+
+  const productLimit =
+    options.intent === "list"
+      ? Math.max(1, Math.min(options.limit ?? 30, 50))
+      : 0;
+  const products =
+    productLimit > 0
+      ? await listActiveCatalogProducts({
+          ...options,
+          limit: productLimit,
+        })
+      : [];
+
+  const content = buildCatalogStructuredContent({
+    intent: options.intent,
+    totalActiveProducts,
+    products,
+  });
+
+  return {
+    intent: options.intent,
+    totalActiveProducts,
+    returnedProducts: products.length,
+    match: {
+      id: `catalog-structured:${options.agentId}:${options.intent}`,
+      score: 2,
+      content,
+      metadata: {
+        catalogStructuredQuery: true,
+        catalogStructuredIntent: options.intent,
+        totalActiveProducts,
+        productsReturned: products.length,
+        sourceId: products[0]?.sourceId ?? `catalog:${options.agentId}`,
+        fileName: "Catalog inventory",
+      },
+    },
+  };
+}
+
+async function listActiveCatalogProducts(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+  limit: number;
+}): Promise<CatalogStructuredProductRow[]> {
+  return db
+    .select({
+      productId: catalogProduct.id,
+      sourceId: catalogProduct.sourceId,
+      recordKey: catalogProduct.recordKey,
+      title: catalogProduct.title,
+      data: catalogProduct.data,
+      exactMatchFields: catalogSyncConfig.exactMatchFields,
+      fileName: knowledgeSource.fileName,
+    })
+    .from(catalogProduct)
+    .innerJoin(
+      catalogSyncConfig,
+      eq(catalogSyncConfig.knowledgeSourceId, catalogProduct.sourceId),
+    )
+    .innerJoin(knowledgeSource, eq(knowledgeSource.id, catalogProduct.sourceId))
+    .where(buildActiveCatalogProductWhere(options))
+    .orderBy(asc(catalogProduct.title), asc(catalogProduct.recordKey))
+    .limit(options.limit);
+}
+
+function buildActiveCatalogProductWhere(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+}) {
+  const sourceFilter =
+    options.knowledgeSourceIds && options.knowledgeSourceIds.length > 0
+      ? inArray(catalogProduct.sourceId, options.knowledgeSourceIds)
+      : undefined;
+
+  return and(
+    eq(catalogProduct.agentId, options.agentId),
+    eq(catalogProduct.status, "active"),
+    eq(catalogSyncConfig.enabled, true),
+    eq(knowledgeSource.status, "indexed"),
+    sourceFilter,
+  );
+}
+
+function buildCatalogStructuredContent(options: {
+  intent: CatalogStructuredIntent;
+  totalActiveProducts: number;
+  products: CatalogStructuredProductRow[];
+}): string {
+  const lines = [
+    "Catalog inventory summary (authoritative structured data from active catalog products).",
+    `User inventory intent: ${options.intent}`,
+    `Total active products: ${options.totalActiveProducts}`,
+    `Products returned in this context: ${options.products.length}`,
+  ];
+
+  if (options.intent === "count") {
+    lines.push(
+      "Answer count questions using the exact total active products above.",
+    );
+    return lines.join("\n");
+  }
+
+  lines.push(
+    "For broad product-list questions, list the products returned below. If products returned is less than total active products, say this is a partial list and invite the user to narrow by brand, category, product name, SKU, or barcode.",
+    "",
+    "Products:",
+  );
+
+  for (const [index, product] of options.products.entries()) {
+    lines.push(`${index + 1}. ${formatCatalogStructuredProduct(product)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatCatalogStructuredProduct(
+  product: CatalogStructuredProductRow,
+): string {
+  const data = product.data ?? {};
+  const facts = new Map<string, string>();
+
+  facts.set("recordKey", product.recordKey);
+  addCatalogFact(facts, "code", getPathValue(data, "code"));
+  addCatalogFact(
+    facts,
+    "supplierSKU",
+    getPathValue(data, "document.identity-codes.supplierSKU"),
+  );
+  addCatalogFact(
+    facts,
+    "gtin",
+    getPathValue(data, "document.gs1-and-barcode.gtin"),
+  );
+  addCatalogFact(
+    facts,
+    "boxBarcode",
+    getPathValue(data, "document.box-description.boxBarcode"),
+  );
+  addCatalogFact(
+    facts,
+    "brand",
+    getPathValue(data, "parent.documentSummary.name.el-GR"),
+  );
+  addCatalogFact(facts, "category", getPathValue(data, "category"));
+
+  for (const field of product.exactMatchFields ?? []) {
+    addCatalogFact(facts, field, getPathValue(data, field));
+  }
+
+  const factText = [...facts.entries()]
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("; ");
+
+  return `${product.title || product.recordKey}${factText ? ` (${factText})` : ""}`;
+}
+
+function addCatalogFact(
+  facts: Map<string, string>,
+  label: string,
+  value: unknown,
+): void {
+  const stringValue = stringifyScalar(value);
+  if (!stringValue || facts.has(label)) return;
+  facts.set(label, stringValue);
 }
 
 async function loadCatalogSyncConfig(

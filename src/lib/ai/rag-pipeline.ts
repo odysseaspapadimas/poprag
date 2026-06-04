@@ -12,7 +12,12 @@ import { generateText } from "ai";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { documentChunks, knowledgeSource } from "@/db/schema";
-import { findCatalogExactMatches } from "@/lib/catalog/sync";
+import {
+  type CatalogStructuredIntent,
+  countActiveCatalogProducts,
+  findCatalogExactMatches,
+  findCatalogStructuredQueryResult,
+} from "@/lib/catalog/sync";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -77,6 +82,10 @@ export interface RAGDebugInfo {
   vectorFilterApplied?: boolean;
   vectorFilterReason?: string;
   vectorFallbackTopK?: number;
+  catalogStructuredIntent?: CatalogStructuredIntent | "none";
+  catalogStructuredIntentReason?: string;
+  catalogActiveProductCount?: number;
+  catalogStructuredProductsReturned?: number;
   catalogExactMatchCount?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
@@ -98,6 +107,8 @@ export interface RAGDebugInfo {
     vectorSearchMs?: number;
     ftsSearchMs?: number;
     hybridSearchMs?: number;
+    catalogStructuredIntentMs?: number;
+    catalogStructuredQueryMs?: number;
     catalogExactSearchMs?: number;
     rerankMs?: number;
     enrichmentMs?: number;
@@ -108,6 +119,7 @@ export interface RAGDebugInfo {
     imageContextModel?: string;
     conversationalReformulationModel?: string;
     intentModel?: string;
+    catalogStructuredIntentModel?: string;
     rewriteModel?: string;
     rerankModel?: string;
     chatModel?: string;
@@ -318,6 +330,66 @@ Respond ONLY with valid JSON in this exact format:
     return {
       requiresRAG: true,
       reason: "Classification failed, defaulting to RAG",
+    };
+  }
+}
+
+export async function classifyCatalogStructuredIntent(
+  model: LanguageModel,
+  query: string,
+): Promise<{ intent: CatalogStructuredIntent | "none"; reason: string }> {
+  try {
+    const { text } = await generateText({
+      model,
+      prompt: `Classify whether this user message is asking for a structured product catalog inventory answer.
+
+The user may write in any language, including Greek. Do not translate the user message; only classify the intent.
+
+Return intent="count" only when the user asks for the total number of products/items/SKUs the agent has, carries, offers, or has available in the product catalog.
+Examples: "how many products do you have?", "πόσα προϊόντα έχετε;", "combien de produits avez-vous ?"
+
+Return intent="list" only when the user asks a broad inventory list of products the agent has/carries/offers, without filters.
+Examples: "which products do you have?", "what products do you carry?", "ποια προϊόντα διαθέτετε;", "list your products"
+
+Return intent="none" for:
+- specific product questions
+- "do you have X?" availability questions
+- product detail questions such as ingredients, dimensions, warnings, price, usage, or barcode
+- filtered or grouped inventory questions such as by brand, category, type, status, country, or keyword
+- recommendations or comparisons
+- anything not about the catalog inventory as a whole
+
+User message: "${query}"
+
+Respond ONLY with valid JSON in this exact shape:
+{"intent":"count"|"list"|"none","reason":"short explanation"}`,
+      temperature: 0,
+      maxOutputTokens: 120,
+      abortSignal: AbortSignal.timeout(1800),
+    });
+
+    const jsonStr = text
+      .trim()
+      .replace(/^```(?:json)?\s*\n?/i, "")
+      .replace(/\n?\s*```$/i, "");
+    const parsed = JSON.parse(jsonStr);
+    const intent =
+      parsed.intent === "count" || parsed.intent === "list"
+        ? parsed.intent
+        : "none";
+
+    return {
+      intent,
+      reason: String(parsed.reason || "No reason provided"),
+    };
+  } catch (error) {
+    console.warn(
+      "[Catalog Structured Intent] Classification failed, using normal RAG:",
+      error,
+    );
+    return {
+      intent: "none",
+      reason: "Classification failed, using normal RAG",
     };
   }
 }
@@ -827,6 +899,85 @@ export async function performRAGRetrieval(
   // Step 3: Hybrid search (uses platform-wide embedding model)
   const topK = config.topK || RAG_CONFIG.TOP_K;
   const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
+
+  const catalogStructuredQueryStart = Date.now();
+  const activeCatalogProductCount = await countActiveCatalogProducts({
+    agentId,
+    knowledgeSourceIds: config.experienceKnowledgeIds,
+  });
+  debugInfo.timing!.catalogStructuredQueryMs =
+    Date.now() - catalogStructuredQueryStart;
+  debugInfo.catalogActiveProductCount = activeCatalogProductCount;
+
+  if (activeCatalogProductCount > 0) {
+    const catalogIntentModelId =
+      config.intentModel || DEFAULT_MODELS.INTENT_CLASSIFICATION;
+    debugInfo.models!.catalogStructuredIntentModel = catalogIntentModelId;
+
+    const catalogStructuredIntentStart = Date.now();
+    const catalogIntentModel =
+      await resolveAndCreateModel(catalogIntentModelId);
+    const catalogIntent = await classifyCatalogStructuredIntent(
+      catalogIntentModel,
+      effectiveQuery,
+    );
+    debugInfo.timing!.catalogStructuredIntentMs =
+      Date.now() - catalogStructuredIntentStart;
+    debugInfo.catalogStructuredIntent = catalogIntent.intent;
+    debugInfo.catalogStructuredIntentReason = catalogIntent.reason;
+
+    if (catalogIntent.intent !== "none") {
+      const structuredLookupStart = Date.now();
+      const structuredCatalogResult = await findCatalogStructuredQueryResult({
+        intent: catalogIntent.intent,
+        agentId,
+        knowledgeSourceIds: config.experienceKnowledgeIds,
+        limit: Math.max(20, topK),
+      });
+      debugInfo.timing!.catalogStructuredQueryMs =
+        (debugInfo.timing!.catalogStructuredQueryMs ?? 0) +
+        (Date.now() - structuredLookupStart);
+
+      if (structuredCatalogResult) {
+        const match = structuredCatalogResult.match;
+        debugInfo.catalogActiveProductCount =
+          structuredCatalogResult.totalActiveProducts;
+        debugInfo.catalogStructuredProductsReturned =
+          structuredCatalogResult.returnedProducts;
+        debugInfo.catalogExactMatchCount = 0;
+        debugInfo.vectorResultsCount = 0;
+        debugInfo.ftsResultsCount = 0;
+        debugInfo.rerankEnabled = false;
+        debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
+
+        debugInfo.chunks = [
+          {
+            id: match.id,
+            content: match.content,
+            score: match.score,
+            vectorScore: match.vectorScore,
+            sourceId: String(match.metadata.sourceId ?? match.id),
+            metadata: match.metadata,
+          },
+        ];
+
+        return {
+          context: {
+            chunks: [
+              {
+                content: match.content,
+                sourceId: String(match.metadata.sourceId ?? match.id),
+                score: match.score,
+                metadata: match.metadata,
+              },
+            ],
+          },
+          debugInfo,
+        };
+      }
+    }
+  }
+
   const catalogExactSearchStart = Date.now();
   const catalogExactMatches = await findCatalogExactMatches({
     query: effectiveQuery,

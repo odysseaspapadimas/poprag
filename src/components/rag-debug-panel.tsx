@@ -28,6 +28,10 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
+  catalogStructuredIntent?: "count" | "list" | "none";
+  catalogStructuredIntentReason?: string;
+  catalogActiveProductCount?: number;
+  catalogStructuredProductsReturned?: number;
   catalogExactMatchCount?: number;
   vectorSearchMode?:
     | "unfiltered"
@@ -57,6 +61,8 @@ interface RAGDebugInfo {
     vectorSearchMs?: number;
     ftsSearchMs?: number;
     hybridSearchMs?: number;
+    catalogStructuredIntentMs?: number;
+    catalogStructuredQueryMs?: number;
     catalogExactSearchMs?: number;
     rerankMs?: number;
     enrichmentMs?: number;
@@ -66,6 +72,7 @@ interface RAGDebugInfo {
   models?: {
     conversationalReformulationModel?: string;
     intentModel?: string;
+    catalogStructuredIntentModel?: string;
     rewriteModel?: string;
     embeddingModel?: string;
     embeddingDimensions?: number;
@@ -365,7 +372,20 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               <BarChart3 className="h-4 w-4" />
               <span>Search Results</span>
             </div>
-            <div className="pl-6 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="pl-6 grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <div className="bg-background border rounded p-2">
+                <div className="text-xs text-muted-foreground">
+                  Active Products
+                </div>
+                <div className="text-lg font-semibold">
+                  {debugInfo.catalogActiveProductCount ?? 0}
+                </div>
+                {debugInfo.catalogStructuredIntent ? (
+                  <div className="text-[11px] text-muted-foreground">
+                    Intent: {debugInfo.catalogStructuredIntent}
+                  </div>
+                ) : null}
+              </div>
               <div className="bg-background border rounded p-2">
                 <div className="text-xs text-muted-foreground">
                   Catalog Exact
@@ -389,6 +409,22 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             </div>
+            {debugInfo.catalogStructuredIntentReason ? (
+              <div className="pl-6 text-xs text-muted-foreground">
+                Catalog inventory reason:{" "}
+                {debugInfo.catalogStructuredIntentReason}
+                {debugInfo.catalogStructuredProductsReturned !== undefined ? (
+                  <>
+                    {" "}
+                    ({debugInfo.catalogStructuredProductsReturned} product
+                    {debugInfo.catalogStructuredProductsReturned === 1
+                      ? ""
+                      : "s"}{" "}
+                    returned)
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {(debugInfo.vectorSearchMode ||
               debugInfo.vectorFilterCapability) && (
               <div className="pl-6 space-y-1 text-xs text-muted-foreground">
@@ -571,6 +607,32 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.queryRewriteMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.catalogStructuredIntentMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Catalog Intent
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.catalogStructuredIntentMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.catalogStructuredQueryMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Catalog Query
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.catalogStructuredQueryMs}
                         <span className="text-xs font-normal text-muted-foreground">
                           ms
                         </span>
