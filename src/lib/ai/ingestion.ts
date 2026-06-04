@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { extractText, getDocumentProxy } from "unpdf";
 import { db } from "@/db";
@@ -21,12 +21,14 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-const VECTORIZE_DELETE_BATCH_SIZE = 100;
+const VECTORIZE_DELETE_BATCH_SIZE = 25;
 const D1_INSERT_BATCH_SIZE = 10; // D1 has ~100 param limit; 10 chunks * 7 fields = 70 params
 const EMBEDDING_BATCH_SIZE = 20;
 const LARGE_DOCUMENT_STREAMING_THRESHOLD_CHARS = 1_000_000;
 const DEFAULT_RETRY_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 400;
+const VECTORIZE_DELETE_RETRY_ATTEMPTS = 5;
+const VECTORIZE_DELETE_RETRY_BASE_DELAY_MS = 1_000;
 const INDEXING_PROGRESS = {
   PARSING: 5,
   PARSING_COMPLETE: 12,
@@ -239,6 +241,28 @@ function* streamChunkBatches(
   }
 }
 
+function* skipChunkBatches(
+  batches: Iterable<string[]>,
+  chunksToSkip: number,
+): Generator<string[]> {
+  let remainingToSkip = Math.max(0, chunksToSkip);
+
+  for (const batch of batches) {
+    if (remainingToSkip >= batch.length) {
+      remainingToSkip -= batch.length;
+      continue;
+    }
+
+    if (remainingToSkip > 0) {
+      yield batch.slice(remainingToSkip);
+      remainingToSkip = 0;
+      continue;
+    }
+
+    yield batch;
+  }
+}
+
 export function isResourceExhaustionError(error: unknown): boolean {
   const message = getErrorMessage(error).toLowerCase();
   return RESOURCE_ERROR_HINTS.some((hint) => message.includes(hint));
@@ -336,19 +360,22 @@ export async function deleteVectorizeIds(
   },
 ): Promise<void> {
   const batches = chunkArray(ids, VECTORIZE_DELETE_BATCH_SIZE);
-  // Run deletion batches concurrently - they are independent operations
-  await Promise.all(
-    batches.map(async (batch, i) => {
-      if (batch.length === 0) return;
 
-      const deleteResult = await vectorize.deleteByIds(batch);
-      console.log(
-        `${options?.logPrefix ?? "Vectorize"} deleted batch ${i + 1}/${batches.length} (${batch.length} ids)` +
-          (options?.namespace ? ` in namespace ${options.namespace}` : "") +
-          `, mutationId: ${deleteResult.mutationId}`,
-      );
-    }),
-  );
+  for (const [i, batch] of batches.entries()) {
+    if (batch.length === 0) continue;
+
+    const deleteResult = await withRetry(() => vectorize.deleteByIds(batch), {
+      retries: VECTORIZE_DELETE_RETRY_ATTEMPTS,
+      baseDelayMs: VECTORIZE_DELETE_RETRY_BASE_DELAY_MS,
+      label: `vectorize delete batch ${i + 1}`,
+    });
+
+    console.log(
+      `${options?.logPrefix ?? "Vectorize"} deleted batch ${i + 1}/${batches.length} (${batch.length} ids)` +
+        (options?.namespace ? ` in namespace ${options.namespace}` : "") +
+        `, mutationId: ${deleteResult.mutationId}`,
+    );
+  }
 }
 
 /**
@@ -360,6 +387,15 @@ export type StreamResponseCallback = (message: {
   error?: string;
   [key: string]: unknown;
 }) => Promise<void>;
+
+export interface ProcessKnowledgeSourceResult {
+  success: true;
+  completed: boolean;
+  vectorsInserted: number;
+  chunksProcessed: number;
+  totalChunks: number;
+  nextChunkIndex?: number;
+}
 
 /**
  * Wait for a Vectorize mutation to be processed
@@ -1060,11 +1096,13 @@ export async function processKnowledgeSource(
     chunkSize?: number;
     embeddingBatchSize?: number;
     retryCount?: number;
+    resumeFromChunkIndex?: number;
+    maxRuntimeMs?: number;
     persistFailureState?: boolean;
     streamResponse?: StreamResponseCallback;
     abortSignal?: AbortSignal;
   },
-) {
+): Promise<ProcessKnowledgeSourceResult> {
   // Get source from database
   const [source] = await db
     .select()
@@ -1082,7 +1120,14 @@ export async function processKnowledgeSource(
   const streamResponse = options?.streamResponse || (async () => {});
   const abortSignal = options?.abortSignal;
   const retryCount = options?.retryCount ?? source.retryCount ?? 0;
+  const resumeFromChunkIndex = Math.max(0, options?.resumeFromChunkIndex ?? 0);
+  const maxRuntimeMs = options?.maxRuntimeMs;
+  const indexingStartedAt = Date.now();
   const persistFailureState = options?.persistFailureState ?? true;
+  const shouldPauseForTimeSlice = () =>
+    typeof maxRuntimeMs === "number" &&
+    maxRuntimeMs > 0 &&
+    Date.now() - indexingStartedAt >= maxRuntimeMs;
 
   const reportProgress = async (update: {
     status?: KnowledgeSourceIndexStatus;
@@ -1119,12 +1164,15 @@ export async function processKnowledgeSource(
 
   try {
     const parseMessage =
-      retryCount > 0
-        ? `Retry ${retryCount}: parsing document with lighter settings`
-        : "Parsing document";
+      resumeFromChunkIndex > 0
+        ? `Resuming indexing from chunk ${resumeFromChunkIndex}`
+        : retryCount > 0
+          ? `Retry ${retryCount}: parsing document with lighter settings`
+          : "Parsing document";
     await reportProgress({
       status: "processing",
-      progress: INDEXING_PROGRESS.PARSING,
+      progress:
+        resumeFromChunkIndex > 0 ? undefined : INDEXING_PROGRESS.PARSING,
       message: parseMessage,
       parserErrors: [],
     });
@@ -1138,7 +1186,10 @@ export async function processKnowledgeSource(
     );
     await reportProgress({
       status: "processing",
-      progress: INDEXING_PROGRESS.PARSING_COMPLETE,
+      progress:
+        resumeFromChunkIndex > 0
+          ? undefined
+          : INDEXING_PROGRESS.PARSING_COMPLETE,
       message: "Document parsed successfully",
     });
 
@@ -1176,8 +1227,17 @@ export async function processKnowledgeSource(
       chunkBatchIterator = chunkArray(structuredChunks, embeddingBatchSize);
       await reportProgress({
         status: "processing",
-        progress: INDEXING_PROGRESS.CHUNKS_READY,
-        message: `Prepared ${structuredChunks.length} structured rows`,
+        progress:
+          resumeFromChunkIndex > 0
+            ? getBatchIndexingProgress(
+                resumeFromChunkIndex,
+                structuredChunks.length,
+              )
+            : INDEXING_PROGRESS.CHUNKS_READY,
+        message:
+          resumeFromChunkIndex > 0
+            ? `Prepared ${structuredChunks.length} structured rows; resuming at chunk ${resumeFromChunkIndex}`
+            : `Prepared ${structuredChunks.length} structured rows`,
       });
       console.log(
         `[Ingestion] Using structured row chunks for source ${sourceId}: ${structuredChunks.length} rows`,
@@ -1197,8 +1257,17 @@ export async function processKnowledgeSource(
 
       await reportProgress({
         status: "processing",
-        progress: INDEXING_PROGRESS.CHUNKS_READY,
-        message: `Large document detected. Streaming chunking (~${totalChunksEstimate} chunks)`,
+        progress:
+          resumeFromChunkIndex > 0
+            ? getBatchIndexingProgress(
+                resumeFromChunkIndex,
+                totalChunksEstimate,
+              )
+            : INDEXING_PROGRESS.CHUNKS_READY,
+        message:
+          resumeFromChunkIndex > 0
+            ? `Large document detected. Resuming chunking at chunk ${resumeFromChunkIndex} (~${totalChunksEstimate} chunks)`
+            : `Large document detected. Streaming chunking (~${totalChunksEstimate} chunks)`,
       });
       console.log(
         `[Ingestion] Using streaming chunker for source ${sourceId}: ${parsed.content.length} chars, estimated ${totalChunksEstimate} chunks`,
@@ -1213,36 +1282,66 @@ export async function processKnowledgeSource(
       totalChunksEstimate = chunks.length;
       await reportProgress({
         status: "processing",
-        progress: INDEXING_PROGRESS.CHUNKS_READY,
-        message: `Split into ${chunks.length} chunks`,
+        progress:
+          resumeFromChunkIndex > 0
+            ? getBatchIndexingProgress(resumeFromChunkIndex, chunks.length)
+            : INDEXING_PROGRESS.CHUNKS_READY,
+        message:
+          resumeFromChunkIndex > 0
+            ? `Split into ${chunks.length} chunks; resuming at chunk ${resumeFromChunkIndex}`
+            : `Split into ${chunks.length} chunks`,
       });
       console.log(`Generated ${chunks.length} chunks for source ${sourceId}`);
       chunkBatchIterator = chunkArray(chunks, embeddingBatchSize);
     }
+
+    chunkBatchIterator = skipChunkBatches(
+      chunkBatchIterator,
+      resumeFromChunkIndex,
+    );
 
     const totalBatchEstimate = Math.max(
       1,
       Math.ceil(Math.max(totalChunksEstimate, 1) / embeddingBatchSize),
     );
 
-    const vectorizeIds: string[] = [];
+    const existingVectorRows =
+      resumeFromChunkIndex > 0
+        ? await db
+            .select({ vectorizeId: documentChunks.vectorizeId })
+            .from(documentChunks)
+            .where(eq(documentChunks.documentId, sourceId))
+        : [];
+    const vectorizeIds = Array.from(
+      new Set(
+        existingVectorRows
+          .map((row) => row.vectorizeId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
     const { env } = await import("cloudflare:workers");
-    let processedChunks = 0;
-    let batchIdx = 0;
+    let processedChunks = resumeFromChunkIndex;
 
     await reportProgress({
       status: "processing",
-      progress: INDEXING_PROGRESS.INDEXING_START,
+      progress:
+        resumeFromChunkIndex > 0
+          ? getBatchIndexingProgress(resumeFromChunkIndex, totalChunksEstimate)
+          : INDEXING_PROGRESS.INDEXING_START,
       message:
-        totalChunksEstimate > 0
-          ? `Starting embeddings for ${totalChunksEstimate} chunks`
-          : "Starting embeddings",
+        resumeFromChunkIndex > 0
+          ? `Resuming embeddings at chunk ${resumeFromChunkIndex}/${Math.max(totalChunksEstimate, resumeFromChunkIndex)}`
+          : totalChunksEstimate > 0
+            ? `Starting embeddings for ${totalChunksEstimate} chunks`
+            : "Starting embeddings",
     });
 
     // Process each batch
     for (const batch of chunkBatchIterator) {
-      batchIdx += 1;
       assertNotAborted(abortSignal);
+      const batchStartIndex = processedChunks;
+      const batchIdx = Math.floor(batchStartIndex / embeddingBatchSize) + 1;
+      const displayBatchTotal = Math.max(totalBatchEstimate, batchIdx);
 
       const batchProgress = getBatchIndexingProgress(
         processedChunks,
@@ -1264,7 +1363,7 @@ export async function processKnowledgeSource(
             await reportProgress({
               status: "processing",
               progress: batchProgress,
-              message: `Embedding batch ${batchIdx}/${totalBatchEstimate} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
+              message: `Embedding batch ${batchIdx}/${displayBatchTotal} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
             });
           },
         },
@@ -1285,7 +1384,7 @@ export async function processKnowledgeSource(
           text: chunk,
           sessionId: source.agentId,
           documentId: source.id,
-          chunkIndex: processedChunks + idx,
+          chunkIndex: batchStartIndex + idx,
           vectorizeId: chunkId, // Set vectorizeId to the chunk ID (used as vector ID)
           createdAt: new Date(),
         };
@@ -1293,18 +1392,24 @@ export async function processKnowledgeSource(
 
       const d1Batches = chunkArray(chunkInsertData, D1_INSERT_BATCH_SIZE);
 
-      // Run D1 sub-batch inserts concurrently (they are independent writes)
-      const d1InsertResults = await Promise.all(
-        d1Batches.map((d1Batch) =>
-          db
+      const chunkIds: string[] = [];
+
+      try {
+        for (const d1Batch of d1Batches) {
+          const d1InsertResult = await db
             .insert(documentChunks)
             .values(d1Batch)
-            .returning({ insertedChunkId: documentChunks.id }),
-        ),
-      );
-      const chunkIds = d1InsertResults.flatMap((r) =>
-        r.map((row) => row.insertedChunkId),
-      );
+            .returning({ insertedChunkId: documentChunks.id });
+          chunkIds.push(...d1InsertResult.map((row) => row.insertedChunkId));
+        }
+      } catch (error) {
+        if (chunkIds.length > 0) {
+          await db
+            .delete(documentChunks)
+            .where(inArray(documentChunks.id, chunkIds));
+        }
+        throw error;
+      }
 
       vectorizeIds.push(...chunkIds);
 
@@ -1313,32 +1418,54 @@ export async function processKnowledgeSource(
       // by enrichWithFullText() — keeping Vectorize metadata small avoids the 3KB limit
       // and removes the artificial chunk size ceiling
       const vectorizeStartTime = Date.now();
-      await withRetry(
-        () =>
-          env.VECTORIZE.insert(
-            embeddingBatch.map((embedding, index) => ({
-              id: chunkIds[index],
-              values: embedding,
-              namespace: source.agentId, // Use agentId for namespace isolation
-              metadata: {
-                sourceId: source.id,
-                chunkId: chunkIds[index],
-                fileName: source.fileName || "Unknown source",
-              },
-            })),
-          ),
-        {
-          label: `vectorize insert batch ${batchIdx}`,
-          abortSignal,
-          onRetry: async ({ nextAttempt, maxAttempts, delayMs, error }) => {
-            await reportProgress({
-              status: "processing",
-              progress: batchProgress,
-              message: `Writing vector batch ${batchIdx}/${totalBatchEstimate} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
-            });
+      try {
+        await withRetry(
+          () =>
+            env.VECTORIZE.insert(
+              embeddingBatch.map((embedding, index) => ({
+                id: chunkIds[index],
+                values: embedding,
+                namespace: source.agentId, // Use agentId for namespace isolation
+                metadata: {
+                  sourceId: source.id,
+                  chunkId: chunkIds[index],
+                  fileName: source.fileName || "Unknown source",
+                },
+              })),
+            ),
+          {
+            label: `vectorize insert batch ${batchIdx}`,
+            abortSignal,
+            onRetry: async ({ nextAttempt, maxAttempts, delayMs, error }) => {
+              await reportProgress({
+                status: "processing",
+                progress: batchProgress,
+                message: `Writing vector batch ${batchIdx}/${displayBatchTotal} hit ${describeRetryableFailure(error)}. Retrying ${nextAttempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s`,
+              });
+            },
           },
-        },
-      );
+        );
+      } catch (error) {
+        try {
+          await deleteVectorizeIds(env.VECTORIZE, chunkIds, {
+            namespace: source.agentId,
+            logPrefix: "Vectorize rollback",
+          });
+        } catch (deleteError) {
+          console.error(
+            `[Ingestion] Failed rolling back vectors for batch ${batchIdx}:`,
+            deleteError,
+          );
+        }
+        await db
+          .delete(documentChunks)
+          .where(inArray(documentChunks.id, chunkIds));
+        vectorizeIds.splice(
+          Math.max(0, vectorizeIds.length - chunkIds.length),
+          chunkIds.length,
+        );
+        throw error;
+      }
       const vectorizeTime = Date.now() - vectorizeStartTime;
 
       console.log(`Batch ${batchIdx} vectorize insert took ${vectorizeTime}ms`);
@@ -1355,7 +1482,7 @@ export async function processKnowledgeSource(
       );
       await reportProgress({
         status: "processing",
-        message: `Indexed ${processedChunks}/${indexedChunkGoal} chunks (batch ${batchIdx}/${totalBatchEstimate})`,
+        message: `Indexed ${processedChunks}/${indexedChunkGoal} chunks (batch ${batchIdx}/${displayBatchTotal})`,
         progress: progressPercent,
         chunksProcessed: processedChunks,
       });
@@ -1363,6 +1490,24 @@ export async function processKnowledgeSource(
       console.log(
         `Processed batch ${batchIdx}/${totalBatchEstimate}, embedded ${processedChunks} chunks`,
       );
+
+      if (shouldPauseForTimeSlice() && processedChunks < totalChunksEstimate) {
+        await reportProgress({
+          status: "processing",
+          message: `Indexed ${processedChunks}/${indexedChunkGoal} chunks. Continuing in background`,
+          progress: progressPercent,
+          chunksProcessed: processedChunks,
+        });
+
+        return {
+          success: true,
+          completed: false,
+          vectorsInserted: vectorizeIds.length,
+          chunksProcessed: processedChunks,
+          totalChunks: indexedChunkGoal,
+          nextChunkIndex: processedChunks,
+        };
+      }
     }
 
     await reportProgress({
@@ -1385,8 +1530,10 @@ export async function processKnowledgeSource(
 
     return {
       success: true,
+      completed: true,
       vectorsInserted: vectorizeIds.length,
       chunksProcessed: processedChunks,
+      totalChunks: Math.max(totalChunksEstimate, processedChunks, 1),
     };
   } catch (error) {
     // Log detailed error for debugging
@@ -1450,12 +1597,27 @@ export async function deleteKnowledgeSource(sourceId: string): Promise<void> {
     throw new Error(`Knowledge source ${sourceId} not found`);
   }
 
-  // Delete from Vectorize using stored vectorizeIds
-  if (source.vectorizeIds && source.vectorizeIds.length > 0) {
+  const chunkRows = await db
+    .select({ vectorizeId: documentChunks.vectorizeId })
+    .from(documentChunks)
+    .where(eq(documentChunks.documentId, sourceId));
+  const vectorIds = Array.from(
+    new Set(
+      [
+        ...(source.vectorizeIds ?? []),
+        ...chunkRows
+          .map((row) => row.vectorizeId)
+          .filter((value): value is string => Boolean(value)),
+      ].filter(Boolean),
+    ),
+  );
+
+  // Delete from Vectorize using both finalized IDs and in-progress chunk rows.
+  if (vectorIds.length > 0) {
     const { env } = await import("cloudflare:workers");
     try {
       // Delete vectors from agent's namespace
-      await deleteVectorizeIds(env.VECTORIZE, source.vectorizeIds, {
+      await deleteVectorizeIds(env.VECTORIZE, vectorIds, {
         namespace: source.agentId,
         logPrefix: "Vectorize",
       });

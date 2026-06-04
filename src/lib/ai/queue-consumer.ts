@@ -1,6 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { documentChunks, knowledgeSource } from "@/db/schema";
+import {
+  documentChunks,
+  type KnowledgeSource,
+  knowledgeSource,
+} from "@/db/schema";
 import {
   deleteVectorizeIds,
   isResourceExhaustionError,
@@ -13,6 +17,7 @@ const MAX_QUEUE_RETRIES = 3;
 const RETRY_DELAY_SECONDS = [10, 30, 90] as const;
 const FALLBACK_REDUCED_CHUNK_SIZE = 768;
 const FALLBACK_EMBEDDING_BATCH_SIZE = 8;
+const QUEUE_INDEXING_TIME_SLICE_MS = 8 * 60 * 1000;
 
 function getQueueRetryDelaySeconds(attempt: number): number {
   return RETRY_DELAY_SECONDS[Math.max(0, attempt - 1)] ?? 180;
@@ -43,6 +48,69 @@ function getRetrySettings(attempt: number): {
 export interface KnowledgeIndexMessage {
   sourceId: string;
   agentId: string;
+  resume?: boolean;
+  startChunkIndex?: number;
+  chunkSize?: number;
+  embeddingBatchSize?: number;
+}
+
+async function getIndexedChunkState(sourceId: string): Promise<{
+  chunkCount: number;
+  nextChunkIndex: number;
+}> {
+  const rows = await db
+    .select({ chunkIndex: documentChunks.chunkIndex })
+    .from(documentChunks)
+    .where(eq(documentChunks.documentId, sourceId));
+
+  const maxChunkIndex = rows.reduce(
+    (max, row) => Math.max(max, row.chunkIndex),
+    -1,
+  );
+
+  return {
+    chunkCount: rows.length,
+    nextChunkIndex: maxChunkIndex + 1,
+  };
+}
+
+async function cleanupSourceIndexData(
+  source: KnowledgeSource,
+  env: Env,
+): Promise<void> {
+  const chunkRows = await db
+    .select({ vectorizeId: documentChunks.vectorizeId })
+    .from(documentChunks)
+    .where(eq(documentChunks.documentId, source.id));
+
+  const vectorIds = Array.from(
+    new Set(
+      [
+        ...(source.vectorizeIds ?? []),
+        ...chunkRows
+          .map((row) => row.vectorizeId)
+          .filter((value): value is string => Boolean(value)),
+      ].filter(Boolean),
+    ),
+  );
+
+  if (vectorIds.length > 0) {
+    try {
+      await deleteVectorizeIds(env.VECTORIZE, vectorIds, {
+        namespace: source.agentId,
+        logPrefix: "Vectorize",
+      });
+    } catch (deleteError) {
+      console.error(
+        `[Queue] Failed deleting vectors for source ${source.id}; continuing cleanup:`,
+        deleteError,
+      );
+    }
+  }
+
+  await db
+    .delete(documentChunks)
+    .where(eq(documentChunks.documentId, source.id));
 }
 
 /**
@@ -61,14 +129,21 @@ export async function handleKnowledgeIndexQueue(
 ): Promise<void> {
   for (const message of batch.messages) {
     const { sourceId } = message.body;
+    const isContinuation = message.body.resume === true;
     const attempt = Math.max(message.attempts, 1);
     const retryCount = Math.max(attempt - 1, 0);
     const hasMoreQueueRetries = retryCount < MAX_QUEUE_RETRIES;
-    const retrySettings = getRetrySettings(attempt);
+    const retrySettings = isContinuation
+      ? {
+          chunkSize: message.body.chunkSize,
+          embeddingBatchSize: message.body.embeddingBatchSize,
+        }
+      : getRetrySettings(attempt);
+    let source: KnowledgeSource | undefined;
 
     try {
       // Fetch source metadata from D1
-      const [source] = await db
+      [source] = await db
         .select()
         .from(knowledgeSource)
         .where(eq(knowledgeSource.id, sourceId))
@@ -77,6 +152,17 @@ export async function handleKnowledgeIndexQueue(
       if (!source) {
         console.error(
           `[Queue] Source ${sourceId} not found in database, acking to prevent retry`,
+        );
+        message.ack();
+        continue;
+      }
+
+      if (
+        isContinuation &&
+        (source.status === "indexed" || source.status === "failed")
+      ) {
+        console.log(
+          `[Queue] Source ${sourceId} is already ${source.status}; acking stale continuation`,
         );
         message.ack();
         continue;
@@ -121,55 +207,31 @@ export async function handleKnowledgeIndexQueue(
       const content = await r2Object.arrayBuffer();
 
       console.log(
-        `[Queue] Processing source ${sourceId} (${source.fileName}, ${content.byteLength} bytes)`,
+        `[Queue] Processing source ${sourceId} (${source.fileName}, ${content.byteLength} bytes)` +
+          (isContinuation ? " as continuation" : ""),
       );
 
-      // Best effort cleanup before indexing to keep queue retries/idempotency safe.
-      // This prevents duplicate chunks/vectors when a message is retried.
-      try {
-        const chunkRows = await db
-          .select({ vectorizeId: documentChunks.vectorizeId })
-          .from(documentChunks)
-          .where(eq(documentChunks.documentId, sourceId));
-        const vectorIds = Array.from(
-          new Set(
-            [
-              ...(source.vectorizeIds ?? []),
-              ...chunkRows
-                .map((row) => row.vectorizeId)
-                .filter((value): value is string => Boolean(value)),
-            ].filter(Boolean),
-          ),
-        );
-
-        if (vectorIds.length > 0) {
-          await deleteVectorizeIds(env.VECTORIZE, vectorIds, {
-            namespace: source.agentId,
-            logPrefix: "Vectorize",
-          });
-        }
-      } catch (deleteError) {
-        console.error(
-          `[Queue] Failed deleting old vectors for source ${sourceId}:`,
-          deleteError,
-        );
+      if (!isContinuation) {
+        await cleanupSourceIndexData(source, env);
       }
 
-      await db
-        .delete(documentChunks)
-        .where(eq(documentChunks.documentId, sourceId));
+      const indexedChunkState = isContinuation
+        ? await getIndexedChunkState(sourceId)
+        : { chunkCount: 0, nextChunkIndex: 0 };
 
       await db
         .update(knowledgeSource)
         .set({
           status: "processing",
-          progress: 0,
+          progress: isContinuation ? source.progress : 0,
           progressMessage:
-            retrySettings.reason ??
-            (retryCount > 0
-              ? `Retry ${retryCount}/${MAX_QUEUE_RETRIES}: resuming indexing`
-              : "Queued for background indexing"),
-          vectorizeIds: [],
+            isContinuation && indexedChunkState.nextChunkIndex > 0
+              ? `Continuing background indexing from chunk ${indexedChunkState.nextChunkIndex}`
+              : (retrySettings.reason ??
+                (retryCount > 0
+                  ? `Retry ${retryCount}/${MAX_QUEUE_RETRIES}: resuming indexing`
+                  : "Queued for background indexing")),
+          vectorizeIds: isContinuation ? source.vectorizeIds : [],
           parserErrors: [],
           retryCount,
           updatedAt: new Date(),
@@ -177,12 +239,32 @@ export async function handleKnowledgeIndexQueue(
         .where(eq(knowledgeSource.id, sourceId));
 
       // Run the full ingestion pipeline with progress updates written to D1
-      await processKnowledgeSource(sourceId, content, {
+      const result = await processKnowledgeSource(sourceId, content, {
         chunkSize: retrySettings.chunkSize,
         embeddingBatchSize: retrySettings.embeddingBatchSize,
         retryCount,
+        resumeFromChunkIndex: indexedChunkState.nextChunkIndex,
+        maxRuntimeMs: QUEUE_INDEXING_TIME_SLICE_MS,
         persistFailureState: false,
       });
+
+      if (!result.completed) {
+        const nextChunkIndex = result.nextChunkIndex ?? result.chunksProcessed;
+        const queue = env.KNOWLEDGE_INDEX_QUEUE as Queue<KnowledgeIndexMessage>;
+        await queue.send({
+          sourceId,
+          agentId: source.agentId,
+          resume: true,
+          startChunkIndex: nextChunkIndex,
+          chunkSize: retrySettings.chunkSize,
+          embeddingBatchSize: retrySettings.embeddingBatchSize,
+        });
+        console.log(
+          `[Queue] Paused source ${sourceId} at chunk ${nextChunkIndex}/${result.totalChunks}; continuation queued`,
+        );
+        message.ack();
+        continue;
+      }
 
       console.log(`[Queue] Successfully indexed source ${sourceId}`);
       message.ack();
@@ -219,6 +301,17 @@ export async function handleKnowledgeIndexQueue(
         const delaySeconds = getQueueRetryDelaySeconds(attempt);
         message.retry({ delaySeconds });
         continue;
+      }
+
+      if (source) {
+        try {
+          await cleanupSourceIndexData(source, env);
+        } catch (cleanupError) {
+          console.error(
+            `[Queue] Failed cleaning up permanently failed source ${sourceId}:`,
+            cleanupError,
+          );
+        }
       }
 
       message.ack();

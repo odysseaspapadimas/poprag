@@ -735,8 +735,10 @@ export async function searchDocumentChunksFTS(
       SELECT document_chunks.id, document_chunks.text, document_chunks_fts.rank
       FROM document_chunks_fts
       JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
+      JOIN knowledge_source ON knowledge_source.id = document_chunks.source_id
       WHERE document_chunks_fts MATCH ${compoundMatch}
         AND document_chunks.agent_id = ${agentId}
+        AND knowledge_source.status = 'indexed'
         ${sourceFilter}
       ORDER BY rank ASC
       LIMIT ${limit * 2}
@@ -790,7 +792,9 @@ export async function searchDocumentChunksFTS(
         document_chunks.text,
         (${sql.join(keywordHitClauses, sql` + `)}) * 1.0 AS rank
       FROM document_chunks
+      JOIN knowledge_source ON knowledge_source.id = document_chunks.source_id
       WHERE document_chunks.agent_id = ${agentId}
+        AND knowledge_source.status = 'indexed'
         ${sourceFilterForScan}
         AND (${sql.join(matchClauses, sql` OR `)})
       ORDER BY rank DESC, length(document_chunks.text) ASC

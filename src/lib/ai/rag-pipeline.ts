@@ -978,17 +978,24 @@ async function enrichWithFullText(
         knowledgeSource,
         eq(documentChunks.documentId, knowledgeSource.id),
       )
-      .where(inArray(documentChunks.id, chunkIds));
+      .where(
+        and(
+          inArray(documentChunks.id, chunkIds),
+          eq(knowledgeSource.status, "indexed"),
+        ),
+      );
 
     const dbRowMap = new Map(dbRows.map((r) => [r.id, r]));
 
     let enrichedCount = 0;
     let missingCount = 0;
-    const enrichedMatches = matches.map((match) => {
+    const enrichedMatches: HybridSearchResult[] = [];
+
+    for (const match of matches) {
       const row = dbRowMap.get(match.id);
       if (row) {
         enrichedCount++;
-        return {
+        enrichedMatches.push({
           ...match,
           content: row.text,
           metadata: {
@@ -999,14 +1006,15 @@ async function enrichWithFullText(
             documentId: row.documentId,
             chunkIndex: row.chunkIndex,
           },
-        };
+        });
+        continue;
       }
+
       missingCount++;
       console.warn(
-        `[RAG Pipeline] Chunk ${match.id} not found in D1 (orphaned Vectorize entry?)`,
+        `[RAG Pipeline] Chunk ${match.id} not found in indexed D1 sources (orphaned or in-progress Vectorize entry?)`,
       );
-      return match;
-    });
+    }
 
     console.log(
       `[RAG Pipeline] Enriched ${enrichedCount}/${matches.length} chunks with text from DB${missingCount > 0 ? ` (${missingCount} missing)` : ""}`,
@@ -1092,10 +1100,15 @@ async function expandWithNeighborChunks(
       chunkIndex: documentChunks.chunkIndex,
     })
     .from(documentChunks)
+    .innerJoin(
+      knowledgeSource,
+      eq(documentChunks.documentId, knowledgeSource.id),
+    )
     .where(
       and(
         inArray(documentChunks.documentId, docIds),
         inArray(documentChunks.chunkIndex, allChunkIndices),
+        eq(knowledgeSource.status, "indexed"),
       ),
     );
 
