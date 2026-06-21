@@ -6,6 +6,7 @@ import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AgentBulkReindexButton } from "@/components/agent-bulk-reindex-button";
 import AgentMetrics from "@/components/agent-metrics";
+import { CatalogCsvImportDialog } from "@/components/catalog-csv-import-dialog";
 import { CatalogSyncDialog } from "@/components/catalog-sync-dialog";
 import { Chat } from "@/components/chat";
 import { EditAgentDialog } from "@/components/edit-agent-dialog";
@@ -139,7 +140,7 @@ export const Route = createFileRoute("/_app/agents/$agentId/")({
               context.trpc.agent.getKnowledgeSources.queryOptions({ agentId }),
             ),
             context.queryClient.prefetchQuery(
-              context.trpc.catalogSync.list.queryOptions({ agentId }),
+              context.trpc.catalog.list.queryOptions({ agentId }),
             ),
           ];
         case "experiences":
@@ -673,7 +674,7 @@ function KnowledgeTab({
   const { data: knowledgeSources } = useKnowledgeSources(agentId);
   const trpc = useTRPC();
   const { data: catalogConfigs } = useSuspenseQuery({
-    ...trpc.catalogSync.list.queryOptions({ agentId }),
+    ...trpc.catalog.list.queryOptions({ agentId }),
     staleTime: 0,
     refetchInterval: (query) => {
       const configs = query.state.data;
@@ -705,6 +706,10 @@ function KnowledgeTab({
           <CatalogSyncDialog
             agentId={agentId}
             trigger={<Button variant="outline">Add Catalog Sync</Button>}
+          />
+          <CatalogCsvImportDialog
+            agentId={agentId}
+            trigger={<Button variant="outline">Import Catalog CSV</Button>}
           />
           <KnowledgeUploadDialog
             agentId={agentId}
@@ -740,7 +745,11 @@ function KnowledgeTab({
                 </p>
                 {catalogConfig ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">Catalog</Badge>
+                    <Badge variant="secondary">
+                      {catalogConfig.origin === "csv"
+                        ? "CSV Catalog"
+                        : "API Catalog"}
+                    </Badge>
                     <Badge
                       variant={
                         catalogConfig.lastRunStatus === "failed"
@@ -748,7 +757,9 @@ function KnowledgeTab({
                           : "outline"
                       }
                     >
-                      {catalogConfig.lastRunStatus ?? "not synced"}
+                      {catalogConfig.origin === "csv"
+                        ? catalogConfig.sourceStatus
+                        : (catalogConfig.lastRunStatus ?? "not synced")}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       {catalogConfig.productCounts.active} active /{" "}

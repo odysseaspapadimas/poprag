@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { CHUNKING_CONFIG, DEFAULT_MODELS } from "@/lib/ai/constants";
 import { generateChunks, generateEmbeddings } from "@/lib/ai/embedding";
+import { isRetryableEmbeddingFailure } from "@/lib/ai/embedding-transport";
 
 /**
  * Utility to split an array into chunks of specified size
@@ -269,6 +270,7 @@ export function isResourceExhaustionError(error: unknown): boolean {
 }
 
 export function isRetryableIngestionError(error: unknown): boolean {
+  if (isRetryableEmbeddingFailure(error)) return true;
   const message = getErrorMessage(error).toLowerCase();
   return RETRYABLE_ERROR_HINTS.some((hint) => message.includes(hint));
 }

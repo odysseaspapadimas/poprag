@@ -28,10 +28,24 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
-  catalogStructuredIntent?: "count" | "list" | "none";
+  catalogStructuredIntent?:
+    | "count"
+    | "list"
+    | "filter"
+    | "continue_list"
+    | "capabilities"
+    | "none";
   catalogStructuredIntentReason?: string;
+  catalogStructuredFilters?: Array<{ value: string; fieldPath?: string }>;
   catalogActiveProductCount?: number;
+  catalogStructuredMatchedProducts?: number;
   catalogStructuredProductsReturned?: number;
+  catalogStructuredContinuationOf?: "list" | "filter";
+  catalogStructuredOffset?: number;
+  catalogStructuredLimit?: number;
+  catalogStructuredNextOffset?: number;
+  catalogStructuredHasMore?: boolean;
+  catalogStructuredComplete?: boolean;
   catalogExactMatchCount?: number;
   vectorSearchMode?:
     | "unfiltered"
@@ -410,18 +424,40 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
               </div>
             </div>
             {debugInfo.catalogStructuredIntentReason ? (
-              <div className="pl-6 text-xs text-muted-foreground">
-                Catalog inventory reason:{" "}
-                {debugInfo.catalogStructuredIntentReason}
+              <div className="pl-6 space-y-1 text-xs text-muted-foreground">
+                <div>
+                  Catalog inventory reason:{" "}
+                  {debugInfo.catalogStructuredIntentReason}
+                </div>
+                {debugInfo.catalogStructuredFilters &&
+                debugInfo.catalogStructuredFilters.length > 0 ? (
+                  <div>
+                    Filters:{" "}
+                    {debugInfo.catalogStructuredFilters
+                      .map((filter) => filter.value)
+                      .join(", ")}
+                  </div>
+                ) : null}
                 {debugInfo.catalogStructuredProductsReturned !== undefined ? (
-                  <>
-                    {" "}
-                    ({debugInfo.catalogStructuredProductsReturned} product
-                    {debugInfo.catalogStructuredProductsReturned === 1
-                      ? ""
-                      : "s"}{" "}
-                    returned)
-                  </>
+                  <div>
+                    Matched: {debugInfo.catalogStructuredMatchedProducts ?? 0},
+                    returned: {debugInfo.catalogStructuredProductsReturned},
+                    complete:{" "}
+                    {debugInfo.catalogStructuredComplete ? "yes" : "no"}
+                  </div>
+                ) : null}
+                {debugInfo.catalogStructuredOffset !== undefined ? (
+                  <div>
+                    Page offset: {debugInfo.catalogStructuredOffset}, limit:{" "}
+                    {debugInfo.catalogStructuredLimit ?? 0}, next:{" "}
+                    {debugInfo.catalogStructuredNextOffset ?? 0}, has more:{" "}
+                    {debugInfo.catalogStructuredHasMore ? "yes" : "no"}
+                  </div>
+                ) : null}
+                {debugInfo.catalogStructuredContinuationOf ? (
+                  <div>
+                    Continuing: {debugInfo.catalogStructuredContinuationOf}
+                  </div>
                 ) : null}
               </div>
             ) : null}

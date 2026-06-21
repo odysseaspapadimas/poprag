@@ -36,6 +36,12 @@ export type AuditEventType =
   | "knowledge.catalog_sync.updated"
   | "knowledge.catalog_sync.disabled"
   | "knowledge.catalog_sync.queued"
+  | "knowledge.catalog.updated"
+  | "knowledge.catalog.facts_rebuilt"
+  | "knowledge.catalog_csv.created"
+  | "knowledge.catalog_csv.uploaded"
+  | "knowledge.catalog_csv.indexed"
+  | "knowledge.catalog_csv.reimported"
   // Prompt events
   | "prompt.version_created"
   | "prompt.version_updated"

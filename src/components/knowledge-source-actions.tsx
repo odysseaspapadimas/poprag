@@ -39,14 +39,16 @@ interface KnowledgeSourceActionsProps {
   agentId: string;
   catalogConfig?: {
     id: string;
+    origin: "api" | "csv";
+    syncConfigId?: string | null;
     name: string;
     experienceId: string | null;
-    snapshotUrl: string;
-    diffUrl: string;
-    authHeaderName: string | null;
-    authSecretName: string | null;
-    updatedSinceParam: string;
-    itemPath: string;
+    snapshotUrl?: string | null;
+    diffUrl?: string | null;
+    authHeaderName?: string | null;
+    authSecretName?: string | null;
+    updatedSinceParam?: string | null;
+    itemPath?: string | null;
     stableKeyField: string;
     updatedAtField: string | null;
     deletionField: string | null;
@@ -54,9 +56,10 @@ interface KnowledgeSourceActionsProps {
     titleField: string;
     searchableFields: string[] | null;
     exactMatchFields: string[] | null;
-    syncIntervalDays: number;
-    scheduleWeekdayUtc: number;
-    scheduleHourUtc: number;
+    filterableFields: string[] | null;
+    syncIntervalDays?: number | null;
+    scheduleWeekdayUtc?: number | null;
+    scheduleHourUtc?: number | null;
     enabled: boolean;
   };
 }
@@ -109,6 +112,9 @@ export function KnowledgeSourceActions({
         queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
         });
+        queryClient.invalidateQueries({
+          queryKey: trpc.catalog.list.queryKey({ agentId }),
+        });
         setDeleteDialogOpen(false);
       },
       onError: (error) => {
@@ -132,12 +138,41 @@ export function KnowledgeSourceActions({
           queryKey: trpc.catalogSync.list.queryKey({ agentId }),
         });
         queryClient.invalidateQueries({
+          queryKey: trpc.catalog.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
         });
       },
       onError: (error) => {
         toast.error(`Catalog sync failed to queue: ${error.message}`, {
           id: `catalog-sync-${source.id}`,
+        });
+      },
+    }),
+  );
+
+  const reimportCsvCatalogMutation = useMutation(
+    trpc.catalog.csvReimport.mutationOptions({
+      onMutate: () => {
+        toast.loading(`Re-importing CSV catalog for ${source.fileName}...`, {
+          id: `catalog-csv-${source.id}`,
+        });
+      },
+      onSuccess: () => {
+        toast.success(`CSV catalog re-imported for ${source.fileName}`, {
+          id: `catalog-csv-${source.id}`,
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.catalog.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
+        });
+      },
+      onError: (error) => {
+        toast.error(`CSV catalog re-import failed: ${error.message}`, {
+          id: `catalog-csv-${source.id}`,
         });
       },
     }),
@@ -156,15 +191,25 @@ export function KnowledgeSourceActions({
   };
 
   const handleRunCatalogSync = () => {
-    if (!catalogConfig) return;
+    if (!catalogConfig?.syncConfigId) return;
     runCatalogSyncMutation.mutate({
-      configId: catalogConfig.id,
+      configId: catalogConfig.syncConfigId,
       mode: "auto",
     });
   };
 
+  const handleReimportCsvCatalog = () => {
+    reimportCsvCatalogMutation.mutate({
+      sourceId: source.id,
+    });
+  };
+
   const isReindexing =
-    reindexMutation.isPending || runCatalogSyncMutation.isPending;
+    reindexMutation.isPending ||
+    runCatalogSyncMutation.isPending ||
+    reimportCsvCatalogMutation.isPending;
+  const isApiCatalog = catalogConfig?.origin === "api";
+  const isCsvCatalog = catalogConfig?.origin === "csv";
 
   return (
     <>
@@ -181,18 +226,23 @@ export function KnowledgeSourceActions({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={handleReindex}
-              disabled={reindexMutation.isPending}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Re-index
-            </DropdownMenuItem>
-            {catalogConfig ? (
+            {!catalogConfig ? (
+              <DropdownMenuItem
+                onClick={handleReindex}
+                disabled={reindexMutation.isPending}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Re-index
+              </DropdownMenuItem>
+            ) : null}
+            {isApiCatalog ? (
               <>
                 <DropdownMenuItem
                   onClick={handleRunCatalogSync}
-                  disabled={runCatalogSyncMutation.isPending}
+                  disabled={
+                    runCatalogSyncMutation.isPending ||
+                    !catalogConfig?.syncConfigId
+                  }
                 >
                   <DatabaseZap className="mr-2 h-4 w-4" />
                   Run sync
@@ -206,6 +256,15 @@ export function KnowledgeSourceActions({
                   Sync runs
                 </DropdownMenuItem>
               </>
+            ) : null}
+            {isCsvCatalog ? (
+              <DropdownMenuItem
+                onClick={handleReimportCsvCatalog}
+                disabled={reimportCsvCatalogMutation.isPending}
+              >
+                <DatabaseZap className="mr-2 h-4 w-4" />
+                Re-import CSV
+              </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -242,16 +301,39 @@ export function KnowledgeSourceActions({
         </AlertDialogContent>
       </AlertDialog>
 
-      {catalogConfig ? (
+      {isApiCatalog && catalogConfig?.syncConfigId ? (
         <>
           <CatalogSyncDialog
             agentId={agentId}
-            config={catalogConfig}
+            config={{
+              id: catalogConfig.syncConfigId,
+              name: catalogConfig.name,
+              experienceId: catalogConfig.experienceId,
+              snapshotUrl: catalogConfig.snapshotUrl ?? "",
+              diffUrl: catalogConfig.diffUrl ?? "",
+              authHeaderName: catalogConfig.authHeaderName ?? null,
+              authSecretName: catalogConfig.authSecretName ?? null,
+              updatedSinceParam:
+                catalogConfig.updatedSinceParam ?? "effectiveUpdatedAfter",
+              itemPath: catalogConfig.itemPath ?? "",
+              stableKeyField: catalogConfig.stableKeyField,
+              updatedAtField: catalogConfig.updatedAtField,
+              deletionField: catalogConfig.deletionField,
+              deletionInactiveValues: catalogConfig.deletionInactiveValues,
+              titleField: catalogConfig.titleField,
+              searchableFields: catalogConfig.searchableFields,
+              exactMatchFields: catalogConfig.exactMatchFields,
+              filterableFields: catalogConfig.filterableFields,
+              syncIntervalDays: catalogConfig.syncIntervalDays ?? 7,
+              scheduleWeekdayUtc: catalogConfig.scheduleWeekdayUtc ?? 1,
+              scheduleHourUtc: catalogConfig.scheduleHourUtc ?? 3,
+              enabled: catalogConfig.enabled,
+            }}
             open={editCatalogOpen}
             onOpenChange={setEditCatalogOpen}
           />
           <CatalogSyncRunsDialog
-            configId={catalogConfig.id}
+            configId={catalogConfig.syncConfigId}
             name={catalogConfig.name}
             open={runsOpen}
             onOpenChange={setRunsOpen}

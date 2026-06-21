@@ -9,15 +9,23 @@
 
 import type { LanguageModel } from "ai";
 import { generateText } from "ai";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { documentChunks, knowledgeSource } from "@/db/schema";
 import {
-  type CatalogStructuredIntent,
-  countActiveCatalogProducts,
-  findCatalogExactMatches,
-  findCatalogStructuredQueryResult,
-} from "@/lib/catalog/sync";
+  catalogConfig,
+  catalogProduct,
+  documentChunks,
+  knowledgeSource,
+} from "@/db/schema";
+import type {
+  CatalogExactMatch,
+  CatalogFieldCapability,
+  CatalogListContinuationState,
+  CatalogStructuredFilter,
+  CatalogStructuredIntent,
+  CatalogStructuredLookupIntent,
+  CatalogStructuredQueryResult,
+} from "@/lib/catalog/query";
 import { reciprocalRankFusion } from "../utils";
 import { DEFAULT_MODELS, RAG_CONFIG } from "./constants";
 import {
@@ -84,8 +92,16 @@ export interface RAGDebugInfo {
   vectorFallbackTopK?: number;
   catalogStructuredIntent?: CatalogStructuredIntent | "none";
   catalogStructuredIntentReason?: string;
+  catalogStructuredFilters?: CatalogStructuredFilter[];
   catalogActiveProductCount?: number;
+  catalogStructuredMatchedProducts?: number;
   catalogStructuredProductsReturned?: number;
+  catalogStructuredContinuationOf?: "list" | "filter";
+  catalogStructuredOffset?: number;
+  catalogStructuredLimit?: number;
+  catalogStructuredNextOffset?: number;
+  catalogStructuredHasMore?: boolean;
+  catalogStructuredComplete?: boolean;
   catalogExactMatchCount?: number;
   rerankEnabled?: boolean;
   rerankModel?: string;
@@ -139,6 +155,32 @@ export interface RAGContext {
 export interface RAGResult {
   context: RAGContext | null;
   debugInfo: RAGDebugInfo;
+}
+
+export interface CatalogRetrievalLane {
+  loadCapabilities(options: {
+    agentId: string;
+    knowledgeSourceIds?: string[];
+  }): Promise<{
+    activeProductCount: number;
+    fieldCapabilities: CatalogFieldCapability[];
+  }>;
+  findStructuredQueryResult(options: {
+    intent: CatalogStructuredLookupIntent;
+    agentId: string;
+    knowledgeSourceIds?: string[];
+    filters?: CatalogStructuredFilter[];
+    limit?: number;
+    offset?: number;
+    totalActiveProducts?: number;
+    fieldCapabilities?: CatalogFieldCapability[];
+  }): Promise<CatalogStructuredQueryResult | null>;
+  findExactMatches(options: {
+    query: string;
+    agentId: string;
+    knowledgeSourceIds?: string[];
+    limit?: number;
+  }): Promise<CatalogExactMatch[]>;
 }
 
 interface MatchMetadata {
@@ -334,37 +376,79 @@ Respond ONLY with valid JSON in this exact format:
   }
 }
 
-export async function classifyCatalogStructuredIntent(
+interface CatalogRetrievalPlan {
+  intent: CatalogStructuredIntent | "none";
+  reason: string;
+  filters: CatalogStructuredFilter[];
+}
+
+export async function planCatalogStructuredRetrieval(
   model: LanguageModel,
-  query: string,
-): Promise<{ intent: CatalogStructuredIntent | "none"; reason: string }> {
+  options: {
+    query: string;
+    originalQuery?: string;
+    previousCatalogPage?: CatalogListContinuationState;
+    activeCatalogProductCount: number;
+    fieldCapabilities: CatalogFieldCapability[];
+  },
+): Promise<CatalogRetrievalPlan> {
+  const previousPageJson = options.previousCatalogPage
+    ? JSON.stringify({
+        intent: options.previousCatalogPage.intent,
+        filters: options.previousCatalogPage.filters,
+        offset: options.previousCatalogPage.offset,
+        limit: options.previousCatalogPage.limit,
+        nextOffset: options.previousCatalogPage.nextOffset,
+        hasMore: options.previousCatalogPage.hasMore,
+      })
+    : "null";
+
+  const capabilitySummary = summarizeCatalogFieldCapabilities(
+    options.fieldCapabilities,
+  );
+
   try {
     const { text } = await generateText({
       model,
-      prompt: `Classify whether this user message is asking for a structured product catalog inventory answer.
+      prompt: `You are a router for a product catalog RAG system. You are not answering the user.
+Decide whether the current user message should use the structured catalog inventory layer before normal vector/FTS retrieval.
 
-The user may write in any language, including Greek. Do not translate the user message; only classify the intent.
+The user may write in any language, including Greek. Preserve the user's language in extracted filters.
 
-Return intent="count" only when the user asks for the total number of products/items/SKUs the agent has, carries, offers, or has available in the product catalog.
-Examples: "how many products do you have?", "πόσα προϊόντα έχετε;", "combien de produits avez-vous ?"
+Active catalog products: ${options.activeCatalogProductCount}
+Configured catalog filter fields JSON: ${JSON.stringify(capabilitySummary.filterFields)}
+Catalog lookup fields JSON: ${JSON.stringify(capabilitySummary.lookupFields)}
+Catalog searchable fields JSON: ${JSON.stringify(capabilitySummary.searchableFields)}
+Previous catalog page state JSON: ${previousPageJson}
+The previous page state is the last structured catalog answer in this conversation. If it is not null and hasMore=true, the assistant can continue from nextOffset with the same list/filter.
+Current user message JSON: ${JSON.stringify(options.originalQuery ?? options.query)}
+Reformulated search query JSON: ${JSON.stringify(options.query)}
 
-Return intent="list" only when the user asks a broad inventory list of products the agent has/carries/offers, without filters.
-Examples: "which products do you have?", "what products do you carry?", "ποια προϊόντα διαθέτετε;", "list your products"
+Choose exactly one intent:
+- "count": the user asks for the total number of products/items/SKUs available in the catalog.
+- "list": the user asks for a broad inventory list of products the catalog has/carries/offers, without filters.
+- "filter": the user asks for products matching a brand, category, type, keyword, product line, SKU-like value, barcode-like value, or other catalog subset.
+- "continue_list": the user is continuing/paginating the previous catalog inventory list.
+- "capabilities": the user asks what filters, fields, or ways of narrowing/searching the catalog are available.
+- "none": the message should not use structured inventory lookup.
 
-Return intent="none" for:
-- specific product questions
-- "do you have X?" availability questions
-- product detail questions such as ingredients, dimensions, warnings, price, usage, or barcode
-- filtered or grouped inventory questions such as by brand, category, type, status, country, or keyword
+Conversation-state rule:
+If previous catalog page state is not null, hasMore=true, and the current user message is a reply that accepts, confirms, asks for more, asks for the next page, or otherwise continues the previous list, choose "continue_list". This includes very short replies in any language (for example affirmative-only replies) when they clearly refer to the assistant's previous offer to continue.
+Do not choose "continue_list" when previous catalog page state is null or hasMore=false.
+
+Return "none" for:
+- specific product detail questions such as ingredients, dimensions, warnings, price, usage, nutrition, or barcode details
 - recommendations or comparisons
-- anything not about the catalog inventory as a whole
+- general small talk unrelated to catalog inventory
+- ambiguous messages that do not clearly refer to inventory or the previous catalog page
 
-User message: "${query}"
+For intent="filter", extract the shortest useful filter terms in the original language. Keep brand/category/product words as written. Do not include generic words like products, items, catalog, have, carry, show, list, which, ποια, έχετε, προϊόντα unless they are part of a product name.
+When the user asks about available filters, base the answer on configured catalog filter fields. Lookup/searchable fields can be mentioned as lookup/search options, but they are not configured filters.
 
 Respond ONLY with valid JSON in this exact shape:
-{"intent":"count"|"list"|"none","reason":"short explanation"}`,
+{"intent":"count"|"list"|"filter"|"continue_list"|"capabilities"|"none","filters":["term"],"reason":"short explanation"}`,
       temperature: 0,
-      maxOutputTokens: 120,
+      maxOutputTokens: 220,
       abortSignal: AbortSignal.timeout(1800),
     });
 
@@ -374,24 +458,96 @@ Respond ONLY with valid JSON in this exact shape:
       .replace(/\n?\s*```$/i, "");
     const parsed = JSON.parse(jsonStr);
     const intent =
-      parsed.intent === "count" || parsed.intent === "list"
+      parsed.intent === "count" ||
+      parsed.intent === "list" ||
+      parsed.intent === "filter" ||
+      parsed.intent === "continue_list" ||
+      parsed.intent === "capabilities"
         ? parsed.intent
         : "none";
+    const filters = Array.isArray(parsed.filters)
+      ? parsed.filters
+          .map((value: unknown) => String(value || "").trim())
+          .filter(Boolean)
+          .slice(0, 6)
+          .map((value: string) => ({ value }))
+      : [];
 
     return {
       intent,
+      filters: intent === "filter" ? filters : [],
       reason: String(parsed.reason || "No reason provided"),
     };
   } catch (error) {
     console.warn(
-      "[Catalog Structured Intent] Classification failed, using normal RAG:",
+      "[Catalog Structured Planner] Planning failed, using normal RAG:",
       error,
     );
     return {
       intent: "none",
-      reason: "Classification failed, using normal RAG",
+      filters: [],
+      reason: "Catalog planning failed, using normal RAG",
     };
   }
+}
+
+function summarizeCatalogFieldCapabilities(
+  capabilities: CatalogFieldCapability[],
+): {
+  filterFields: string[];
+  lookupFields: string[];
+  searchableFields: string[];
+} {
+  const fieldsByRole = (roles: CatalogFieldCapability["role"][]) => {
+    const roleSet = new Set(roles);
+    return Array.from(
+      new Set(
+        capabilities
+          .filter((capability) => roleSet.has(capability.role))
+          .map((capability) => capability.fieldPath.trim())
+          .filter(Boolean),
+      ),
+    );
+  };
+
+  return {
+    filterFields: fieldsByRole(["filterable"]),
+    lookupFields: fieldsByRole(["stable_key", "title", "exact"]),
+    searchableFields: fieldsByRole(["searchable"]),
+  };
+}
+
+function resolveCatalogStructuredLookup(
+  intent: CatalogStructuredIntent | "none",
+  filters: CatalogStructuredFilter[],
+  previousCatalogPage: CatalogListContinuationState | undefined,
+  defaultLimit: number,
+): {
+  intent: CatalogStructuredLookupIntent;
+  filters: CatalogStructuredFilter[];
+  offset: number;
+  limit: number;
+} | null {
+  if (intent === "none") return null;
+
+  if (intent === "continue_list") {
+    if (!previousCatalogPage) return null;
+    return {
+      intent: previousCatalogPage.intent,
+      filters: previousCatalogPage.filters,
+      offset: previousCatalogPage.nextOffset,
+      limit: previousCatalogPage.limit || defaultLimit,
+    };
+  }
+
+  if (intent === "filter" && filters.length === 0) return null;
+
+  return {
+    intent,
+    filters: intent === "filter" ? filters : [],
+    offset: 0,
+    limit: defaultLimit,
+  };
 }
 
 // ─────────────────────────────────────────────────────
@@ -733,6 +889,8 @@ export async function performRAGRetrieval(
   agentId: string,
   config: RAGConfig,
   conversationHistory?: ConversationMessage[],
+  previousCatalogPage?: CatalogListContinuationState,
+  catalogLane?: CatalogRetrievalLane,
 ): Promise<RAGResult> {
   const ragStartTime = Date.now();
   const debugInfo: RAGDebugInfo = {
@@ -790,9 +948,128 @@ export async function performRAGRetrieval(
 
   const rewriteModelId = config.rewriteModel || DEFAULT_MODELS.QUERY_REWRITE;
   const variationsCount = config.queryVariationsCount || 3;
+  const topK = config.topK || RAG_CONFIG.TOP_K;
+  const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
 
   let queries = [effectiveQuery];
   let keywords: string[] = [];
+
+  const catalogStructuredQueryStart = Date.now();
+  const catalogCapabilities = catalogLane
+    ? await catalogLane.loadCapabilities({
+        agentId,
+        knowledgeSourceIds: config.experienceKnowledgeIds,
+      })
+    : { activeProductCount: 0, fieldCapabilities: [] };
+  const activeCatalogProductCount = catalogCapabilities.activeProductCount;
+  const catalogFieldCapabilities = catalogCapabilities.fieldCapabilities;
+  debugInfo.timing!.catalogStructuredQueryMs =
+    Date.now() - catalogStructuredQueryStart;
+  debugInfo.catalogActiveProductCount = activeCatalogProductCount;
+
+  if (catalogLane && activeCatalogProductCount > 0) {
+    const catalogPlannerModelId =
+      config.intentModel || DEFAULT_MODELS.INTENT_CLASSIFICATION;
+    debugInfo.models!.catalogStructuredIntentModel = catalogPlannerModelId;
+
+    const catalogStructuredIntentStart = Date.now();
+    const catalogPlannerModel = await resolveAndCreateModel(
+      catalogPlannerModelId,
+    );
+    const catalogPlan = await planCatalogStructuredRetrieval(
+      catalogPlannerModel,
+      {
+        query: effectiveQuery,
+        originalQuery: userQuery,
+        previousCatalogPage,
+        activeCatalogProductCount,
+        fieldCapabilities: catalogFieldCapabilities,
+      },
+    );
+    debugInfo.timing!.catalogStructuredIntentMs =
+      Date.now() - catalogStructuredIntentStart;
+    debugInfo.catalogStructuredIntent = catalogPlan.intent;
+    debugInfo.catalogStructuredIntentReason = catalogPlan.reason;
+    debugInfo.catalogStructuredFilters = catalogPlan.filters;
+
+    const lookup = resolveCatalogStructuredLookup(
+      catalogPlan.intent,
+      catalogPlan.filters,
+      previousCatalogPage,
+      Math.max(20, topK),
+    );
+
+    if (lookup) {
+      const structuredLookupStart = Date.now();
+      const structuredCatalogResult =
+        await catalogLane.findStructuredQueryResult({
+          intent: lookup.intent,
+          agentId,
+          knowledgeSourceIds: config.experienceKnowledgeIds,
+          filters: lookup.filters,
+          limit: lookup.limit,
+          offset: lookup.offset,
+          totalActiveProducts: activeCatalogProductCount,
+          fieldCapabilities: catalogFieldCapabilities,
+        });
+      debugInfo.timing!.catalogStructuredQueryMs =
+        (debugInfo.timing!.catalogStructuredQueryMs ?? 0) +
+        (Date.now() - structuredLookupStart);
+
+      if (structuredCatalogResult) {
+        const match = structuredCatalogResult.match;
+        debugInfo.catalogActiveProductCount =
+          structuredCatalogResult.totalActiveProducts;
+        debugInfo.catalogStructuredMatchedProducts =
+          structuredCatalogResult.matchedProducts;
+        debugInfo.catalogStructuredProductsReturned =
+          structuredCatalogResult.returnedProducts;
+        debugInfo.catalogStructuredFilters = structuredCatalogResult.filters;
+        debugInfo.catalogStructuredContinuationOf =
+          catalogPlan.intent === "continue_list" &&
+          (structuredCatalogResult.intent === "list" ||
+            structuredCatalogResult.intent === "filter")
+            ? structuredCatalogResult.intent
+            : undefined;
+        debugInfo.catalogStructuredOffset = structuredCatalogResult.offset;
+        debugInfo.catalogStructuredLimit = structuredCatalogResult.limit;
+        debugInfo.catalogStructuredNextOffset =
+          structuredCatalogResult.nextOffset;
+        debugInfo.catalogStructuredHasMore = structuredCatalogResult.hasMore;
+        debugInfo.catalogStructuredComplete = structuredCatalogResult.complete;
+        debugInfo.catalogExactMatchCount = 0;
+        debugInfo.vectorResultsCount = 0;
+        debugInfo.ftsResultsCount = 0;
+        debugInfo.rerankEnabled = false;
+        debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
+
+        debugInfo.chunks = [
+          {
+            id: match.id,
+            content: match.content,
+            score: match.score,
+            vectorScore: match.vectorScore,
+            sourceId: String(match.metadata.sourceId ?? match.id),
+            metadata: match.metadata,
+          },
+        ];
+
+        return {
+          context: {
+            chunks: [
+              {
+                content: match.content,
+                sourceId: String(match.metadata.sourceId ?? match.id),
+                score: match.score,
+                metadata: match.metadata,
+              },
+            ],
+          },
+          debugInfo,
+        };
+      }
+    }
+  }
 
   if (config.skipIntentClassification) {
     console.log("[RAG Pipeline] Intent classification skipped by config");
@@ -897,94 +1174,16 @@ export async function performRAGRetrieval(
   }
 
   // Step 3: Hybrid search (uses platform-wide embedding model)
-  const topK = config.topK || RAG_CONFIG.TOP_K;
-  const minSimilarity = config.minSimilarity ?? RAG_CONFIG.MIN_SIMILARITY;
-
-  const catalogStructuredQueryStart = Date.now();
-  const activeCatalogProductCount = await countActiveCatalogProducts({
-    agentId,
-    knowledgeSourceIds: config.experienceKnowledgeIds,
-  });
-  debugInfo.timing!.catalogStructuredQueryMs =
-    Date.now() - catalogStructuredQueryStart;
-  debugInfo.catalogActiveProductCount = activeCatalogProductCount;
-
-  if (activeCatalogProductCount > 0) {
-    const catalogIntentModelId =
-      config.intentModel || DEFAULT_MODELS.INTENT_CLASSIFICATION;
-    debugInfo.models!.catalogStructuredIntentModel = catalogIntentModelId;
-
-    const catalogStructuredIntentStart = Date.now();
-    const catalogIntentModel =
-      await resolveAndCreateModel(catalogIntentModelId);
-    const catalogIntent = await classifyCatalogStructuredIntent(
-      catalogIntentModel,
-      effectiveQuery,
-    );
-    debugInfo.timing!.catalogStructuredIntentMs =
-      Date.now() - catalogStructuredIntentStart;
-    debugInfo.catalogStructuredIntent = catalogIntent.intent;
-    debugInfo.catalogStructuredIntentReason = catalogIntent.reason;
-
-    if (catalogIntent.intent !== "none") {
-      const structuredLookupStart = Date.now();
-      const structuredCatalogResult = await findCatalogStructuredQueryResult({
-        intent: catalogIntent.intent,
-        agentId,
-        knowledgeSourceIds: config.experienceKnowledgeIds,
-        limit: Math.max(20, topK),
-      });
-      debugInfo.timing!.catalogStructuredQueryMs =
-        (debugInfo.timing!.catalogStructuredQueryMs ?? 0) +
-        (Date.now() - structuredLookupStart);
-
-      if (structuredCatalogResult) {
-        const match = structuredCatalogResult.match;
-        debugInfo.catalogActiveProductCount =
-          structuredCatalogResult.totalActiveProducts;
-        debugInfo.catalogStructuredProductsReturned =
-          structuredCatalogResult.returnedProducts;
-        debugInfo.catalogExactMatchCount = 0;
-        debugInfo.vectorResultsCount = 0;
-        debugInfo.ftsResultsCount = 0;
-        debugInfo.rerankEnabled = false;
-        debugInfo.timing!.totalRagMs = Date.now() - ragStartTime;
-
-        debugInfo.chunks = [
-          {
-            id: match.id,
-            content: match.content,
-            score: match.score,
-            vectorScore: match.vectorScore,
-            sourceId: String(match.metadata.sourceId ?? match.id),
-            metadata: match.metadata,
-          },
-        ];
-
-        return {
-          context: {
-            chunks: [
-              {
-                content: match.content,
-                sourceId: String(match.metadata.sourceId ?? match.id),
-                score: match.score,
-                metadata: match.metadata,
-              },
-            ],
-          },
-          debugInfo,
-        };
-      }
-    }
-  }
-
   const catalogExactSearchStart = Date.now();
-  const catalogExactMatches = await findCatalogExactMatches({
-    query: effectiveQuery,
-    agentId,
-    knowledgeSourceIds: config.experienceKnowledgeIds,
-    limit: topK,
-  });
+  const catalogExactMatches =
+    catalogLane && activeCatalogProductCount > 0
+      ? await catalogLane.findExactMatches({
+          query: effectiveQuery,
+          agentId,
+          knowledgeSourceIds: config.experienceKnowledgeIds,
+          limit: topK,
+        })
+      : [];
   debugInfo.timing!.catalogExactSearchMs = Date.now() - catalogExactSearchStart;
   debugInfo.catalogExactMatchCount = catalogExactMatches.length;
 
@@ -1165,10 +1364,25 @@ async function enrichWithFullText(
         knowledgeSource,
         eq(documentChunks.documentId, knowledgeSource.id),
       )
+      .leftJoin(catalogProduct, eq(catalogProduct.id, documentChunks.productId))
+      .leftJoin(
+        catalogConfig,
+        eq(catalogConfig.knowledgeSourceId, documentChunks.documentId),
+      )
       .where(
         and(
           inArray(documentChunks.id, chunkIds),
-          eq(knowledgeSource.status, "indexed"),
+          or(
+            and(
+              isNull(documentChunks.productId),
+              eq(knowledgeSource.status, "indexed"),
+            ),
+            and(
+              eq(catalogConfig.enabled, true),
+              eq(catalogProduct.status, "active"),
+              eq(catalogProduct.indexVersion, catalogConfig.activeIndexVersion),
+            ),
+          ),
         ),
       );
 
@@ -1297,11 +1511,26 @@ async function expandWithNeighborChunks(
       knowledgeSource,
       eq(documentChunks.documentId, knowledgeSource.id),
     )
+    .leftJoin(catalogProduct, eq(catalogProduct.id, documentChunks.productId))
+    .leftJoin(
+      catalogConfig,
+      eq(catalogConfig.knowledgeSourceId, documentChunks.documentId),
+    )
     .where(
       and(
         inArray(documentChunks.documentId, docIds),
         inArray(documentChunks.chunkIndex, allChunkIndices),
-        eq(knowledgeSource.status, "indexed"),
+        or(
+          and(
+            isNull(documentChunks.productId),
+            eq(knowledgeSource.status, "indexed"),
+          ),
+          and(
+            eq(catalogConfig.enabled, true),
+            eq(catalogProduct.status, "active"),
+            eq(catalogProduct.indexVersion, catalogConfig.activeIndexVersion),
+          ),
+        ),
       ),
     );
 

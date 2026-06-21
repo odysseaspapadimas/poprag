@@ -13,4 +13,5 @@ yarn.lock
 /playwright/.cache/
 .tanstack
 dist
-.wrangler
+.wrangler/
+.codex/

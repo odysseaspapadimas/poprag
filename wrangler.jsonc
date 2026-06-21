@@ -13,14 +13,12 @@
       "database_name": "poprag",
       "database_id": "6da51806-c6ac-4ea3-9b62-cb17fa21b4a0",
       "migrations_dir": "drizzle/migrations",
-      "remote": true,
     },
   ],
   "r2_buckets": [
     {
       "binding": "R2",
       "bucket_name": "poprag",
-      "remote": true,
     },
   ],
   "ai": {

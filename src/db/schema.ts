@@ -341,6 +341,7 @@ export const catalogProduct = sqliteTable(
     sourceId: text("source_id")
       .notNull()
       .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    indexVersion: integer("index_version").default(0).notNull(),
     recordKey: text("record_key").notNull(),
     recordHash: text("record_hash").notNull(),
     title: text("title"),
@@ -360,13 +361,65 @@ export const catalogProduct = sqliteTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("catalog_product_source_record_key_idx").on(
+    uniqueIndex("catalog_product_source_record_key_version_idx").on(
       table.sourceId,
       table.recordKey,
+      table.indexVersion,
     ),
     index("catalog_product_agent_idx").on(table.agentId),
     index("catalog_product_source_status_idx").on(table.sourceId, table.status),
+    index("catalog_product_source_version_idx").on(
+      table.sourceId,
+      table.indexVersion,
+      table.status,
+    ),
     index("catalog_product_record_key_idx").on(table.recordKey),
+  ],
+);
+
+export const catalogProductFact = sqliteTable(
+  "catalog_product_fact",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    indexVersion: integer("index_version").default(0).notNull(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => catalogProduct.id, { onDelete: "cascade" }),
+    fieldPath: text("field_path").notNull(),
+    role: text("role", {
+      enum: ["stable_key", "title", "exact", "searchable", "filterable"],
+    }).notNull(),
+    value: text("value").notNull(),
+    normalizedValue: text("normalized_value").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("catalog_product_fact_agent_idx").on(table.agentId),
+    index("catalog_product_fact_source_idx").on(table.sourceId),
+    index("catalog_product_fact_product_idx").on(table.productId),
+    index("catalog_product_fact_source_version_idx").on(
+      table.sourceId,
+      table.indexVersion,
+    ),
+    index("catalog_product_fact_field_idx").on(table.fieldPath),
+    index("catalog_product_fact_lookup_idx").on(
+      table.agentId,
+      table.role,
+      table.normalizedValue,
+    ),
+    index("catalog_product_fact_filter_idx").on(
+      table.agentId,
+      table.fieldPath,
+      table.normalizedValue,
+    ),
   ],
 );
 
@@ -384,6 +437,7 @@ export const documentChunks = sqliteTable(
     productId: text("product_id").references(() => catalogProduct.id, {
       onDelete: "set null",
     }),
+    catalogIndexVersion: integer("catalog_index_version"),
     recordKey: text("record_key"),
     recordHash: text("record_hash"),
     metadata: text("metadata", { mode: "json" }).$type<
@@ -397,6 +451,10 @@ export const documentChunks = sqliteTable(
     index("document_chunks_document_idx").on(table.documentId),
     index("document_chunks_session_idx").on(table.sessionId),
     index("document_chunks_product_idx").on(table.productId),
+    index("document_chunks_catalog_version_idx").on(
+      table.documentId,
+      table.catalogIndexVersion,
+    ),
     index("document_chunks_record_key_idx").on(
       table.documentId,
       table.recordKey,
@@ -600,10 +658,108 @@ export const agentExperienceKnowledge = sqliteTable(
   ],
 );
 
+export const catalogConfig = sqliteTable(
+  "catalog_config",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    knowledgeSourceId: text("knowledge_source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" })
+      .unique(),
+    experienceId: text("experience_id").references(() => agentExperience.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    origin: text("origin", { enum: ["api", "csv"] }).notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+    activeIndexVersion: integer("active_index_version").default(0).notNull(),
+    stableKeyField: text("stable_key_field").notNull(),
+    updatedAtField: text("updated_at_field"),
+    deletionField: text("deletion_field"),
+    deletionInactiveValues: text("deletion_inactive_values", {
+      mode: "json",
+    }).$type<string[]>(),
+    titleField: text("title_field").notNull(),
+    searchableFields: text("searchable_fields", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
+    exactMatchFields: text("exact_match_fields", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
+    filterableFields: text("filterable_fields", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("catalog_config_agent_idx").on(table.agentId),
+    index("catalog_config_source_idx").on(table.knowledgeSourceId),
+    index("catalog_config_enabled_idx").on(table.agentId, table.enabled),
+    index("catalog_config_origin_idx").on(table.origin),
+  ],
+);
+
+export const catalogIndexVersion = sqliteTable(
+  "catalog_index_version",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agent.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+    catalogConfigId: text("catalog_config_id")
+      .notNull()
+      .references(() => catalogConfig.id, { onDelete: "cascade" }),
+    runId: text("run_id"),
+    version: integer("version").notNull(),
+    status: text("status", {
+      enum: ["building", "active", "superseded", "failed"],
+    })
+      .default("building")
+      .notNull(),
+    stats: text("stats", { mode: "json" }).$type<Record<string, unknown>>(),
+    error: text("error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    promotedAt: integer("promoted_at", { mode: "timestamp_ms" }),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("catalog_index_version_source_version_idx").on(
+      table.sourceId,
+      table.version,
+    ),
+    index("catalog_index_version_source_status_idx").on(
+      table.sourceId,
+      table.status,
+    ),
+    index("catalog_index_version_config_idx").on(table.catalogConfigId),
+  ],
+);
+
 export const catalogSyncConfig = sqliteTable(
   "catalog_sync_config",
   {
     id: text("id").primaryKey(),
+    catalogConfigId: text("catalog_config_id").references(
+      () => catalogConfig.id,
+      { onDelete: "set null" },
+    ),
     agentId: text("agent_id")
       .notNull()
       .references(() => agent.id, { onDelete: "cascade" }),
@@ -662,6 +818,7 @@ export const catalogSyncConfig = sqliteTable(
       .notNull(),
   },
   (table) => [
+    index("catalog_sync_config_catalog_idx").on(table.catalogConfigId),
     index("catalog_sync_config_agent_idx").on(table.agentId),
     index("catalog_sync_config_due_idx").on(table.enabled, table.nextRunAt),
     index("catalog_sync_config_source_idx").on(table.knowledgeSourceId),
@@ -738,6 +895,12 @@ export type InsertKnowledgeSource = typeof knowledgeSource.$inferInsert;
 
 export type CatalogProduct = typeof catalogProduct.$inferSelect;
 export type InsertCatalogProduct = typeof catalogProduct.$inferInsert;
+export type CatalogConfig = typeof catalogConfig.$inferSelect;
+export type InsertCatalogConfig = typeof catalogConfig.$inferInsert;
+export type CatalogIndexVersion = typeof catalogIndexVersion.$inferSelect;
+export type InsertCatalogIndexVersion = typeof catalogIndexVersion.$inferInsert;
+export type CatalogProductFact = typeof catalogProductFact.$inferSelect;
+export type InsertCatalogProductFact = typeof catalogProductFact.$inferInsert;
 
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type InsertDocumentChunk = typeof documentChunks.$inferInsert;

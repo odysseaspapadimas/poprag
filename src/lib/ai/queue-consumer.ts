@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  catalogConfig,
   documentChunks,
   type KnowledgeSource,
   knowledgeSource,
@@ -12,12 +13,15 @@ import {
   normalizeKnowledgeIngestionError,
   processKnowledgeSource,
 } from "@/lib/ai/ingestion";
+import { processCsvCatalogSource } from "@/lib/catalog/csv";
 
 const MAX_QUEUE_RETRIES = 3;
 const RETRY_DELAY_SECONDS = [10, 30, 90] as const;
 const FALLBACK_REDUCED_CHUNK_SIZE = 768;
 const FALLBACK_EMBEDDING_BATCH_SIZE = 8;
 const QUEUE_INDEXING_TIME_SLICE_MS = 8 * 60 * 1000;
+
+type CatalogConfigRow = typeof catalogConfig.$inferSelect;
 
 function getQueueRetryDelaySeconds(attempt: number): number {
   return RETRY_DELAY_SECONDS[Math.max(0, attempt - 1)] ?? 180;
@@ -140,6 +144,7 @@ export async function handleKnowledgeIndexQueue(
         }
       : getRetrySettings(attempt);
     let source: KnowledgeSource | undefined;
+    let catalogSource: CatalogConfigRow | undefined;
 
     try {
       // Fetch source metadata from D1
@@ -180,6 +185,30 @@ export async function handleKnowledgeIndexQueue(
             updatedAt: new Date(),
           })
           .where(eq(knowledgeSource.id, sourceId));
+        message.ack();
+        continue;
+      }
+
+      [catalogSource] = await db
+        .select()
+        .from(catalogConfig)
+        .where(eq(catalogConfig.knowledgeSourceId, sourceId))
+        .limit(1);
+      if (catalogSource) {
+        if (catalogSource.origin === "csv") {
+          await processCsvCatalogSource({ sourceId, env });
+        } else {
+          await db
+            .update(knowledgeSource)
+            .set({
+              status: "indexed",
+              progress: 100,
+              progressMessage:
+                "API catalog sources are refreshed by Catalog Sync, not the generic indexing queue.",
+              updatedAt: new Date(),
+            })
+            .where(eq(knowledgeSource.id, sourceId));
+        }
         message.ack();
         continue;
       }
@@ -303,7 +332,7 @@ export async function handleKnowledgeIndexQueue(
         continue;
       }
 
-      if (source) {
+      if (source && !catalogSource) {
         try {
           await cleanupSourceIndexData(source, env);
         } catch (cleanupError) {
@@ -312,6 +341,10 @@ export async function handleKnowledgeIndexQueue(
             cleanupError,
           );
         }
+      } else if (catalogSource) {
+        console.log(
+          `[Queue] Preserving active catalog index for failed catalog source ${sourceId}`,
+        );
       }
 
       message.ack();

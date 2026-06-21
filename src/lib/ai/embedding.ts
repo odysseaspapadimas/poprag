@@ -1,10 +1,8 @@
 import { env } from "cloudflare:workers";
-import { createOpenAI } from "@ai-sdk/openai";
 import {
   MarkdownTextSplitter,
   RecursiveCharacterTextSplitter,
 } from "@langchain/textsplitters";
-import { embedMany } from "ai";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -12,6 +10,13 @@ import {
   EMBEDDING_CONFIG,
   RAG_CONFIG,
 } from "@/lib/ai/constants";
+import {
+  createOpenAIEmbeddingAdapter,
+  createWorkersAIEmbeddingAdapter,
+  EmbeddingFailure,
+  normalizeEmbeddingInputs,
+  requestOrderedEmbeddings,
+} from "@/lib/ai/embedding-transport";
 import { resolveModelConfig } from "@/lib/ai/helpers";
 
 /**
@@ -82,7 +87,14 @@ async function resolveEmbeddingConfig(
   options?: EmbeddingRequestOptions,
 ): Promise<ResolvedEmbeddingConfig> {
   const modelAlias = options?.model || DEFAULT_MODELS.EMBEDDING;
-  const modelConfig = await resolveModelConfig(modelAlias);
+  const modelConfig =
+    modelAlias === DEFAULT_MODELS.EMBEDDING
+      ? {
+          alias: modelAlias,
+          modelId: DEFAULT_MODELS.EMBEDDING,
+          provider: "openai" as const,
+        }
+      : await resolveModelConfig(modelAlias);
 
   // Platform-wide: always use configured dimensions (768 Matryoshka for text-embedding-3-small)
   return {
@@ -95,65 +107,64 @@ async function resolveEmbeddingConfig(
   };
 }
 
-async function runEmbeddingRequest(
-  inputs: string[],
-  config: ResolvedEmbeddingConfig,
-): Promise<number[][]> {
+function resolveEmbeddingAdapter(config: ResolvedEmbeddingConfig) {
   switch (config.provider) {
     case "cloudflare-workers-ai": {
       if (!env.AI) {
-        throw new Error("Workers AI binding not available");
+        throw new EmbeddingFailure(
+          "provider_unavailable",
+          "Workers AI binding not available",
+          {
+            provider: config.provider,
+            modelId: config.modelId,
+            expectedDimensions: config.expectedDimensions,
+            requestedDimensions: config.requestedDimensions,
+            inputCount: 0,
+          },
+        );
       }
-      const aiOptions = env.AI_GATEWAY_ID
-        ? { gateway: { id: env.AI_GATEWAY_ID } }
-        : {};
-      const response = await env.AI.run(
-        config.modelId as keyof AiModels,
-        { text: inputs },
-        aiOptions,
-      );
-      return (response as { data: number[][] }).data;
-    }
-    case "openai": {
-      if (!env.OPENAI_API_KEY) {
-        throw new Error("OPENAI_API_KEY is required for OpenAI embeddings");
-      }
-      const openaiProvider = createOpenAI({ apiKey: env.OPENAI_API_KEY });
-      const model = openaiProvider.embedding(config.modelId);
-      const providerOptions = config.requestedDimensions
-        ? { openai: { dimensions: config.requestedDimensions } }
-        : undefined;
-      const result = await embedMany({
-        model,
-        values: inputs,
-        abortSignal: config.abortSignal,
-        providerOptions,
+      return createWorkersAIEmbeddingAdapter({
+        ai: env.AI as unknown as {
+          run: (
+            modelId: string,
+            input: { text: string[] },
+            options?: Record<string, unknown>,
+          ) => Promise<{ data?: number[][] } | unknown>;
+        },
+        gatewayId: env.AI_GATEWAY_ID,
       });
-      return result.embeddings as number[][];
     }
+    case "openai":
+      return createOpenAIEmbeddingAdapter({
+        apiKey: env.OPENAI_API_KEY,
+      });
     default:
-      throw new Error(
+      throw new EmbeddingFailure(
+        "provider_unsupported",
         `Embedding not supported for provider: ${config.provider}`,
+        {
+          provider: config.provider,
+          modelId: config.modelId,
+          expectedDimensions: config.expectedDimensions,
+          requestedDimensions: config.requestedDimensions,
+          inputCount: 0,
+        },
       );
   }
 }
 
-function assertValidEmbedding(
-  embedding: number[] | undefined,
-  expectedDimensions: number,
-  index?: number,
-): void {
-  const label = index === undefined ? "embedding" : `embedding ${index}`;
-  if (!Array.isArray(embedding) || embedding.length === 0) {
-    throw new Error(
-      `Invalid ${label} response: expected array with ${expectedDimensions} dimensions, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`,
-    );
-  }
-  if (embedding.length !== expectedDimensions) {
-    throw new Error(
-      `Invalid ${label} dimensions: expected ${expectedDimensions}, got ${embedding.length}`,
-    );
-  }
+async function runEmbeddingRequest(
+  inputs: string[],
+  config: ResolvedEmbeddingConfig,
+): Promise<number[][]> {
+  const adapter = resolveEmbeddingAdapter(config);
+  return requestOrderedEmbeddings(adapter, {
+    inputs,
+    modelId: config.modelId,
+    expectedDimensions: config.expectedDimensions,
+    requestedDimensions: config.requestedDimensions,
+    abortSignal: config.abortSignal,
+  });
 }
 
 /**
@@ -271,11 +282,7 @@ export async function generateEmbedding(
   value: string,
   options?: EmbeddingRequestOptions,
 ): Promise<number[]> {
-  const input = value.replaceAll("\n", " ");
-
-  if (!input.trim()) {
-    throw new Error("Cannot generate embedding for empty text");
-  }
+  const [input] = normalizeEmbeddingInputs([value]);
 
   const config = await resolveEmbeddingConfig(options);
   console.log(
@@ -284,13 +291,20 @@ export async function generateEmbedding(
 
   const embeddings = await runEmbeddingRequest([input], config);
   if (!Array.isArray(embeddings) || embeddings.length !== 1) {
-    throw new Error(
+    throw new EmbeddingFailure(
+      "invalid_response",
       `Invalid embeddings response: expected 1 embedding, got ${Array.isArray(embeddings) ? embeddings.length : "non-array"}`,
+      {
+        provider: config.provider,
+        modelId: config.modelId,
+        expectedDimensions: config.expectedDimensions,
+        requestedDimensions: config.requestedDimensions,
+        inputCount: 1,
+      },
     );
   }
 
   const embedding = embeddings[0];
-  assertValidEmbedding(embedding, config.expectedDimensions);
   console.log(`Generated embedding with ${embedding.length} dimensions`);
   return embedding;
 }
@@ -303,14 +317,10 @@ export async function generateEmbeddings(
   values: string[],
   options?: EmbeddingRequestOptions,
 ): Promise<number[][]> {
-  const inputs = values.map((value) => value.replaceAll("\n", " ").trim());
+  const inputs = normalizeEmbeddingInputs(values);
 
   if (inputs.length === 0) {
     return [];
-  }
-
-  if (inputs.some((input) => input.length === 0)) {
-    throw new Error("Cannot generate embeddings for empty text");
   }
 
   const config = await resolveEmbeddingConfig(options);
@@ -321,14 +331,18 @@ export async function generateEmbeddings(
   const embeddings = await runEmbeddingRequest(inputs, config);
 
   if (!Array.isArray(embeddings) || embeddings.length !== inputs.length) {
-    throw new Error(
+    throw new EmbeddingFailure(
+      "invalid_response",
       `Invalid embeddings response: expected ${inputs.length} embeddings, got ${Array.isArray(embeddings) ? embeddings.length : "non-array"}`,
+      {
+        provider: config.provider,
+        modelId: config.modelId,
+        expectedDimensions: config.expectedDimensions,
+        requestedDimensions: config.requestedDimensions,
+        inputCount: inputs.length,
+      },
     );
   }
-
-  embeddings.forEach((embedding, index) => {
-    assertValidEmbedding(embedding, config.expectedDimensions, index);
-  });
 
   console.log(
     `Generated ${embeddings.length} embeddings with ${embeddings[0]?.length || 0} dimensions`,
@@ -736,9 +750,19 @@ export async function searchDocumentChunksFTS(
       FROM document_chunks_fts
       JOIN document_chunks ON document_chunks_fts.id = document_chunks.id
       JOIN knowledge_source ON knowledge_source.id = document_chunks.source_id
+      LEFT JOIN catalog_product ON catalog_product.id = document_chunks.product_id
+      LEFT JOIN catalog_config ON catalog_config.knowledge_source_id = document_chunks.source_id
       WHERE document_chunks_fts MATCH ${compoundMatch}
         AND document_chunks.agent_id = ${agentId}
-        AND knowledge_source.status = 'indexed'
+        AND (
+          (document_chunks.product_id IS NULL AND knowledge_source.status = 'indexed')
+          OR (
+            document_chunks.product_id IS NOT NULL
+            AND catalog_config.enabled = 1
+            AND catalog_product.status = 'active'
+            AND catalog_product.index_version = catalog_config.active_index_version
+          )
+        )
         ${sourceFilter}
       ORDER BY rank ASC
       LIMIT ${limit * 2}
@@ -793,8 +817,18 @@ export async function searchDocumentChunksFTS(
         (${sql.join(keywordHitClauses, sql` + `)}) * 1.0 AS rank
       FROM document_chunks
       JOIN knowledge_source ON knowledge_source.id = document_chunks.source_id
+      LEFT JOIN catalog_product ON catalog_product.id = document_chunks.product_id
+      LEFT JOIN catalog_config ON catalog_config.knowledge_source_id = document_chunks.source_id
       WHERE document_chunks.agent_id = ${agentId}
-        AND knowledge_source.status = 'indexed'
+        AND (
+          (document_chunks.product_id IS NULL AND knowledge_source.status = 'indexed')
+          OR (
+            document_chunks.product_id IS NOT NULL
+            AND catalog_config.enabled = 1
+            AND catalog_product.status = 'active'
+            AND catalog_product.index_version = catalog_config.active_index_version
+          )
+        )
         ${sourceFilterForScan}
         AND (${sql.join(matchClauses, sql` OR `)})
       ORDER BY rank DESC, length(document_chunks.text) ASC

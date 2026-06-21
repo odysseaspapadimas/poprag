@@ -28,6 +28,10 @@ import {
 } from "@/db/schema";
 import { createModel, type ProviderType } from "@/lib/ai/models";
 import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
+import {
+  type CatalogListContinuationState,
+  createCatalogRetrievalLane,
+} from "@/lib/catalog/query";
 
 // Import refactored modules
 import type { ModelCapabilities } from "./helpers";
@@ -96,12 +100,17 @@ export async function handleChatRequest(
     agentData = await resolveAgent(request.agentSlug);
 
     // 2. Load prompt config and model policy in PARALLEL for speed
-    const [{ basePrompt, mergedVariables }, policy, experienceKnowledgeIds] =
-      await Promise.all([
-        loadPromptConfig(agentData.id, request.variables),
-        loadModelPolicy(agentData.id),
-        resolveExperienceKnowledge(agentData.id, request.experienceSlug),
-      ]);
+    const [
+      { basePrompt },
+      policy,
+      experienceKnowledgeIds,
+      previousCatalogPage,
+    ] = await Promise.all([
+      loadPromptConfig(agentData.id, request.variables),
+      loadModelPolicy(agentData.id),
+      resolveExperienceKnowledge(agentData.id, request.experienceSlug),
+      loadLatestCatalogContinuation(agentData.id, request.conversationId),
+    ]);
 
     // 3. Resolve model and capabilities (before RAG, needed for image context extraction)
     const resolved = await resolveModelForChat(
@@ -165,6 +174,8 @@ export async function handleChatRequest(
         agentData.id,
         ragConfig,
         conversationHistory,
+        previousCatalogPage,
+        createCatalogRetrievalLane(),
       );
 
     // 5b. Add model and image context info to debug
@@ -275,6 +286,77 @@ export async function handleChatRequest(
 // ─────────────────────────────────────────────────────
 // Helper Functions (extracted from handleChatRequest)
 // ─────────────────────────────────────────────────────
+
+async function loadLatestCatalogContinuation(
+  agentId: string,
+  conversationId?: string,
+): Promise<CatalogListContinuationState | undefined> {
+  if (!conversationId) return undefined;
+
+  const recentTranscripts = await db
+    .select({ request: transcript.request })
+    .from(transcript)
+    .where(
+      and(
+        eq(transcript.agentId, agentId),
+        eq(transcript.conversationId, conversationId),
+      ),
+    )
+    .orderBy(desc(transcript.createdAt))
+    .limit(5);
+
+  for (const item of recentTranscripts) {
+    const request = item.request as Record<string, unknown> | undefined;
+    const ragDebug = request?.ragDebug as Partial<RAGDebugInfo> | undefined;
+    if (!ragDebug) continue;
+
+    const intent =
+      ragDebug.catalogStructuredIntent === "list" ||
+      ragDebug.catalogStructuredIntent === "filter"
+        ? ragDebug.catalogStructuredIntent
+        : ragDebug.catalogStructuredContinuationOf;
+    if (intent !== "list" && intent !== "filter") continue;
+
+    const offset = finiteNumber(ragDebug.catalogStructuredOffset) ?? 0;
+    const limit = finiteNumber(ragDebug.catalogStructuredLimit) ?? 20;
+    const returned =
+      finiteNumber(ragDebug.catalogStructuredProductsReturned) ?? 0;
+    const nextOffset =
+      finiteNumber(ragDebug.catalogStructuredNextOffset) ?? offset + returned;
+
+    return {
+      intent,
+      filters: normalizeDebugCatalogFilters(ragDebug.catalogStructuredFilters),
+      offset,
+      limit,
+      nextOffset,
+      hasMore: ragDebug.catalogStructuredHasMore === true,
+    };
+  }
+
+  return undefined;
+}
+
+function normalizeDebugCatalogFilters(
+  filters: RAGDebugInfo["catalogStructuredFilters"],
+): CatalogListContinuationState["filters"] {
+  if (!Array.isArray(filters)) return [];
+  return filters
+    .map((filter) => ({
+      value: String(filter?.value ?? "").trim(),
+      fieldPath:
+        typeof filter?.fieldPath === "string"
+          ? filter.fieldPath.trim() || undefined
+          : undefined,
+    }))
+    .filter((filter) => filter.value.length > 0);
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
 
 /**
  * Resolve experience knowledge source IDs for filtering RAG queries.

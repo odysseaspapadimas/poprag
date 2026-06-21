@@ -7,6 +7,7 @@ import {
   agent,
   agentExperience,
   agentExperienceKnowledge,
+  catalogConfig,
   documentChunks,
   knowledgeSource,
 } from "@/db/schema";
@@ -27,6 +28,36 @@ import {
   checkVectorizeHealth,
   inspectVectorizeExperienceFiltering,
 } from "@/lib/ai/vectorize-utils";
+import { processCsvCatalogSource } from "@/lib/catalog/csv";
+
+const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
+const TEXT_PREVIEW_MIME_TYPES = new Set([
+  "application/json",
+  "application/jsonl",
+  "application/ndjson",
+  "application/x-ndjson",
+]);
+const TEXT_PREVIEW_EXTENSIONS = [".csv", ".jsonl", ".ndjson", ".txt", ".md"];
+
+function normalizeMime(mime: string | null | undefined): string | null {
+  return mime?.split(";")[0]?.trim().toLowerCase() ?? null;
+}
+
+function canPreviewAsText(
+  mime: string | null,
+  fileName: string | null,
+): boolean {
+  const normalizedMime = normalizeMime(mime);
+  const normalizedName = fileName?.toLowerCase() ?? "";
+
+  return (
+    normalizedMime?.startsWith("text/") ||
+    TEXT_PREVIEW_MIME_TYPES.has(normalizedMime ?? "") ||
+    TEXT_PREVIEW_EXTENSIONS.some((extension) =>
+      normalizedName.endsWith(extension),
+    )
+  );
+}
 
 function normalizeFileNameForDedup(fileName: string): string {
   return fileName.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
@@ -294,6 +325,26 @@ export const knowledgeRouter = createTRPCRouter({
       // Verify user has access to the agent
       await requireAgent(source.agentId);
 
+      const [catalog] = await db
+        .select()
+        .from(catalogConfig)
+        .where(eq(catalogConfig.knowledgeSourceId, source.id))
+        .limit(1);
+      if (catalog) {
+        if (catalog.origin === "api") {
+          throw new Error(
+            "API catalog sources must be refreshed with Run sync, not generic re-index.",
+          );
+        }
+        const { env } = await import("cloudflare:workers");
+        return await processCsvCatalogSource({
+          sourceId: input.sourceId,
+          env,
+          content: input.content ?? input.contentBuffer,
+          abortSignal: ctx.request.signal,
+        });
+      }
+
       // Small file fast path: process synchronously when content is inline
       if (input.content || input.contentBuffer) {
         const content: string | Buffer | Uint8Array = input.content
@@ -493,6 +544,38 @@ export const knowledgeRouter = createTRPCRouter({
       // Verify user has access to the agent
       await requireAgent(source.agentId);
 
+      const [catalog] = await db
+        .select()
+        .from(catalogConfig)
+        .where(eq(catalogConfig.knowledgeSourceId, source.id))
+        .limit(1);
+      if (catalog) {
+        if (catalog.origin === "api") {
+          throw new Error(
+            "API catalog sources must be refreshed with Run sync, not generic re-index.",
+          );
+        }
+        const { env } = await import("cloudflare:workers");
+        const result = await processCsvCatalogSource({
+          sourceId: input.sourceId,
+          env,
+          abortSignal: ctx.request.signal,
+        });
+        await audit(
+          ctx,
+          "knowledge.catalog_csv.reimported",
+          { type: "knowledge_source", id: input.sourceId },
+          { catalogConfigId: catalog.id, fromGenericReindex: true },
+        );
+        return {
+          queued: false,
+          sourceId: input.sourceId,
+          success: true,
+          vectorsInserted: result.vectorsInserted,
+          chunksProcessed: result.chunksInserted,
+        };
+      }
+
       // Check if source has R2 file
       if (!source.r2Key) {
         throw new Error("No R2 file found for this source");
@@ -620,6 +703,64 @@ export const knowledgeRouter = createTRPCRouter({
         downloadUrl: signedRequest.url,
         fileName: source.fileName,
         mime: source.mime,
+      };
+    }),
+
+  /**
+   * Get inline text preview content for a knowledge source.
+   */
+  getTextPreview: protectedProcedure
+    .input(z.object({ sourceId: z.string() }))
+    .query(async ({ input }) => {
+      const [source] = await db
+        .select()
+        .from(knowledgeSource)
+        .where(eq(knowledgeSource.id, input.sourceId))
+        .limit(1);
+
+      if (!source) {
+        throw new Error("Source not found");
+      }
+
+      // Verify user has access to the agent
+      await requireAgent(source.agentId);
+
+      if (!source.r2Key) {
+        throw new Error("No R2 file found for this source");
+      }
+
+      if (!canPreviewAsText(source.mime, source.fileName)) {
+        throw new Error("Text preview is not available for this file type");
+      }
+
+      const { env } = await import("cloudflare:workers");
+      const r2Object = await env.R2.get(source.r2Key, {
+        range: { offset: 0, length: TEXT_PREVIEW_MAX_BYTES + 1 },
+      });
+
+      if (!r2Object) {
+        throw new Error("R2 file not found for this source");
+      }
+
+      const bytes = new Uint8Array(await r2Object.arrayBuffer());
+      const truncatedByRange = bytes.byteLength > TEXT_PREVIEW_MAX_BYTES;
+      const previewBytes = truncatedByRange
+        ? bytes.slice(0, TEXT_PREVIEW_MAX_BYTES)
+        : bytes;
+      const content = new TextDecoder("utf-8", { fatal: false }).decode(
+        previewBytes,
+      );
+      const totalBytes = source.bytes ?? r2Object.size ?? bytes.byteLength;
+      const truncated =
+        truncatedByRange || totalBytes > previewBytes.byteLength;
+
+      return {
+        content,
+        truncated,
+        previewBytes: previewBytes.byteLength,
+        totalBytes,
+        mime: source.mime,
+        fileName: source.fileName,
       };
     }),
 

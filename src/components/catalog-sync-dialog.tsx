@@ -42,6 +42,7 @@ type CatalogConfigFormValue = {
   titleField: string;
   searchableFields: string;
   exactMatchFields: string;
+  filterableFields: string;
   syncIntervalDays: number;
   scheduleWeekdayUtc: number;
   scheduleHourUtc: number;
@@ -65,6 +66,7 @@ type CatalogSyncDialogConfig = {
   titleField: string;
   searchableFields: string[] | null;
   exactMatchFields: string[] | null;
+  filterableFields: string[] | null;
   syncIntervalDays: number;
   scheduleWeekdayUtc: number;
   scheduleHourUtc: number;
@@ -128,6 +130,9 @@ function emptyForm(): CatalogConfigFormValue {
       "document.general-information.name.el-GR",
       "document.general-information.name.en-GB",
     ].join(", "),
+    filterableFields: ["parent.documentSummary.name.el-GR", "category"].join(
+      ", ",
+    ),
     syncIntervalDays: 7,
     scheduleWeekdayUtc: 1,
     scheduleHourUtc: 3,
@@ -156,6 +161,7 @@ function formFromConfig(
     titleField: config.titleField,
     searchableFields: (config.searchableFields ?? []).join(", "),
     exactMatchFields: (config.exactMatchFields ?? []).join(", "),
+    filterableFields: (config.filterableFields ?? []).join(", "),
     syncIntervalDays: config.syncIntervalDays,
     scheduleWeekdayUtc: config.scheduleWeekdayUtc,
     scheduleHourUtc: config.scheduleHourUtc,
@@ -212,6 +218,9 @@ export function CatalogSyncDialog({
           queryKey: trpc.catalogSync.list.queryKey({ agentId }),
         });
         queryClient.invalidateQueries({
+          queryKey: trpc.catalog.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
         });
       },
@@ -228,6 +237,9 @@ export function CatalogSyncDialog({
         setOpen(false);
         queryClient.invalidateQueries({
           queryKey: trpc.catalogSync.list.queryKey({ agentId }),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.catalog.list.queryKey({ agentId }),
         });
         queryClient.invalidateQueries({
           queryKey: trpc.agent.getKnowledgeSources.queryKey({ agentId }),
@@ -258,6 +270,7 @@ export function CatalogSyncDialog({
       titleField: form.titleField.trim(),
       searchableFields: parseList(form.searchableFields),
       exactMatchFields: parseList(form.exactMatchFields),
+      filterableFields: parseList(form.filterableFields),
       syncIntervalDays: form.syncIntervalDays,
       scheduleWeekdayUtc: form.scheduleWeekdayUtc,
       scheduleHourUtc: form.scheduleHourUtc,
@@ -486,6 +499,19 @@ export function CatalogSyncDialog({
                 rows={3}
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="filterable-fields">Filterable fields</Label>
+            <Textarea
+              id="filterable-fields"
+              value={form.filterableFields}
+              onChange={(event) =>
+                updateField("filterableFields", event.target.value)
+              }
+              placeholder="brand, category, productType"
+              rows={2}
+            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
