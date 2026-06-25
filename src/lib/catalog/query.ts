@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   catalogConfig,
@@ -9,15 +9,20 @@ import {
 } from "@/db/schema";
 import {
   type CatalogFieldRole,
-  catalogFactMatchesFilter,
+  type CatalogFilterValueSummary,
+  formatCatalogFilterValueSummaryLines,
+  getCatalogSearchableQueryCandidates,
   getPathValue,
   isCatalogTitlePrefixCandidate,
   normalizeCatalogFactValue,
   normalizeCatalogQueryForRole,
   normalizeCatalogValue,
+  selectCatalogFilteredProductIds,
   stringifyScalar,
   uniqueFieldList,
 } from "./shared";
+
+export type { CatalogFilterValueSummary } from "./shared";
 
 export interface CatalogExactMatch {
   id: string;
@@ -29,6 +34,7 @@ export interface CatalogExactMatch {
 
 export type CatalogStructuredIntent =
   | "count"
+  | "overview"
   | "list"
   | "filter"
   | "continue_list"
@@ -63,6 +69,7 @@ export interface CatalogStructuredQueryResult {
   totalActiveProducts: number;
   matchedProducts: number;
   returnedProducts: number;
+  filterValueSummaries: CatalogFilterValueSummary[];
   filters: CatalogStructuredFilter[];
   offset: number;
   limit: number;
@@ -86,6 +93,8 @@ type CatalogStructuredProductRow = {
   filterableFields: string[] | null;
 };
 
+const PRODUCT_ID_FILTER_CHUNK_SIZE = 80;
+
 export async function countActiveCatalogProducts(options: {
   agentId: string;
   knowledgeSourceIds?: string[];
@@ -98,7 +107,7 @@ export async function countActiveCatalogProducts(options: {
       eq(catalogConfig.knowledgeSourceId, catalogProduct.sourceId),
     )
     .innerJoin(knowledgeSource, eq(knowledgeSource.id, catalogProduct.sourceId))
-    .where(buildActiveCatalogProductWhere(options));
+    .where(buildStructuredInventoryProductWhere(options));
 
   return Number(row?.total ?? 0);
 }
@@ -138,6 +147,54 @@ export async function listCatalogFieldCapabilities(options: {
   }
 
   return dedupeCatalogCapabilities(capabilities);
+}
+
+export async function listCatalogFilterValueSummaries(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+  limit?: number;
+}): Promise<CatalogFilterValueSummary[]> {
+  const rows = await db
+    .select({
+      fieldPath: catalogProductFact.fieldPath,
+      value: catalogProductFact.value,
+      normalizedValue: catalogProductFact.normalizedValue,
+      productCount: count(),
+    })
+    .from(catalogProductFact)
+    .innerJoin(
+      catalogProduct,
+      eq(catalogProduct.id, catalogProductFact.productId),
+    )
+    .innerJoin(
+      catalogConfig,
+      eq(catalogConfig.knowledgeSourceId, catalogProduct.sourceId),
+    )
+    .innerJoin(knowledgeSource, eq(knowledgeSource.id, catalogProduct.sourceId))
+    .where(
+      and(
+        buildStructuredInventoryProductWhere(options),
+        eq(catalogProductFact.role, "filterable"),
+      ),
+    )
+    .groupBy(
+      catalogProductFact.fieldPath,
+      catalogProductFact.value,
+      catalogProductFact.normalizedValue,
+    )
+    .orderBy(
+      asc(catalogProductFact.fieldPath),
+      desc(count()),
+      asc(catalogProductFact.value),
+    )
+    .limit(Math.max(1, Math.min(options.limit ?? 500, 1000)));
+
+  return rows.map((row) => ({
+    fieldPath: row.fieldPath,
+    value: row.value,
+    normalizedValue: row.normalizedValue,
+    productCount: Number(row.productCount),
+  }));
 }
 
 export async function findCatalogExactMatches(options: {
@@ -285,9 +342,14 @@ export async function findCatalogStructuredQueryResult(options: {
   if (totalActiveProducts === 0) return null;
   const fieldCapabilities =
     options.fieldCapabilities ?? (await listCatalogFieldCapabilities(options));
+  const filterValueSummaries =
+    options.intent === "capabilities" || options.intent === "overview"
+      ? await listCatalogFilterValueSummaries(options)
+      : [];
   const productLimit =
-    (options.intent === "count" && filters.length === 0) ||
-    options.intent === "capabilities"
+    options.intent === "count" ||
+    options.intent === "capabilities" ||
+    options.intent === "overview"
       ? 0
       : Math.max(1, Math.min(options.limit ?? 30, 50));
   const offset = productLimit > 0 ? normalizeOffset(options.offset) : 0;
@@ -306,6 +368,7 @@ export async function findCatalogStructuredQueryResult(options: {
       totalActiveProducts,
       matchedProducts: 0,
       returnedProducts: 0,
+      filterValueSummaries,
       filters,
       offset: 0,
       limit: productLimit,
@@ -325,6 +388,7 @@ export async function findCatalogStructuredQueryResult(options: {
           limit: productLimit,
           hasMore: false,
           fieldCapabilities,
+          filterValueSummaries,
         }),
         metadata: {
           catalogStructuredQuery: true,
@@ -332,6 +396,7 @@ export async function findCatalogStructuredQueryResult(options: {
           totalActiveProducts,
           matchedProducts: 0,
           productsReturned: 0,
+          filterValueSummaries,
           filters,
           offset: 0,
           limit: productLimit,
@@ -355,12 +420,19 @@ export async function findCatalogStructuredQueryResult(options: {
         })
       : [];
   const matchedProducts = productIds?.length ?? totalActiveProducts;
-  const nextOffset = offset + products.length;
-  const hasMore = nextOffset < matchedProducts;
+  const nextOffset = productLimit > 0 ? offset + products.length : 0;
+  const hasMore = productLimit > 0 ? nextOffset < matchedProducts : false;
   const complete = !hasMore;
 
+  const resultIntent =
+    options.intent === "count"
+      ? "count"
+      : filters.length > 0
+        ? "filter"
+        : options.intent;
+
   const content = buildCatalogStructuredContent({
-    intent: filters.length > 0 ? "filter" : options.intent,
+    intent: resultIntent,
     totalActiveProducts,
     matchedProducts,
     products,
@@ -369,13 +441,15 @@ export async function findCatalogStructuredQueryResult(options: {
     limit: productLimit,
     hasMore,
     fieldCapabilities,
+    filterValueSummaries,
   });
 
   return {
-    intent: filters.length > 0 ? "filter" : options.intent,
+    intent: resultIntent,
     totalActiveProducts,
     matchedProducts,
     returnedProducts: products.length,
+    filterValueSummaries,
     filters,
     offset,
     limit: productLimit,
@@ -388,10 +462,11 @@ export async function findCatalogStructuredQueryResult(options: {
       content,
       metadata: {
         catalogStructuredQuery: true,
-        catalogStructuredIntent: filters.length > 0 ? "filter" : options.intent,
+        catalogStructuredIntent: resultIntent,
         totalActiveProducts,
         matchedProducts,
         productsReturned: products.length,
+        filterValueSummaries,
         filters,
         offset,
         limit: productLimit,
@@ -423,6 +498,9 @@ async function findFilteredProductIds(options: {
   const exactFilterValues = options.filters
     .map((filter) => normalizeCatalogFactValue("exact", filter.value))
     .filter(Boolean);
+  const searchableFilterValues = Array.from(
+    new Set(filterValues.flatMap(getCatalogSearchableQueryCandidates)),
+  );
 
   const rows = await db
     .select({
@@ -467,32 +545,50 @@ async function findFilteredProductIds(options: {
           ),
           and(
             eq(catalogProductFact.role, "searchable"),
-            or(...filterValues.map(catalogFactContains)),
+            or(...searchableFilterValues.map(catalogFactContains)),
           ),
         ),
       ),
     );
 
-  const matchedTermsByProduct = new Map<string, Set<string>>();
-  for (const row of rows) {
-    for (const filter of options.filters) {
-      if (!catalogFactMatchesFilter(row, filter)) continue;
-      const value = normalizeCatalogValue(
-        `${filter.fieldPath ?? "*"}:${filter.value}`,
-      );
-      const terms =
-        matchedTermsByProduct.get(row.productId) ?? new Set<string>();
-      terms.add(value);
-      matchedTermsByProduct.set(row.productId, terms);
-    }
-  }
-
-  return [...matchedTermsByProduct.entries()]
-    .filter(([, terms]) => terms.size === filterValues.length)
-    .map(([productId]) => productId);
+  return selectCatalogFilteredProductIds(options.filters, rows);
 }
 
 async function listActiveCatalogProducts(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+  productIds?: string[];
+  limit: number;
+  offset: number;
+}): Promise<CatalogStructuredProductRow[]> {
+  if (
+    options.productIds &&
+    options.productIds.length > PRODUCT_ID_FILTER_CHUNK_SIZE
+  ) {
+    const rows: CatalogStructuredProductRow[] = [];
+    for (const productIdChunk of chunkArray(
+      options.productIds,
+      PRODUCT_ID_FILTER_CHUNK_SIZE,
+    )) {
+      rows.push(
+        ...(await queryActiveCatalogProducts({
+          ...options,
+          productIds: productIdChunk,
+          limit: productIdChunk.length,
+          offset: 0,
+        })),
+      );
+    }
+
+    return rows
+      .sort(compareCatalogStructuredProductRows)
+      .slice(options.offset, options.offset + options.limit);
+  }
+
+  return queryActiveCatalogProducts(options);
+}
+
+async function queryActiveCatalogProducts(options: {
   agentId: string;
   knowledgeSourceIds?: string[];
   productIds?: string[];
@@ -524,7 +620,7 @@ async function listActiveCatalogProducts(options: {
       eq(catalogConfig.knowledgeSourceId, catalogProduct.sourceId),
     )
     .innerJoin(knowledgeSource, eq(knowledgeSource.id, catalogProduct.sourceId))
-    .where(and(buildActiveCatalogProductWhere(options), productFilter))
+    .where(and(buildStructuredInventoryProductWhere(options), productFilter))
     .orderBy(asc(catalogProduct.title), asc(catalogProduct.recordKey))
     .limit(options.limit)
     .offset(options.offset);
@@ -545,6 +641,25 @@ function buildActiveCatalogProductWhere(options: {
     eq(catalogConfig.enabled, true),
     eq(catalogProduct.indexVersion, catalogConfig.activeIndexVersion),
     sourceFilter,
+  );
+}
+
+function buildStructuredInventoryProductWhere(options: {
+  agentId: string;
+  knowledgeSourceIds?: string[];
+}) {
+  return and(
+    buildActiveCatalogProductWhere(options),
+    sql`(
+      coalesce(json_array_length(${catalogConfig.filterableFields}), 0) = 0
+      or exists (
+        select 1
+        from ${catalogProductFact}
+        where ${catalogProductFact.productId} = ${catalogProduct.id}
+          and ${catalogProductFact.indexVersion} = ${catalogProduct.indexVersion}
+          and ${catalogProductFact.role} = 'filterable'
+      )
+    )`,
   );
 }
 
@@ -574,6 +689,7 @@ function buildCatalogStructuredContent(options: {
   limit: number;
   hasMore: boolean;
   fieldCapabilities: CatalogFieldCapability[];
+  filterValueSummaries: CatalogFilterValueSummary[];
 }): string {
   const hasFilters = options.filters.length > 0;
   const lines = [
@@ -587,17 +703,37 @@ function buildCatalogStructuredContent(options: {
     lines.push(
       `Applied filters: ${options.filters.map((filter) => filter.value).join(", ")}`,
       `Matching active products: ${options.matchedProducts}`,
-      `Products returned in this page: ${options.products.length}`,
     );
-  } else {
+    if (options.intent !== "count") {
+      lines.push(`Products returned in this page: ${options.products.length}`);
+    }
+  } else if (options.intent !== "count") {
     lines.push(`Products returned in this page: ${options.products.length}`);
+  } else {
+    lines.push(`Matching active products: ${options.matchedProducts}`);
   }
 
   if (options.intent === "capabilities") {
     lines.push(
+      "The configured filter values below are global active-catalog values, not scoped to any previous product page or filtered list.",
+      ...formatCatalogFilterValueSummaryLines(options.filterValueSummaries),
       "Answer questions about available catalog filters from the configured catalog filter fields above.",
+      "For questions about available filter values, answer from the global configured filter values above, not from a previous product page unless the user explicitly scopes the question to that page or filtered list.",
       "If configured catalog filter fields is none, say no dedicated filter fields are configured for this catalog.",
       "You may mention lookup/searchable fields separately as ways to narrow or search, but do not call them configured filters and do not invent fields that are not listed above.",
+    );
+    return lines.join("\n");
+  }
+
+  if (options.intent === "overview") {
+    lines.push(
+      "This is a broad catalog overview request, not a product page request.",
+      "Do not list the first sorted product page.",
+      "Answer conversationally with a short overview of what the catalog carries.",
+      "Use the available configured filter values below as examples of brands, families, categories, or other configured ways to browse.",
+      ...formatCatalogFilterValueSummaryLines(options.filterValueSummaries, 24),
+      "Invite the user to ask for a specific brand/category/search term, or to ask for a product list if they want individual products.",
+      "Do not use internal phrases like active products, configured filters, structured data, or page offset in the answer.",
     );
     return lines.join("\n");
   }
@@ -605,6 +741,14 @@ function buildCatalogStructuredContent(options: {
   if (options.intent === "count" && !hasFilters) {
     lines.push(
       "Answer count questions using the exact total active products above.",
+      "Do not describe this as a page or partial product list.",
+    );
+    return lines.join("\n");
+  }
+  if (options.intent === "count") {
+    lines.push(
+      "Answer filtered count questions using the exact matching active products above.",
+      "Do not describe this as a page or partial product list.",
     );
     return lines.join("\n");
   }
@@ -626,7 +770,7 @@ function buildCatalogStructuredContent(options: {
     lines.push(
       options.offset > 0
         ? "No products were returned for this continuation page. Answer that there are no more matching active catalog products to show."
-        : "No active products matched the structured catalog filters. Answer that no matching products were found in the active catalog.",
+        : "No active products matched the requested catalog term(s). Answer that no matching products were found for the user's requested term. Do not claim a brand, category, or type does not exist beyond this exact validated lookup.",
     );
     return lines.join("\n");
   }
@@ -634,7 +778,7 @@ function buildCatalogStructuredContent(options: {
   lines.push(
     hasFilters
       ? "For filtered inventory questions, answer from the matching products below. If has more products after this page is yes, say this is a partial filtered list and the user can ask for more."
-      : "For broad product-list questions, list the products returned below. If has more products after this page is yes, say this is a partial list and the user can ask for more or narrow using only the configured filter, lookup, or searchable fields listed above. Do not mention unlisted fields as available filters.",
+      : "For broad product-list questions, list the products returned below. This is one sorted page from the active catalog, not a brand, category, or product-family summary. Do not infer that the whole catalog is limited to the first returned brand, category, or product line. If has more products after this page is yes, say this is a partial list and the user can ask for more or narrow using only the configured filter, lookup, or searchable fields listed above. Do not mention unlisted fields as available filters.",
     "",
     "Products:",
   );
@@ -680,6 +824,30 @@ function fieldsByRole(
 
 function formatFieldList(fields: string[]): string {
   return fields.length > 0 ? fields.join(", ") : "none";
+}
+
+function compareCatalogStructuredProductRows(
+  left: CatalogStructuredProductRow,
+  right: CatalogStructuredProductRow,
+): number {
+  return (
+    compareCatalogText(left.title ?? "", right.title ?? "") ||
+    compareCatalogText(left.recordKey, right.recordKey)
+  );
+}
+
+function compareCatalogText(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function normalizeOffset(offset: number | undefined): number {
@@ -795,5 +963,9 @@ function catalogFactContains(value: string) {
 }
 
 function catalogFactStartsWith(value: string) {
-  return sql`${catalogProductFact.normalizedValue} LIKE ${`${value}%`}`;
+  return sql`${catalogProductFact.normalizedValue} LIKE ${`${escapeCatalogLikePattern(value)}%`} ESCAPE '\\'`;
+}
+
+function escapeCatalogLikePattern(value: string) {
+  return value.replace(/[\\%_]/gu, "\\$&");
 }

@@ -47,6 +47,8 @@ type CatalogSyncConfigRow = CatalogSyncConfig & {
   sourceStatus: string;
   catalogOrigin: "api" | "csv" | null;
   catalogEnabled: boolean | null;
+  catalogScopeName: string | null;
+  catalogScopeAliases: string[] | null;
   catalogStableKeyField: string | null;
   catalogUpdatedAtField: string | null;
   catalogDeletionField: string | null;
@@ -455,6 +457,8 @@ async function loadCatalogSyncConfig(
       sourceStatus: knowledgeSource.status,
       catalogOrigin: catalogConfig.origin,
       catalogEnabled: catalogConfig.enabled,
+      catalogScopeName: catalogConfig.scopeName,
+      catalogScopeAliases: catalogConfig.scopeAliases,
       catalogStableKeyField: catalogConfig.stableKeyField,
       catalogUpdatedAtField: catalogConfig.updatedAtField,
       catalogDeletionField: catalogConfig.deletionField,
@@ -487,6 +491,8 @@ function toCatalogImportConfig(
     agentId: config.agentId,
     knowledgeSourceId: config.knowledgeSourceId,
     name: config.name,
+    scopeName: config.catalogScopeName,
+    scopeAliases: config.catalogScopeAliases,
     origin: config.catalogOrigin ?? "api",
     enabled: config.catalogEnabled ?? config.enabled,
     stableKeyField: config.catalogStableKeyField ?? config.stableKeyField,

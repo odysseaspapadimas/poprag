@@ -7,6 +7,11 @@ export type CatalogFieldRole =
   | "searchable"
   | "filterable";
 
+export interface CatalogScopeConfig {
+  scopeName?: string | null;
+  scopeAliases?: string[] | null;
+}
+
 export interface CatalogMapping {
   stableKeyField: string;
   updatedAtField?: string | null;
@@ -18,7 +23,7 @@ export interface CatalogMapping {
   filterableFields?: string[] | null;
 }
 
-export interface CatalogImportConfig extends CatalogMapping {
+export interface CatalogImportConfig extends CatalogMapping, CatalogScopeConfig {
   id: string;
   agentId: string;
   knowledgeSourceId: string;
@@ -45,6 +50,36 @@ export interface CatalogFieldFactInput {
   role: CatalogFieldRole;
   value: string;
   normalizedValue: string;
+}
+
+export interface CatalogFilterCandidateFact {
+  productId: string;
+  fieldPath: string;
+  role: CatalogFieldRole;
+  normalizedValue: string;
+}
+
+export interface CatalogFilterValueSummary {
+  fieldPath: string;
+  value: string;
+  normalizedValue: string;
+  productCount: number;
+}
+
+export function normalizeCatalogScopeAliases(config: CatalogScopeConfig) {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of [config.scopeName, ...(config.scopeAliases ?? [])]) {
+    const alias = String(value ?? "").trim();
+    if (!alias) continue;
+    const normalized = normalizeCatalogValue(alias);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    aliases.push(alias);
+  }
+
+  return aliases;
 }
 
 export const DEFAULT_INACTIVE_VALUES = [
@@ -111,6 +146,9 @@ export function normalizeCatalogValue(value: unknown): string {
   return stringifyValue(value)
     .normalize("NFKC")
     .trim()
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/ς/g, "σ")
     .toLocaleLowerCase()
     .replace(/\s+/g, " ");
 }
@@ -139,6 +177,8 @@ export function isCatalogTitlePrefixCandidate(value: unknown): boolean {
   const normalized = normalizeCatalogValue(value);
   if (normalized.length < 3 || normalized.length > 120) return false;
   if (/[\n\r]/u.test(normalized)) return false;
+  if (/[?!;:]/u.test(normalized)) return false;
+  if (normalized.split(/\s+/u).length > 8) return false;
   return /\p{L}|\p{N}/u.test(normalized);
 }
 
@@ -187,11 +227,174 @@ export function catalogFactMatchesFilter(
       );
     case "searchable": {
       const query = normalizeCatalogFactValue("searchable", filter.value);
-      return query.length > 0 && fact.normalizedValue.includes(query);
+      const tokens = tokenizeCatalogSearchableQuery(query);
+      return (
+        tokens.length > 0 &&
+        tokens.every((token) =>
+          getCatalogSearchableQueryCandidates(token).some((candidate) =>
+            fact.normalizedValue.includes(candidate),
+          ),
+        )
+      );
     }
     default:
       return false;
   }
+}
+
+export function getCatalogSearchableQueryCandidates(value: unknown): string[] {
+  const normalized = normalizeCatalogFactValue("searchable", value);
+  const candidates = [normalized];
+  for (const token of tokenizeCatalogSearchableQuery(normalized)) {
+    candidates.push(token);
+    const stem = stemCatalogSearchableToken(token);
+    if (stem !== token) candidates.push(stem);
+  }
+  return Array.from(
+    new Set(candidates.filter((candidate) => candidate.length > 0)),
+  );
+}
+
+export function selectCatalogFilteredProductIds(
+  filters: Array<{ value: string; fieldPath?: string }>,
+  candidateFacts: CatalogFilterCandidateFact[],
+): string[] {
+  const normalizedFilters = normalizeCatalogFilterTerms(filters);
+  if (normalizedFilters.length === 0) return [];
+
+  const matchesByFilter = normalizedFilters.map((filter) => {
+    const matchingFacts = candidateFacts.filter((fact) =>
+      catalogFactMatchesFilter(fact, filter),
+    );
+    const filterableFacts = matchingFacts.filter(
+      (fact) => fact.role === "filterable",
+    );
+    const exactFacts = matchingFacts.filter(
+      (fact) => fact.role === "stable_key" || fact.role === "exact",
+    );
+    const titleFacts = matchingFacts.filter((fact) => fact.role === "title");
+    const selectedFacts =
+      filterableFacts.length > 0
+        ? filterableFacts
+        : exactFacts.length > 0
+          ? exactFacts
+          : titleFacts.length > 0
+            ? titleFacts
+            : matchingFacts;
+
+    return {
+      hasAuthoritativeFacts:
+        filterableFacts.length > 0 ||
+        exactFacts.length > 0 ||
+        titleFacts.length > 0,
+      selectedFacts,
+    };
+  });
+  const hasAuthoritativeMatch = matchesByFilter.some(
+    (match) => match.hasAuthoritativeFacts,
+  );
+  const productIdsByFilter = matchesByFilter
+    .map((match) => {
+      const effectiveFacts = match.hasAuthoritativeFacts
+        ? match.selectedFacts
+        : hasAuthoritativeMatch
+          ? []
+          : match.selectedFacts;
+
+      return new Set(effectiveFacts.map((fact) => fact.productId));
+    })
+    .filter((productIds) => productIds.size > 0 || !hasAuthoritativeMatch);
+
+  if (productIdsByFilter.some((productIds) => productIds.size === 0)) {
+    return [];
+  }
+
+  const [firstProductIds, ...remainingProductIds] = productIdsByFilter;
+  const seen = new Set<string>();
+  const orderedProductIds: string[] = [];
+
+  for (const fact of candidateFacts) {
+    if (!firstProductIds.has(fact.productId) || seen.has(fact.productId)) {
+      continue;
+    }
+    if (
+      remainingProductIds.every((productIds) => productIds.has(fact.productId))
+    ) {
+      seen.add(fact.productId);
+      orderedProductIds.push(fact.productId);
+    }
+  }
+
+  return orderedProductIds;
+}
+
+export function formatCatalogFilterValueSummaryLines(
+  summaries: CatalogFilterValueSummary[],
+  maxValuesPerField = 80,
+): string[] {
+  if (summaries.length === 0) {
+    return ["Available configured filter values: none"];
+  }
+
+  const valuesByField = new Map<string, CatalogFilterValueSummary[]>();
+  for (const summary of summaries) {
+    const fieldPath = summary.fieldPath.trim();
+    const value = summary.value.trim();
+    if (!fieldPath || !value) continue;
+    valuesByField.set(fieldPath, [
+      ...(valuesByField.get(fieldPath) ?? []),
+      { ...summary, fieldPath, value },
+    ]);
+  }
+
+  if (valuesByField.size === 0) {
+    return ["Available configured filter values: none"];
+  }
+
+  const lines = ["Available configured filter values:"];
+  for (const [fieldPath, values] of valuesByField) {
+    const displayedValues = values
+      .slice(0, maxValuesPerField)
+      .map((summary) => `${summary.value} (${summary.productCount})`);
+    const remainingCount = values.length - displayedValues.length;
+    lines.push(
+      `- ${fieldPath}: ${displayedValues.join(", ")}${
+        remainingCount > 0 ? `, and ${remainingCount} more` : ""
+      }`,
+    );
+  }
+
+  return lines;
+}
+
+function normalizeCatalogFilterTerms(
+  filters: Array<{ value: string; fieldPath?: string }>,
+) {
+  const seen = new Set<string>();
+  return filters
+    .map((filter) => ({
+      value: filter.value.trim(),
+      fieldPath: filter.fieldPath?.trim() || undefined,
+    }))
+    .filter((filter) => {
+      const key = normalizeCatalogValue(
+        `${filter.fieldPath ?? "*"}:${filter.value}`,
+      );
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function tokenizeCatalogSearchableQuery(value: string): string[] {
+  return value
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function stemCatalogSearchableToken(token: string): string {
+  return token.length >= 6 ? token.slice(0, -1) : token;
 }
 
 export function parseCatalogDate(value: unknown): Date | undefined {

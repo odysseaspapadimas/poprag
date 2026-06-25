@@ -11,6 +11,9 @@ export const DEFAULT_MODELS = {
   /** Model used for intent classification (determining if RAG is needed) */
   INTENT_CLASSIFICATION: "@cf/meta/llama-3.1-8b-instruct-fast",
 
+  /** Model used for LLM-first retrieval planning */
+  RETRIEVAL_PLANNER: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+
   /** Model used for query rewriting to improve search coverage
    * Using 8B model for better multilingual support (3B was producing
    * garbage English output for Greek queries) */

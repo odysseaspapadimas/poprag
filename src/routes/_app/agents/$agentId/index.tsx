@@ -375,10 +375,10 @@ function AgentDetailPage() {
 
       {/* Content */}
       <div
-        className={`grid grid-cols-1 gap-6 ${isChatVisible ? "lg:grid-cols-2" : ""}`}
+        className={`grid grid-cols-1 gap-6 ${isChatVisible ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : ""}`}
       >
         {/* Tab Content */}
-        <div>
+        <div className="min-w-0">
           {activeTab === "overview" && (
             <AgentOverviewTab
               agent={agent}
@@ -431,7 +431,7 @@ function AgentDetailPage() {
 
         {/* Chat */}
         {isChatVisible && (
-          <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex flex-col">
+          <div className="bg-card border rounded-lg overflow-hidden h-[600px] flex min-w-0 flex-col">
             <Chat
               agentId={agentId}
               initialConversationId={conversationId}
@@ -690,14 +690,14 @@ function KnowledgeTab({
 
   return (
     <div className="bg-card border rounded-lg p-6">
-      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <div className="mb-4 flex flex-col gap-4">
+        <div className="min-w-0">
           <h2 className="text-xl font-semibold">Knowledge Management</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Upload new sources or re-index everything attached to this agent.
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <AgentBulkReindexButton
             agentId={agentId}
             agentName={agentName}

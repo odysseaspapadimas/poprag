@@ -1,18 +1,25 @@
 import { authClient } from "@/auth/client";
+import { normalizeAuthRedirect } from "@/auth/redirect";
 import { Button } from "@/components/ui/button";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth/sign-in")({
+  validateSearch: (search): { redirect?: string } => {
+    const redirect = normalizeAuthRedirect(search.redirect);
+    return redirect === "/" ? {} : { redirect };
+  },
   component: RouteComponent,
 });
 
 function RouteComponent() {
+  const { redirect = "/" } = Route.useSearch();
+
   const handleGoogleSignIn = async () => {
     try {
       await authClient.signIn.social({
         provider: "google",
-        callbackURL: "/",
+        callbackURL: redirect,
       });
       // The redirect will happen automatically
     } catch (error) {
@@ -35,6 +42,17 @@ function RouteComponent() {
           Sign in with Google
         </Button>
       </div>
+
+      <p className="text-sm text-muted-foreground">
+        Need staging access?{" "}
+        <Link
+          to="/auth/sign-up"
+          search={{ redirect }}
+          className="text-primary hover:underline"
+        >
+          Create an account
+        </Link>
+      </p>
     </main>
   );
 }

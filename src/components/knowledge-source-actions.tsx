@@ -42,6 +42,8 @@ interface KnowledgeSourceActionsProps {
     origin: "api" | "csv";
     syncConfigId?: string | null;
     name: string;
+    scopeName?: string | null;
+    scopeAliases?: string[] | null;
     experienceId: string | null;
     snapshotUrl?: string | null;
     diffUrl?: string | null;
@@ -308,6 +310,8 @@ export function KnowledgeSourceActions({
             config={{
               id: catalogConfig.syncConfigId,
               name: catalogConfig.name,
+              scopeName: catalogConfig.scopeName,
+              scopeAliases: catalogConfig.scopeAliases,
               experienceId: catalogConfig.experienceId,
               snapshotUrl: catalogConfig.snapshotUrl ?? "",
               diffUrl: catalogConfig.diffUrl ?? "",

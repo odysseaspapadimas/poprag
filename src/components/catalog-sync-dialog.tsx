@@ -28,6 +28,8 @@ import { useTRPC } from "@/integrations/trpc/react";
 
 type CatalogConfigFormValue = {
   name: string;
+  scopeName: string;
+  scopeAliases: string;
   experienceId: string;
   snapshotUrl: string;
   diffUrl: string;
@@ -52,6 +54,8 @@ type CatalogConfigFormValue = {
 type CatalogSyncDialogConfig = {
   id: string;
   name: string;
+  scopeName?: string | null;
+  scopeAliases?: string[] | null;
   experienceId: string | null;
   snapshotUrl: string;
   diffUrl: string;
@@ -96,6 +100,8 @@ const DEFAULT_UPDATED_SINCE_PARAM = "effectiveUpdatedAfter";
 function emptyForm(): CatalogConfigFormValue {
   return {
     name: "",
+    scopeName: "",
+    scopeAliases: "",
     experienceId: NO_EXPERIENCE_VALUE,
     snapshotUrl: "",
     diffUrl: "",
@@ -147,6 +153,8 @@ function formFromConfig(
 
   return {
     name: config.name,
+    scopeName: config.scopeName ?? "",
+    scopeAliases: (config.scopeAliases ?? []).join(", "),
     experienceId: config.experienceId ?? NO_EXPERIENCE_VALUE,
     snapshotUrl: config.snapshotUrl,
     diffUrl: config.diffUrl === config.snapshotUrl ? "" : config.diffUrl,
@@ -254,6 +262,8 @@ export function CatalogSyncDialog({
   const payload = useMemo(
     () => ({
       name: form.name.trim(),
+      scopeName: form.scopeName.trim() || null,
+      scopeAliases: parseList(form.scopeAliases),
       experienceId:
         form.experienceId === NO_EXPERIENCE_VALUE ? null : form.experienceId,
       snapshotUrl: form.snapshotUrl.trim(),
@@ -319,6 +329,36 @@ export function CatalogSyncDialog({
                 onChange={(event) => updateField("name", event.target.value)}
                 placeholder="Retail product catalog"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="scope-name">Catalog owner</Label>
+              <Input
+                id="scope-name"
+                value={form.scopeName}
+                onChange={(event) =>
+                  updateField("scopeName", event.target.value)
+                }
+                placeholder="Nestlé, ACME, ExampleCo..."
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="scope-aliases">Owner aliases</Label>
+              <Textarea
+                id="scope-aliases"
+                value={form.scopeAliases}
+                onChange={(event) =>
+                  updateField("scopeAliases", event.target.value)
+                }
+                placeholder="ACME Foods, ExampleCo Greece"
+                rows={2}
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional names customers use for the whole catalog owner. These
+                are treated as the full catalog, not as product filters.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Experience</Label>

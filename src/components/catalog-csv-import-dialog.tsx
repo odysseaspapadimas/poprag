@@ -33,6 +33,8 @@ interface CatalogCsvImportDialogProps {
 
 type CsvCatalogForm = {
   name: string;
+  scopeName: string;
+  scopeAliases: string;
   experienceId: string;
   stableKeyField: string;
   titleField: string;
@@ -49,6 +51,8 @@ const NO_EXPERIENCE_VALUE = "__none__";
 function emptyForm(): CsvCatalogForm {
   return {
     name: "",
+    scopeName: "",
+    scopeAliases: "",
     experienceId: NO_EXPERIENCE_VALUE,
     stableKeyField: "",
     titleField: "",
@@ -101,6 +105,8 @@ export function CatalogCsvImportDialog({
   const payload = useMemo(
     () => ({
       name: form.name.trim(),
+      scopeName: form.scopeName.trim() || null,
+      scopeAliases: parseList(form.scopeAliases),
       experienceId:
         form.experienceId === NO_EXPERIENCE_VALUE ? null : form.experienceId,
       stableKeyField: form.stableKeyField.trim(),
@@ -253,6 +259,32 @@ export function CatalogCsvImportDialog({
                 value={form.name}
                 onChange={(event) => updateField("name", event.target.value)}
                 placeholder="Retail product catalog"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="catalog-csv-scope-name">Catalog owner</Label>
+              <Input
+                id="catalog-csv-scope-name"
+                value={form.scopeName}
+                onChange={(event) =>
+                  updateField("scopeName", event.target.value)
+                }
+                placeholder="Nestlé, ACME, ExampleCo..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="catalog-csv-scope-aliases">Owner aliases</Label>
+              <Textarea
+                id="catalog-csv-scope-aliases"
+                value={form.scopeAliases}
+                onChange={(event) =>
+                  updateField("scopeAliases", event.target.value)
+                }
+                placeholder="ACME Foods, ExampleCo Greece"
+                rows={2}
               />
             </div>
           </div>

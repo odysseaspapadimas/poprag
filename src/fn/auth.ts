@@ -3,6 +3,7 @@ import { createIsomorphicFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { authClient } from "@/auth/client";
 import { auth } from "@/auth/server";
+import { ensureStagingAdminSession } from "@/auth/staging-admin";
 
 export const $getSession = createIsomorphicFn()
   .client(async (queryClient: QueryClient) => {
@@ -23,9 +24,11 @@ export const $getSession = createIsomorphicFn()
       return { session: null };
     }
 
-    const session = await auth.api.getSession({
-      headers,
-    });
+    const session = await ensureStagingAdminSession(
+      await auth.api.getSession({
+        headers,
+      }),
+    );
 
     return {
       session,

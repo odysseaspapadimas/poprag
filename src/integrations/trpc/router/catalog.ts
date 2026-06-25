@@ -21,8 +21,12 @@ import {
 } from "@/lib/catalog/apply";
 import { loadCatalogImportConfigById } from "@/lib/catalog/config";
 import { processCsvCatalogSource } from "@/lib/catalog/csv";
+import { createR2ObjectUrl, getR2BucketName } from "@/lib/r2";
 
 const catalogFieldListSchema = z.array(z.string().trim().min(1)).default([]);
+const catalogScopeAliasListSchema = z
+  .array(z.string().trim().min(1).max(200))
+  .default([]);
 const MAPPING_REBUILD_PROGRESS_START = 5;
 const MAPPING_REBUILD_NORMALIZE_START = 10;
 const MAPPING_REBUILD_NORMALIZE_END = 30;
@@ -31,6 +35,8 @@ const MAPPING_REBUILD_INDEX_END = 88;
 
 const catalogMappingInput = z.object({
   name: z.string().min(1).max(200),
+  scopeName: z.string().trim().max(200).nullable().optional(),
+  scopeAliases: catalogScopeAliasListSchema,
   experienceId: z.string().nullable().optional(),
   stableKeyField: z.string().trim().min(1).max(200),
   updatedAtField: z.string().trim().max(200).nullable().optional(),
@@ -155,6 +161,8 @@ export const catalogRouter = createTRPCRouter({
           knowledgeSourceId: catalogConfig.knowledgeSourceId,
           experienceId: catalogConfig.experienceId,
           name: catalogConfig.name,
+          scopeName: catalogConfig.scopeName,
+          scopeAliases: catalogConfig.scopeAliases,
           origin: catalogConfig.origin,
           enabled: catalogConfig.enabled,
           stableKeyField: catalogConfig.stableKeyField,
@@ -291,6 +299,10 @@ export const catalogRouter = createTRPCRouter({
         updatedAt: new Date(),
       };
       if (input.name !== undefined) updateValues.name = input.name;
+      if (input.scopeName !== undefined)
+        updateValues.scopeName = input.scopeName || null;
+      if (input.scopeAliases !== undefined)
+        updateValues.scopeAliases = input.scopeAliases;
       if (experienceId !== undefined) updateValues.experienceId = experienceId;
       if (input.enabled !== undefined) updateValues.enabled = input.enabled;
       if (input.stableKeyField !== undefined)
@@ -507,12 +519,14 @@ export const catalogRouter = createTRPCRouter({
       const catalogConfigId = nanoid();
       const r2Key = `agents/${input.agentId}/catalogs/${sourceId}/${input.fileName}`;
       const now = new Date();
+      const { env } = await import("cloudflare:workers");
+      const r2Bucket = getR2BucketName(env);
 
       await db.insert(knowledgeSource).values({
         id: sourceId,
         agentId: input.agentId,
         type: "dataset",
-        r2Bucket: "poprag",
+        r2Bucket,
         r2Key,
         fileName: input.fileName,
         mime: input.mime || "text/csv",
@@ -532,6 +546,8 @@ export const catalogRouter = createTRPCRouter({
         knowledgeSourceId: sourceId,
         experienceId,
         name: input.name,
+        scopeName: input.scopeName || null,
+        scopeAliases: input.scopeAliases,
         origin: "csv",
         enabled: input.enabled,
         stableKeyField: input.stableKeyField,
@@ -550,14 +566,11 @@ export const catalogRouter = createTRPCRouter({
         await replaceExperienceLink(sourceId, experienceId);
       }
 
-      const { env } = await import("cloudflare:workers");
       const aws = new AwsClient({
         accessKeyId: env.R2_ACCESS_KEY_ID,
         secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       });
-      const url = new URL(
-        `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
-      );
+      const url = createR2ObjectUrl(env, r2Key);
       url.searchParams.set("X-Amz-Expires", "3600");
       const signedRequest = await aws.sign(
         new Request(url, { method: "PUT" }),

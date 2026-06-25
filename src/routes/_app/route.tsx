@@ -11,10 +11,13 @@ import {
 } from "@/components/ui/sidebar";
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: ({ context: { session } }) => {
+  beforeLoad: ({ context: { session }, location }) => {
     if (!session?.session) {
       throw redirect({
         to: "/auth/sign-in",
+        search: {
+          redirect: location.href,
+        },
       });
     }
     return { session };

@@ -673,6 +673,10 @@ export const catalogConfig = sqliteTable(
       onDelete: "set null",
     }),
     name: text("name").notNull(),
+    scopeName: text("scope_name"),
+    scopeAliases: text("scope_aliases", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`('[]')`),
     origin: text("origin", { enum: ["api", "csv"] }).notNull(),
     enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
     activeIndexVersion: integer("active_index_version").default(0).notNull(),

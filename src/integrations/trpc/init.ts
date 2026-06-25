@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 
 import { auth } from "@/auth/server";
+import { ensureStagingAdminSession } from "@/auth/staging-admin";
 import { db } from "@/db";
 
 export const createTRPCContext = async ({
@@ -12,9 +13,11 @@ export const createTRPCContext = async ({
   resHeaders: Headers;
 }) => {
   const headers = request.headers;
-  const session = await auth.api.getSession({
-    headers,
-  });
+  const session = await ensureStagingAdminSession(
+    await auth.api.getSession({
+      headers,
+    }),
+  );
 
   return {
     request,
@@ -30,7 +33,9 @@ export const createServerSideContext = async (
   url?: string,
 ) => {
   const reqHeaders = headers ?? new Headers();
-  const session = headers ? await auth.api.getSession({ headers }) : null;
+  const session = headers
+    ? await ensureStagingAdminSession(await auth.api.getSession({ headers }))
+    : null;
 
   return {
     request: new Request(url ?? "http://localhost", { headers: reqHeaders }),

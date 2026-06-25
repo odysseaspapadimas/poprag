@@ -27,11 +27,15 @@ import {
   transcript,
 } from "@/db/schema";
 import { createModel, type ProviderType } from "@/lib/ai/models";
-import { buildSystemPrompt, renderPrompt } from "@/lib/ai/prompt";
-import {
-  type CatalogListContinuationState,
-  createCatalogRetrievalLane,
-} from "@/lib/catalog/query";
+import { renderPrompt } from "@/lib/ai/prompt";
+import { buildRetrievalSystemPrompt } from "@/lib/retrieval/answer-composer";
+import type {
+  CatalogProductFocusItem,
+  CatalogSearchTerm,
+  RetrievalCatalogFocus,
+  RetrievalCatalogProductFocus,
+  RetrievalPageCursor,
+} from "@/lib/retrieval/types";
 
 // Import refactored modules
 import type { ModelCapabilities } from "./helpers";
@@ -104,12 +108,12 @@ export async function handleChatRequest(
       { basePrompt },
       policy,
       experienceKnowledgeIds,
-      previousCatalogPage,
+      previousCatalogState,
     ] = await Promise.all([
       loadPromptConfig(agentData.id, request.variables),
       loadModelPolicy(agentData.id),
       resolveExperienceKnowledge(agentData.id, request.experienceSlug),
-      loadLatestCatalogContinuation(agentData.id, request.conversationId),
+      loadLatestCatalogState(agentData.id, request.conversationId),
     ]);
 
     // 3. Resolve model and capabilities (before RAG, needed for image context extraction)
@@ -168,15 +172,19 @@ export async function handleChatRequest(
       experienceKnowledgeIds,
     };
 
-    const { context: ragContext, debugInfo: ragDebugInfo } =
-      await performRAGRetrieval(
-        userQuery,
-        agentData.id,
-        ragConfig,
-        conversationHistory,
-        previousCatalogPage,
-        createCatalogRetrievalLane(),
-      );
+    const {
+      context: ragContext,
+      catalogEvidence,
+      debugInfo: ragDebugInfo,
+    } = await performRAGRetrieval(
+      userQuery,
+      agentData.id,
+      ragConfig,
+      conversationHistory,
+      previousCatalogState.page,
+      previousCatalogState.focus,
+      previousCatalogState.productFocus,
+    );
 
     // 5b. Add model and image context info to debug
     ragDebugInfo.models = {
@@ -194,10 +202,10 @@ export async function handleChatRequest(
     }
 
     // 6. Build final system prompt with RAG context
-    let systemPrompt = basePrompt;
-    if (ragContext?.chunks && ragContext.chunks.length > 0) {
-      systemPrompt = buildSystemPrompt(systemPrompt, ragContext);
-    }
+    let systemPrompt = buildRetrievalSystemPrompt(basePrompt, {
+      catalogEvidence,
+      documentEvidence: ragContext,
+    });
 
     // 6b. Append language instruction if provided (for Flutter app)
     if (request.languageInstruction) {
@@ -287,11 +295,27 @@ export async function handleChatRequest(
 // Helper Functions (extracted from handleChatRequest)
 // ─────────────────────────────────────────────────────
 
-async function loadLatestCatalogContinuation(
+interface LatestCatalogState {
+  page?: RetrievalPageCursor;
+  focus?: RetrievalCatalogFocus;
+  productFocus?: RetrievalCatalogProductFocus;
+}
+
+interface RagDebugCatalogState {
+  retrievalPlanKind?: unknown;
+  catalogEvidenceKind?: unknown;
+  catalogTerms?: unknown;
+  catalogMatchedProducts?: unknown;
+  catalogPageCursor?: unknown;
+  catalogFocus?: unknown;
+  catalogProductFocus?: unknown;
+}
+
+async function loadLatestCatalogState(
   agentId: string,
   conversationId?: string,
-): Promise<CatalogListContinuationState | undefined> {
-  if (!conversationId) return undefined;
+): Promise<LatestCatalogState> {
+  if (!conversationId) return {};
 
   const recentTranscripts = await db
     .select({ request: transcript.request })
@@ -307,49 +331,163 @@ async function loadLatestCatalogContinuation(
 
   for (const item of recentTranscripts) {
     const request = item.request as Record<string, unknown> | undefined;
-    const ragDebug = request?.ragDebug as Partial<RAGDebugInfo> | undefined;
+    const ragDebug = request?.ragDebug as RagDebugCatalogState | undefined;
     if (!ragDebug) continue;
 
-    const intent =
-      ragDebug.catalogStructuredIntent === "list" ||
-      ragDebug.catalogStructuredIntent === "filter"
-        ? ragDebug.catalogStructuredIntent
-        : ragDebug.catalogStructuredContinuationOf;
-    if (intent !== "list" && intent !== "filter") continue;
+    const page = normalizeCatalogPageCursor(ragDebug.catalogPageCursor);
+    const focus =
+      normalizeCatalogFocus(ragDebug.catalogFocus) ??
+      deriveCatalogFocusFromDebug(ragDebug);
+    const productFocus = normalizeCatalogProductFocus(
+      ragDebug.catalogProductFocus,
+    );
 
-    const offset = finiteNumber(ragDebug.catalogStructuredOffset) ?? 0;
-    const limit = finiteNumber(ragDebug.catalogStructuredLimit) ?? 20;
-    const returned =
-      finiteNumber(ragDebug.catalogStructuredProductsReturned) ?? 0;
-    const nextOffset =
-      finiteNumber(ragDebug.catalogStructuredNextOffset) ?? offset + returned;
-
-    return {
-      intent,
-      filters: normalizeDebugCatalogFilters(ragDebug.catalogStructuredFilters),
-      offset,
-      limit,
-      nextOffset,
-      hasMore: ragDebug.catalogStructuredHasMore === true,
-    };
+    if (page || focus || productFocus) return { page, focus, productFocus };
+    if (typeof ragDebug.catalogEvidenceKind === "string") return {};
   }
 
-  return undefined;
+  return {};
 }
 
-function normalizeDebugCatalogFilters(
-  filters: RAGDebugInfo["catalogStructuredFilters"],
-): CatalogListContinuationState["filters"] {
-  if (!Array.isArray(filters)) return [];
-  return filters
-    .map((filter) => ({
-      value: String(filter?.value ?? "").trim(),
-      fieldPath:
-        typeof filter?.fieldPath === "string"
-          ? filter.fieldPath.trim() || undefined
-          : undefined,
-    }))
-    .filter((filter) => filter.value.length > 0);
+function normalizeCatalogPageCursor(
+  value: unknown,
+): RetrievalPageCursor | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const cursor = value as Partial<RetrievalPageCursor>;
+  if (cursor.kind !== "catalog_page" || cursor.planKind !== "catalog_search") {
+    return undefined;
+  }
+
+  const terms = normalizeCatalogSearchTerms(cursor.terms);
+  const scopeSourceIds = normalizeStringList(cursor.scopeSourceIds);
+
+  return {
+    kind: "catalog_page",
+    planKind: "catalog_search",
+    terms,
+    scopeSourceIds: scopeSourceIds.length > 0 ? scopeSourceIds : undefined,
+    offset: finiteNumber(cursor.offset) ?? 0,
+    limit: finiteNumber(cursor.limit) ?? 20,
+    nextOffset: finiteNumber(cursor.nextOffset) ?? 0,
+    hasMore: cursor.hasMore === true,
+  };
+}
+
+function normalizeCatalogFocus(
+  value: unknown,
+): RetrievalCatalogFocus | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const focus = value as Partial<RetrievalCatalogFocus>;
+  if (focus.kind !== "catalog_focus") return undefined;
+  if (
+    focus.planKind !== "catalog_search" &&
+    focus.planKind !== "catalog_count"
+  ) {
+    return undefined;
+  }
+
+  const terms = normalizeCatalogSearchTerms(focus.terms);
+  const scopeSourceIds = normalizeStringList(focus.scopeSourceIds);
+  if (terms.length === 0 && scopeSourceIds.length === 0) return undefined;
+
+  return {
+    kind: "catalog_focus",
+    planKind: focus.planKind,
+    terms,
+    scopeSourceIds: scopeSourceIds.length > 0 ? scopeSourceIds : undefined,
+    matchedProducts: finiteNumber(focus.matchedProducts) ?? 0,
+  };
+}
+
+function normalizeCatalogProductFocus(
+  value: unknown,
+): RetrievalCatalogProductFocus | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const focus = value as Partial<RetrievalCatalogProductFocus>;
+  if (focus.kind !== "catalog_product_focus") return undefined;
+
+  const products = normalizeCatalogProductFocusItems(focus.products);
+  if (products.length === 0) return undefined;
+
+  return {
+    kind: "catalog_product_focus",
+    terms: normalizeCatalogSearchTerms(focus.terms),
+    matchedProducts: finiteNumber(focus.matchedProducts) ?? products.length,
+    products,
+  };
+}
+
+function normalizeCatalogProductFocusItems(
+  value: unknown,
+): CatalogProductFocusItem[] {
+  if (!Array.isArray(value)) return [];
+
+  const products: CatalogProductFocusItem[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const product = item as Partial<CatalogProductFocusItem>;
+    const productId = String(product.productId ?? "").trim();
+    const title = String(product.title ?? "").trim();
+    const recordKey = String(product.recordKey ?? "").trim();
+    if (!productId || !title || !recordKey) continue;
+    products.push({ productId, title, recordKey });
+  }
+
+  return products.slice(0, 20);
+}
+
+function deriveCatalogFocusFromDebug(
+  ragDebug: RagDebugCatalogState,
+): RetrievalCatalogFocus | undefined {
+  const evidenceKind = ragDebug.catalogEvidenceKind;
+  if (evidenceKind !== "product_page" && evidenceKind !== "count") {
+    return undefined;
+  }
+
+  const terms = normalizeCatalogSearchTerms(ragDebug.catalogTerms);
+  if (terms.length === 0) return undefined;
+
+  return {
+    kind: "catalog_focus",
+    planKind: evidenceKind === "count" ? "catalog_count" : "catalog_search",
+    terms,
+    matchedProducts: finiteNumber(ragDebug.catalogMatchedProducts) ?? 0,
+  };
+}
+
+function normalizeCatalogSearchTerms(value: unknown): CatalogSearchTerm[] {
+  if (!Array.isArray(value)) return [];
+
+  const terms: CatalogSearchTerm[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const term = item as Partial<CatalogSearchTerm>;
+    const termValue = String(term.value ?? "").trim();
+    if (!termValue) continue;
+
+    const fieldPath =
+      typeof term.fieldPath === "string"
+        ? term.fieldPath.trim() || undefined
+        : undefined;
+    terms.push(
+      fieldPath ? { value: termValue, fieldPath } : { value: termValue },
+    );
+  }
+
+  return terms;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of value) {
+    const text = String(item ?? "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    items.push(text);
+  }
+  return items;
 }
 
 function finiteNumber(value: unknown): number | undefined {

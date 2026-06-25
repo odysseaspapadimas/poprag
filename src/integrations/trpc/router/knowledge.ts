@@ -29,6 +29,7 @@ import {
   inspectVectorizeExperienceFiltering,
 } from "@/lib/ai/vectorize-utils";
 import { processCsvCatalogSource } from "@/lib/catalog/csv";
+import { createR2ObjectUrl, getR2BucketName } from "@/lib/r2";
 
 const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
 const TEXT_PREVIEW_MIME_TYPES = new Set([
@@ -93,6 +94,10 @@ export const knowledgeRouter = createTRPCRouter({
       const sourceId = nanoid();
       const r2Key = `agents/${input.agentId}/sources/${sourceId}/${input.fileName}`;
 
+      // Generate R2 presigned URL for direct upload
+      const { env } = await import("cloudflare:workers");
+      const r2Bucket = getR2BucketName(env);
+
       await createKnowledgeSource({
         id: sourceId,
         agentId: input.agentId,
@@ -101,12 +106,9 @@ export const knowledgeRouter = createTRPCRouter({
         mime: input.mime,
         bytes: input.bytes,
         status: "uploaded", // Will be set to "uploaded" again after confirm, or "failed" on error
-        r2Bucket: "poprag", // Match wrangler.jsonc bucket name
+        r2Bucket,
         r2Key,
       });
-
-      // Generate R2 presigned URL for direct upload
-      const { env } = await import("cloudflare:workers");
 
       // Create AWS4 client for R2 with credentials from environment
       const aws = new AwsClient({
@@ -115,9 +117,7 @@ export const knowledgeRouter = createTRPCRouter({
       });
 
       // Build the R2 URL following Cloudflare's format: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
-      const url = new URL(
-        `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
-      );
+      const url = createR2ObjectUrl(env, r2Key);
 
       // Set expiry in search params (as per Cloudflare docs)
       url.searchParams.set("X-Amz-Expires", "3600"); // 1 hour
@@ -682,9 +682,7 @@ export const knowledgeRouter = createTRPCRouter({
       });
 
       // Build the R2 URL following Cloudflare's format: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
-      const url = new URL(
-        `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${source.r2Key}`,
-      );
+      const url = createR2ObjectUrl(env, source.r2Key);
 
       // Set expiry in search params (24 hours for viewing)
       url.searchParams.set("X-Amz-Expires", "86400");

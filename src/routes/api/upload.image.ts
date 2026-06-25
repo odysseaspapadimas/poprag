@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
 import { chatImage } from "@/db/schema";
+import { createR2ObjectUrl, getR2BucketName } from "@/lib/r2";
 
 const uploadRequestSchema = z.object({
   agentSlug: z.string(),
@@ -160,6 +161,8 @@ export const Route = createFileRoute("/api/upload/image")({
           // Access Cloudflare Workers environment
           const { env } = await import("cloudflare:workers");
 
+          const r2Bucket = getR2BucketName(env);
+
           // Upload directly to R2
           const arrayBuffer = await file.arrayBuffer();
           await env.R2.put(r2Key, arrayBuffer, {
@@ -174,7 +177,7 @@ export const Route = createFileRoute("/api/upload/image")({
             id: imageId,
             agentId: agentRecord.id,
             conversationId,
-            r2Bucket: "poprag",
+            r2Bucket,
             r2Key,
             fileName,
             mime: file.type,
@@ -188,9 +191,7 @@ export const Route = createFileRoute("/api/upload/image")({
             secretAccessKey: env.R2_SECRET_ACCESS_KEY,
           });
 
-          const getUrl = new URL(
-            `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
-          );
+          const getUrl = createR2ObjectUrl(env, r2Key);
           getUrl.searchParams.set("X-Amz-Expires", "86400"); // 24 hours
 
           const getRequest = new Request(getUrl, {

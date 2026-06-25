@@ -1,11 +1,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "poprag",
+  "account_id": "02f4a23b7528f9110777107453bc2088",
   "compatibility_date": "2025-10-22",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  "workers_dev": true,
+  "preview_urls": true,
   "limits": {
     "cpu_ms": 300000,
+  },
+  "vars": {
+    "R2_BUCKET_NAME": "poprag",
+    "AUTH_ENABLE_SIGN_UP": "false",
+    "AUTH_AUTO_ADMIN_SIGN_UP": "false",
   },
   "d1_databases": [
     {
@@ -69,6 +77,67 @@
       "enabled": false,
       "persist": true,
       "head_sampling_rate": 1,
+    },
+  },
+  "env": {
+    "staging": {
+      "name": "poprag-staging",
+      "workers_dev": true,
+      "preview_urls": true,
+      "vars": {
+        "R2_BUCKET_NAME": "poprag-staging",
+        "AUTH_ENABLE_SIGN_UP": "true",
+        "AUTH_AUTO_ADMIN_SIGN_UP": "true",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "poprag-staging",
+          "database_id": "cddc9b93-68b3-4bb8-85bc-baeb9c84d508",
+          "migrations_dir": "drizzle/migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "R2",
+          "bucket_name": "poprag-staging",
+        },
+      ],
+      "ai": {
+        "binding": "AI",
+        "remote": true,
+      },
+      "vectorize": [
+        {
+          "binding": "VECTORIZE",
+          "index_name": "rag-staging",
+          "remote": true,
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "KNOWLEDGE_INDEX_QUEUE",
+            "queue": "knowledge-index-queue-staging",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "knowledge-index-queue-staging",
+            "max_batch_size": 1,
+            "max_retries": 3,
+            "dead_letter_queue": "knowledge-index-dlq-staging",
+          },
+        ],
+      },
+      "workflows": [
+        {
+          "name": "catalog-sync-workflow-staging",
+          "binding": "CATALOG_SYNC_WORKFLOW",
+          "class_name": "CatalogSyncWorkflow",
+          "schedules": ["0 * * * *"],
+        },
+      ],
     },
   },
 }

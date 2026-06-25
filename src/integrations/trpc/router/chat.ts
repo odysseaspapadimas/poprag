@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { chatImage, transcript } from "@/db/schema";
 import { audit, requireAgent } from "@/integrations/trpc/helpers";
 import { createTRPCRouter, protectedProcedure } from "@/integrations/trpc/init";
+import { createR2ObjectUrl, getR2BucketName } from "@/lib/r2";
 
 /**
  * Chat management router
@@ -82,20 +83,21 @@ export const chatRouter = createTRPCRouter({
         const imageId = nanoid();
         const r2Key = `agents/${input.agentId}/chat/${input.conversationId}/images/${imageId}/${input.fileName}`;
 
+        // Generate R2 presigned URL for direct upload
+        const { env } = await import("cloudflare:workers");
+        const r2Bucket = getR2BucketName(env);
+
         await db.insert(chatImage).values({
           id: imageId,
           agentId: input.agentId,
           conversationId: input.conversationId,
-          r2Bucket: "poprag", // Match wrangler.jsonc bucket name
+          r2Bucket,
           r2Key,
           fileName: input.fileName,
           mime: input.mime,
           bytes: input.bytes,
           createdBy: ctx.session.user.id,
         });
-
-        // Generate R2 presigned URL for direct upload
-        const { env } = await import("cloudflare:workers");
 
         // Create AWS4 client for R2 with credentials from environment
         const aws = new AwsClient({
@@ -104,9 +106,7 @@ export const chatRouter = createTRPCRouter({
         });
 
         // Build the R2 URL following Cloudflare's format: https://{bucket}.{accountId}.r2.cloudflarestorage.com/{key}
-        const url = new URL(
-          `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
-        );
+        const url = createR2ObjectUrl(env, r2Key);
 
         // Set expiry in search params (as per Cloudflare docs)
         url.searchParams.set("X-Amz-Expires", "3600"); // 1 hour
@@ -127,9 +127,7 @@ export const chatRouter = createTRPCRouter({
         const uploadUrl = signedRequest.url;
 
         // Generate a signed GET URL for downloading the image (short-lived)
-        const getUrl = new URL(
-          `https://poprag.${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${r2Key}`,
-        );
+        const getUrl = createR2ObjectUrl(env, r2Key);
         getUrl.searchParams.set("X-Amz-Expires", "86400"); // 24 hours
 
         const getRequest = new Request(getUrl, {

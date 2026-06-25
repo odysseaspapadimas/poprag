@@ -1,6 +1,14 @@
 import type { TRPCRouterRecord } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import {
+  isStagingAuthEnabled,
+  shouldAutoAdminSignUps,
+} from "@/auth/env";
 import { auth } from "@/auth/server";
+import { ensureStagingAdminSession } from "@/auth/staging-admin";
+import { user } from "@/db/schema";
 import { protectedProcedure, publicProcedure } from "../init";
 
 const LoginSchema = z.object({
@@ -39,6 +47,13 @@ export const authRouter = {
   signUp: publicProcedure
     .input(SignUpSchema)
     .mutation(async ({ input, ctx }) => {
+      if (!isStagingAuthEnabled()) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Sign ups are disabled.",
+        });
+      }
+
       // Call Better Auth API - it returns a Response with Set-Cookie headers
       const headers = ctx.request.headers;
       const response = await auth.api.signUpEmail({
@@ -56,6 +71,14 @@ export const authRouter = {
 
       // Parse and return the response body
       const result = await response.json();
+
+      if (response.ok && shouldAutoAdminSignUps()) {
+        await ctx.db
+          .update(user)
+          .set({ isAdmin: true })
+          .where(eq(user.email, input.email));
+      }
+
       return result;
     }),
 
@@ -80,9 +103,11 @@ export const authRouter = {
   getSession: publicProcedure.query(async ({ ctx }) => {
     // Return the current session
     const headers = ctx.request.headers;
-    const session = await auth.api.getSession({
-      headers,
-    });
+    const session = await ensureStagingAdminSession(
+      await auth.api.getSession({
+        headers,
+      }),
+    );
 
     return session;
   }),

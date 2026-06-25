@@ -28,25 +28,6 @@ interface RAGDebugInfo {
   keywords?: string[];
   vectorResultsCount?: number;
   ftsResultsCount?: number;
-  catalogStructuredIntent?:
-    | "count"
-    | "list"
-    | "filter"
-    | "continue_list"
-    | "capabilities"
-    | "none";
-  catalogStructuredIntentReason?: string;
-  catalogStructuredFilters?: Array<{ value: string; fieldPath?: string }>;
-  catalogActiveProductCount?: number;
-  catalogStructuredMatchedProducts?: number;
-  catalogStructuredProductsReturned?: number;
-  catalogStructuredContinuationOf?: "list" | "filter";
-  catalogStructuredOffset?: number;
-  catalogStructuredLimit?: number;
-  catalogStructuredNextOffset?: number;
-  catalogStructuredHasMore?: boolean;
-  catalogStructuredComplete?: boolean;
-  catalogExactMatchCount?: number;
   vectorSearchMode?:
     | "unfiltered"
     | "direct_filtered_query"
@@ -56,6 +37,38 @@ interface RAGDebugInfo {
   vectorFilterApplied?: boolean;
   vectorFilterReason?: string;
   vectorFallbackTopK?: number;
+  retrievalPlanKind?:
+    | "catalog_overview"
+    | "catalog_search"
+    | "catalog_count"
+    | "catalog_capabilities"
+    | "catalog_continue"
+    | "catalog_detail"
+    | "document_retrieval"
+    | "mixed"
+    | "none";
+  retrievalPlanReason?: string;
+  retrievalPlannerFallbackReason?: string;
+  catalogAvailable?: boolean;
+  documentAvailable?: boolean;
+  catalogActiveProductCount?: number;
+  catalogEvidenceKind?:
+    | "overview"
+    | "product_page"
+    | "product_detail"
+    | "product_clarification"
+    | "count"
+    | "capabilities"
+    | "no_match";
+  catalogValidationResult?: string;
+  catalogValidationError?: string;
+  catalogTerms?: Array<{ value: string; fieldPath?: string }>;
+  catalogMatchedProducts?: number;
+  catalogProductsReturned?: number;
+  catalogPageOffset?: number;
+  catalogPageLimit?: number;
+  catalogPageNextOffset?: number;
+  catalogPageHasMore?: boolean;
   rerankEnabled?: boolean;
   rerankModel?: string;
   chunks?: Array<{
@@ -75,9 +88,9 @@ interface RAGDebugInfo {
     vectorSearchMs?: number;
     ftsSearchMs?: number;
     hybridSearchMs?: number;
-    catalogStructuredIntentMs?: number;
-    catalogStructuredQueryMs?: number;
-    catalogExactSearchMs?: number;
+    sourceCapabilityMs?: number;
+    retrievalPlannerMs?: number;
+    catalogEvidenceMs?: number;
     rerankMs?: number;
     enrichmentMs?: number;
     totalRagMs?: number;
@@ -86,7 +99,7 @@ interface RAGDebugInfo {
   models?: {
     conversationalReformulationModel?: string;
     intentModel?: string;
-    catalogStructuredIntentModel?: string;
+    retrievalPlannerModel?: string;
     rewriteModel?: string;
     embeddingModel?: string;
     embeddingDimensions?: number;
@@ -380,34 +393,95 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
             )}
           </div>
 
+          {/* Retrieval Planner */}
+          {(debugInfo.retrievalPlanKind || debugInfo.catalogEvidenceKind) && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <Search className="h-4 w-4" />
+                <span>Retrieval Planner</span>
+              </div>
+              <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="bg-background border rounded p-2">
+                  <div className="text-xs text-muted-foreground">Plan</div>
+                  <div className="text-sm font-semibold">
+                    {debugInfo.retrievalPlanKind ?? "unknown"}
+                  </div>
+                  {debugInfo.retrievalPlanReason && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {debugInfo.retrievalPlanReason}
+                    </div>
+                  )}
+                </div>
+                <div className="bg-background border rounded p-2">
+                  <div className="text-xs text-muted-foreground">
+                    Catalog Evidence
+                  </div>
+                  <div className="text-sm font-semibold">
+                    {debugInfo.catalogEvidenceKind ?? "none"}
+                  </div>
+                  {debugInfo.catalogValidationResult && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {debugInfo.catalogValidationResult}
+                      {debugInfo.catalogValidationError
+                        ? ` (${debugInfo.catalogValidationError})`
+                        : ""}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="pl-6 space-y-1 text-xs text-muted-foreground">
+                <div>
+                  Sources: catalog{" "}
+                  {debugInfo.catalogAvailable ? "available" : "unavailable"}
+                  {debugInfo.catalogActiveProductCount !== undefined
+                    ? ` (${debugInfo.catalogActiveProductCount} products)`
+                    : ""}
+                  , documents{" "}
+                  {debugInfo.documentAvailable ? "available" : "unavailable"}
+                </div>
+                {debugInfo.catalogTerms &&
+                  debugInfo.catalogTerms.length > 0 && (
+                    <div>
+                      Catalog terms:{" "}
+                      {debugInfo.catalogTerms
+                        .map((term) =>
+                          term.fieldPath
+                            ? `${term.fieldPath}: ${term.value}`
+                            : term.value,
+                        )
+                        .join(", ")}
+                    </div>
+                  )}
+                {debugInfo.catalogMatchedProducts !== undefined && (
+                  <div>
+                    Matched: {debugInfo.catalogMatchedProducts}, returned:{" "}
+                    {debugInfo.catalogProductsReturned ?? 0}
+                  </div>
+                )}
+                {debugInfo.catalogPageOffset !== undefined && (
+                  <div>
+                    Page offset: {debugInfo.catalogPageOffset}, limit:{" "}
+                    {debugInfo.catalogPageLimit ?? 0}, next:{" "}
+                    {debugInfo.catalogPageNextOffset ?? 0}, has more:{" "}
+                    {debugInfo.catalogPageHasMore ? "yes" : "no"}
+                  </div>
+                )}
+                {debugInfo.retrievalPlannerFallbackReason && (
+                  <div>
+                    Planner fallback: {debugInfo.retrievalPlannerFallbackReason}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Search Results Summary */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 font-semibold">
               <BarChart3 className="h-4 w-4" />
               <span>Search Results</span>
             </div>
-            <div className="pl-6 grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <div className="bg-background border rounded p-2">
-                <div className="text-xs text-muted-foreground">
-                  Active Products
-                </div>
-                <div className="text-lg font-semibold">
-                  {debugInfo.catalogActiveProductCount ?? 0}
-                </div>
-                {debugInfo.catalogStructuredIntent ? (
-                  <div className="text-[11px] text-muted-foreground">
-                    Intent: {debugInfo.catalogStructuredIntent}
-                  </div>
-                ) : null}
-              </div>
-              <div className="bg-background border rounded p-2">
-                <div className="text-xs text-muted-foreground">
-                  Catalog Exact
-                </div>
-                <div className="text-lg font-semibold">
-                  {debugInfo.catalogExactMatchCount ?? 0}
-                </div>
-              </div>
+            <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="bg-background border rounded p-2">
                 <div className="text-xs text-muted-foreground">
                   Vector Results
@@ -423,44 +497,6 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                 </div>
               </div>
             </div>
-            {debugInfo.catalogStructuredIntentReason ? (
-              <div className="pl-6 space-y-1 text-xs text-muted-foreground">
-                <div>
-                  Catalog inventory reason:{" "}
-                  {debugInfo.catalogStructuredIntentReason}
-                </div>
-                {debugInfo.catalogStructuredFilters &&
-                debugInfo.catalogStructuredFilters.length > 0 ? (
-                  <div>
-                    Filters:{" "}
-                    {debugInfo.catalogStructuredFilters
-                      .map((filter) => filter.value)
-                      .join(", ")}
-                  </div>
-                ) : null}
-                {debugInfo.catalogStructuredProductsReturned !== undefined ? (
-                  <div>
-                    Matched: {debugInfo.catalogStructuredMatchedProducts ?? 0},
-                    returned: {debugInfo.catalogStructuredProductsReturned},
-                    complete:{" "}
-                    {debugInfo.catalogStructuredComplete ? "yes" : "no"}
-                  </div>
-                ) : null}
-                {debugInfo.catalogStructuredOffset !== undefined ? (
-                  <div>
-                    Page offset: {debugInfo.catalogStructuredOffset}, limit:{" "}
-                    {debugInfo.catalogStructuredLimit ?? 0}, next:{" "}
-                    {debugInfo.catalogStructuredNextOffset ?? 0}, has more:{" "}
-                    {debugInfo.catalogStructuredHasMore ? "yes" : "no"}
-                  </div>
-                ) : null}
-                {debugInfo.catalogStructuredContinuationOf ? (
-                  <div>
-                    Continuing: {debugInfo.catalogStructuredContinuationOf}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
             {(debugInfo.vectorSearchMode ||
               debugInfo.vectorFilterCapability) && (
               <div className="pl-6 space-y-1 text-xs text-muted-foreground">
@@ -546,6 +582,19 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       title={debugInfo.models.intentModel}
                     >
                       {formatModelName(debugInfo.models.intentModel)}
+                    </div>
+                  </div>
+                )}
+                {debugInfo.models.retrievalPlannerModel && (
+                  <div className="bg-background border rounded p-2">
+                    <div className="text-xs text-muted-foreground">
+                      Retrieval Planner
+                    </div>
+                    <div
+                      className="text-sm font-mono truncate"
+                      title={debugInfo.models.retrievalPlannerModel}
+                    >
+                      {formatModelName(debugInfo.models.retrievalPlannerModel)}
                     </div>
                   </div>
                 )}
@@ -636,6 +685,45 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       </div>
                     </div>
                   )}
+                  {debugInfo.timing.sourceCapabilityMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Sources
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.sourceCapabilityMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.retrievalPlannerMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Planner
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.retrievalPlannerMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {debugInfo.timing.catalogEvidenceMs !== undefined && (
+                    <div className="bg-background border rounded p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Catalog
+                      </div>
+                      <div className="text-lg font-semibold">
+                        {debugInfo.timing.catalogEvidenceMs}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          ms
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {debugInfo.timing.queryRewriteMs !== undefined && (
                     <div className="bg-background border rounded p-2">
                       <div className="text-xs text-muted-foreground">
@@ -643,45 +731,6 @@ export function RAGDebugPanel({ debugInfo }: RAGDebugPanelProps) {
                       </div>
                       <div className="text-lg font-semibold">
                         {debugInfo.timing.queryRewriteMs}
-                        <span className="text-xs font-normal text-muted-foreground">
-                          ms
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {debugInfo.timing.catalogStructuredIntentMs !== undefined && (
-                    <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">
-                        Catalog Intent
-                      </div>
-                      <div className="text-lg font-semibold">
-                        {debugInfo.timing.catalogStructuredIntentMs}
-                        <span className="text-xs font-normal text-muted-foreground">
-                          ms
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {debugInfo.timing.catalogStructuredQueryMs !== undefined && (
-                    <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">
-                        Catalog Query
-                      </div>
-                      <div className="text-lg font-semibold">
-                        {debugInfo.timing.catalogStructuredQueryMs}
-                        <span className="text-xs font-normal text-muted-foreground">
-                          ms
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {debugInfo.timing.catalogExactSearchMs !== undefined && (
-                    <div className="bg-background border rounded p-2">
-                      <div className="text-xs text-muted-foreground">
-                        Catalog Exact
-                      </div>
-                      <div className="text-lg font-semibold">
-                        {debugInfo.timing.catalogExactSearchMs}
                         <span className="text-xs font-normal text-muted-foreground">
                           ms
                         </span>

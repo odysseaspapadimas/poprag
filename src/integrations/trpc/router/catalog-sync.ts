@@ -22,8 +22,12 @@ import {
   type CatalogSyncMode,
   computeNextCatalogRunAt,
 } from "@/lib/catalog/sync";
+import { getR2BucketName } from "@/lib/r2";
 
 const catalogFieldListSchema = z.array(z.string().trim().min(1)).default([]);
+const catalogScopeAliasListSchema = z
+  .array(z.string().trim().min(1).max(200))
+  .default([]);
 const DEFAULT_UPDATED_SINCE_PARAM = "effectiveUpdatedAfter";
 const MAPPING_REBUILD_PROGRESS_START = 5;
 const MAPPING_REBUILD_NORMALIZE_START = 10;
@@ -33,6 +37,8 @@ const MAPPING_REBUILD_INDEX_END = 88;
 
 const catalogConfigInput = z.object({
   name: z.string().min(1).max(200),
+  scopeName: z.string().trim().max(200).nullable().optional(),
+  scopeAliases: catalogScopeAliasListSchema,
   experienceId: z.string().nullable().optional(),
   snapshotUrl: z.string().url(),
   diffUrl: z.union([z.string().url(), z.literal("")]).default(""),
@@ -186,6 +192,8 @@ export const catalogSyncRouter = createTRPCRouter({
           knowledgeSourceId: catalogSyncConfig.knowledgeSourceId,
           experienceId: catalogSyncConfig.experienceId,
           name: catalogSyncConfig.name,
+          scopeName: catalogConfig.scopeName,
+          scopeAliases: catalogConfig.scopeAliases,
           enabled: catalogSyncConfig.enabled,
           snapshotUrl: catalogSyncConfig.snapshotUrl,
           diffUrl: catalogSyncConfig.diffUrl,
@@ -288,6 +296,8 @@ export const catalogSyncRouter = createTRPCRouter({
           knowledgeSourceId: catalogSyncConfig.knowledgeSourceId,
           experienceId: catalogConfig.experienceId,
           name: catalogConfig.name,
+          scopeName: catalogConfig.scopeName,
+          scopeAliases: catalogConfig.scopeAliases,
           enabled: catalogConfig.enabled,
           snapshotUrl: catalogSyncConfig.snapshotUrl,
           diffUrl: catalogSyncConfig.diffUrl,
@@ -349,12 +359,14 @@ export const catalogSyncRouter = createTRPCRouter({
       const now = new Date();
       const nextRunAt = computeNextCatalogRunAt(input, now);
       const diffUrl = input.diffUrl || input.snapshotUrl;
+      const { env } = await import("cloudflare:workers");
+      const r2Bucket = getR2BucketName(env);
 
       await db.insert(knowledgeSource).values({
         id: sourceId,
         agentId: input.agentId,
         type: "dataset",
-        r2Bucket: "poprag",
+        r2Bucket,
         r2Key,
         fileName,
         mime: "application/x-ndjson",
@@ -374,6 +386,8 @@ export const catalogSyncRouter = createTRPCRouter({
         knowledgeSourceId: sourceId,
         experienceId,
         name: input.name,
+        scopeName: input.scopeName || null,
+        scopeAliases: input.scopeAliases,
         origin: "api",
         enabled: input.enabled,
         stableKeyField: input.stableKeyField,
@@ -525,6 +539,10 @@ export const catalogSyncRouter = createTRPCRouter({
         updatedAt: new Date(),
       };
       if (input.name !== undefined) catalogUpdateValues.name = input.name;
+      if (input.scopeName !== undefined)
+        catalogUpdateValues.scopeName = input.scopeName || null;
+      if (input.scopeAliases !== undefined)
+        catalogUpdateValues.scopeAliases = input.scopeAliases;
       if (experienceId !== undefined)
         catalogUpdateValues.experienceId = experienceId;
       if (input.enabled !== undefined)
