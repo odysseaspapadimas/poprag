@@ -26,6 +26,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useTRPC } from "@/integrations/trpc/react";
 
+type CatalogIncludeFilterInput = {
+  fieldPath: string;
+  values: string[];
+};
+
 type CatalogConfigFormValue = {
   name: string;
   scopeName: string;
@@ -45,6 +50,7 @@ type CatalogConfigFormValue = {
   searchableFields: string;
   exactMatchFields: string;
   filterableFields: string;
+  includeFilters: string;
   syncIntervalDays: number;
   scheduleWeekdayUtc: number;
   scheduleHourUtc: number;
@@ -71,6 +77,7 @@ type CatalogSyncDialogConfig = {
   searchableFields: string[] | null;
   exactMatchFields: string[] | null;
   filterableFields: string[] | null;
+  includeFilters?: CatalogIncludeFilterInput[] | null;
   syncIntervalDays: number;
   scheduleWeekdayUtc: number;
   scheduleHourUtc: number;
@@ -139,6 +146,7 @@ function emptyForm(): CatalogConfigFormValue {
     filterableFields: ["parent.documentSummary.name.el-GR", "category"].join(
       ", ",
     ),
+    includeFilters: "",
     syncIntervalDays: 7,
     scheduleWeekdayUtc: 1,
     scheduleHourUtc: 3,
@@ -170,6 +178,7 @@ function formFromConfig(
     searchableFields: (config.searchableFields ?? []).join(", "),
     exactMatchFields: (config.exactMatchFields ?? []).join(", "),
     filterableFields: (config.filterableFields ?? []).join(", "),
+    includeFilters: formatIncludeFilters(config.includeFilters),
     syncIntervalDays: config.syncIntervalDays,
     scheduleWeekdayUtc: config.scheduleWeekdayUtc,
     scheduleHourUtc: config.scheduleHourUtc,
@@ -182,6 +191,67 @@ function parseList(value: string): string[] {
     .split(/[,\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function formatIncludeFilters(
+  filters: CatalogIncludeFilterInput[] | null | undefined,
+): string {
+  return (filters ?? [])
+    .map((filter) => {
+      const fieldPath = filter.fieldPath?.trim();
+      const values = (filter.values ?? [])
+        .map((value) => value.trim())
+        .filter(Boolean);
+      return fieldPath && values.length > 0
+        ? `${fieldPath} = ${values.join(", ")}`
+        : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseIncludeFilters(value: string): {
+  filters: CatalogIncludeFilterInput[];
+  invalidLines: string[];
+} {
+  const filtersByField = new Map<string, Set<string>>();
+  const invalidLines: string[] = [];
+
+  for (const rawLine of value.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const match = line.match(/^([^:=]+?)\s*[:=]\s*(.+)$/u);
+    if (!match) {
+      invalidLines.push(line);
+      continue;
+    }
+
+    const fieldPath = match[1]?.trim() ?? "";
+    const values = (match[2] ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (!fieldPath || values.length === 0) {
+      invalidLines.push(line);
+      continue;
+    }
+
+    const current = filtersByField.get(fieldPath) ?? new Set<string>();
+    for (const item of values) current.add(item);
+    filtersByField.set(fieldPath, current);
+  }
+
+  return {
+    filters: Array.from(filtersByField.entries()).map(
+      ([fieldPath, values]) => ({
+        fieldPath,
+        values: Array.from(values),
+      }),
+    ),
+    invalidLines,
+  };
 }
 
 export function CatalogSyncDialog({
@@ -281,6 +351,7 @@ export function CatalogSyncDialog({
       searchableFields: parseList(form.searchableFields),
       exactMatchFields: parseList(form.exactMatchFields),
       filterableFields: parseList(form.filterableFields),
+      includeFilters: parseIncludeFilters(form.includeFilters).filters,
       syncIntervalDays: form.syncIntervalDays,
       scheduleWeekdayUtc: form.scheduleWeekdayUtc,
       scheduleHourUtc: form.scheduleHourUtc,
@@ -292,10 +363,27 @@ export function CatalogSyncDialog({
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const submit = () => {
+    const includeFilterResult = parseIncludeFilters(form.includeFilters);
+    if (includeFilterResult.invalidLines.length > 0) {
+      toast.error(
+        `Invalid include filter line: ${includeFilterResult.invalidLines[0]}`,
+        {
+          description:
+            "Use one rule per line, for example: contentType = Product",
+        },
+      );
+      return;
+    }
+
+    const nextPayload = {
+      ...payload,
+      includeFilters: includeFilterResult.filters,
+    };
+
     if (isEditing && config) {
-      updateMutation.mutate({ configId: config.id, ...payload });
+      updateMutation.mutate({ configId: config.id, ...nextPayload });
     } else {
-      createMutation.mutate({ agentId, ...payload });
+      createMutation.mutate({ agentId, ...nextPayload });
     }
   };
 
@@ -552,6 +640,23 @@ export function CatalogSyncDialog({
               placeholder="brand, category, productType"
               rows={2}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="include-filters">Include row filters</Label>
+            <Textarea
+              id="include-filters"
+              value={form.includeFilters}
+              onChange={(event) =>
+                updateField("includeFilters", event.target.value)
+              }
+              placeholder="contentType = Product"
+              rows={2}
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional. One rule per line. Rows that do not match every rule are
+              skipped before indexing.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">

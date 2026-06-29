@@ -28,6 +28,15 @@ const catalogFieldListSchema = z.array(z.string().trim().min(1)).default([]);
 const catalogScopeAliasListSchema = z
   .array(z.string().trim().min(1).max(200))
   .default([]);
+const catalogIncludeFilterListSchema = z
+  .array(
+    z.object({
+      fieldPath: z.string().trim().min(1).max(200),
+      values: z.array(z.string().trim().min(1).max(500)).min(1).max(100),
+    }),
+  )
+  .max(20);
+const catalogIncludeFiltersSchema = catalogIncludeFilterListSchema.default([]);
 const DEFAULT_UPDATED_SINCE_PARAM = "effectiveUpdatedAfter";
 const MAPPING_REBUILD_PROGRESS_START = 5;
 const MAPPING_REBUILD_NORMALIZE_START = 10;
@@ -65,6 +74,7 @@ const catalogConfigInput = z.object({
   searchableFields: catalogFieldListSchema,
   exactMatchFields: catalogFieldListSchema,
   filterableFields: catalogFieldListSchema,
+  includeFilters: catalogIncludeFiltersSchema,
   syncIntervalDays: z.number().int().min(1).max(31).default(7),
   scheduleWeekdayUtc: z.number().int().min(0).max(6).default(1),
   scheduleHourUtc: z.number().int().min(0).max(23).default(3),
@@ -209,6 +219,7 @@ export const catalogSyncRouter = createTRPCRouter({
           searchableFields: catalogSyncConfig.searchableFields,
           exactMatchFields: catalogSyncConfig.exactMatchFields,
           filterableFields: catalogConfig.filterableFields,
+          includeFilters: catalogConfig.includeFilters,
           syncIntervalDays: catalogSyncConfig.syncIntervalDays,
           scheduleWeekdayUtc: catalogSyncConfig.scheduleWeekdayUtc,
           scheduleHourUtc: catalogSyncConfig.scheduleHourUtc,
@@ -313,6 +324,7 @@ export const catalogSyncRouter = createTRPCRouter({
           searchableFields: catalogConfig.searchableFields,
           exactMatchFields: catalogConfig.exactMatchFields,
           filterableFields: catalogConfig.filterableFields,
+          includeFilters: catalogConfig.includeFilters,
           syncIntervalDays: catalogSyncConfig.syncIntervalDays,
           scheduleWeekdayUtc: catalogSyncConfig.scheduleWeekdayUtc,
           scheduleHourUtc: catalogSyncConfig.scheduleHourUtc,
@@ -398,6 +410,7 @@ export const catalogSyncRouter = createTRPCRouter({
         searchableFields: input.searchableFields,
         exactMatchFields: input.exactMatchFields,
         filterableFields: input.filterableFields,
+        includeFilters: input.includeFilters,
         createdAt: now,
         updatedAt: now,
       });
@@ -423,6 +436,7 @@ export const catalogSyncRouter = createTRPCRouter({
         titleField: input.titleField,
         searchableFields: input.searchableFields,
         exactMatchFields: input.exactMatchFields,
+        includeFilters: input.includeFilters,
         syncIntervalDays: input.syncIntervalDays,
         scheduleWeekdayUtc: input.scheduleWeekdayUtc,
         scheduleHourUtc: input.scheduleHourUtc,
@@ -446,7 +460,12 @@ export const catalogSyncRouter = createTRPCRouter({
     }),
 
   update: protectedProcedure
-    .input(catalogConfigInput.partial().extend({ configId: z.string() }))
+    .input(
+      catalogConfigInput.partial().extend({
+        configId: z.string(),
+        includeFilters: catalogIncludeFilterListSchema.optional(),
+      }),
+    )
     .mutation(async ({ input, ctx }) => {
       const config = await requireCatalogConfig(input.configId);
       const experienceId =
@@ -461,7 +480,8 @@ export const catalogSyncRouter = createTRPCRouter({
         input.titleField !== undefined ||
         input.searchableFields !== undefined ||
         input.exactMatchFields !== undefined ||
-        input.filterableFields !== undefined;
+        input.filterableFields !== undefined ||
+        input.includeFilters !== undefined;
       const currentSourceState = mappingChanged
         ? await getKnowledgeSourceState(config.knowledgeSourceId)
         : undefined;
@@ -520,6 +540,8 @@ export const catalogSyncRouter = createTRPCRouter({
         updateValues.searchableFields = input.searchableFields;
       if (input.exactMatchFields !== undefined)
         updateValues.exactMatchFields = input.exactMatchFields;
+      if (input.includeFilters !== undefined)
+        updateValues.includeFilters = input.includeFilters;
       if (input.syncIntervalDays !== undefined)
         updateValues.syncIntervalDays = input.syncIntervalDays;
       if (input.scheduleWeekdayUtc !== undefined)
@@ -564,6 +586,8 @@ export const catalogSyncRouter = createTRPCRouter({
         catalogUpdateValues.exactMatchFields = input.exactMatchFields;
       if (input.filterableFields !== undefined)
         catalogUpdateValues.filterableFields = input.filterableFields;
+      if (input.includeFilters !== undefined)
+        catalogUpdateValues.includeFilters = input.includeFilters;
 
       if (mappingChanged) {
         const nextImportConfig = {
@@ -590,6 +614,8 @@ export const catalogSyncRouter = createTRPCRouter({
             input.exactMatchFields ?? currentImportConfig!.exactMatchFields,
           filterableFields:
             input.filterableFields ?? currentImportConfig!.filterableFields,
+          includeFilters:
+            input.includeFilters ?? currentImportConfig!.includeFilters,
         };
         const { env } = await import("cloudflare:workers");
         let lastProgressReportAt = 0;

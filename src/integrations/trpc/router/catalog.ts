@@ -27,6 +27,15 @@ const catalogFieldListSchema = z.array(z.string().trim().min(1)).default([]);
 const catalogScopeAliasListSchema = z
   .array(z.string().trim().min(1).max(200))
   .default([]);
+const catalogIncludeFilterListSchema = z
+  .array(
+    z.object({
+      fieldPath: z.string().trim().min(1).max(200),
+      values: z.array(z.string().trim().min(1).max(500)).min(1).max(100),
+    }),
+  )
+  .max(20);
+const catalogIncludeFiltersSchema = catalogIncludeFilterListSchema.default([]);
 const MAPPING_REBUILD_PROGRESS_START = 5;
 const MAPPING_REBUILD_NORMALIZE_START = 10;
 const MAPPING_REBUILD_NORMALIZE_END = 30;
@@ -52,6 +61,7 @@ const catalogMappingInput = z.object({
   searchableFields: catalogFieldListSchema,
   exactMatchFields: catalogFieldListSchema,
   filterableFields: catalogFieldListSchema,
+  includeFilters: catalogIncludeFiltersSchema,
   enabled: z.boolean().default(true),
 });
 
@@ -173,6 +183,7 @@ export const catalogRouter = createTRPCRouter({
           searchableFields: catalogConfig.searchableFields,
           exactMatchFields: catalogConfig.exactMatchFields,
           filterableFields: catalogConfig.filterableFields,
+          includeFilters: catalogConfig.includeFilters,
           createdAt: catalogConfig.createdAt,
           updatedAt: catalogConfig.updatedAt,
           sourceFileName: knowledgeSource.fileName,
@@ -260,7 +271,10 @@ export const catalogRouter = createTRPCRouter({
 
   updateMapping: protectedProcedure
     .input(
-      catalogMappingInput.partial().extend({ catalogConfigId: z.string() }),
+      catalogMappingInput.partial().extend({
+        catalogConfigId: z.string(),
+        includeFilters: catalogIncludeFilterListSchema.optional(),
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       const config = await requireCatalogConfig(input.catalogConfigId);
@@ -276,7 +290,8 @@ export const catalogRouter = createTRPCRouter({
         input.titleField !== undefined ||
         input.searchableFields !== undefined ||
         input.exactMatchFields !== undefined ||
-        input.filterableFields !== undefined;
+        input.filterableFields !== undefined ||
+        input.includeFilters !== undefined;
       const currentSourceState = mappingChanged
         ? await getKnowledgeSourceState(config.knowledgeSourceId)
         : undefined;
@@ -321,6 +336,8 @@ export const catalogRouter = createTRPCRouter({
         updateValues.exactMatchFields = input.exactMatchFields;
       if (input.filterableFields !== undefined)
         updateValues.filterableFields = input.filterableFields;
+      if (input.includeFilters !== undefined)
+        updateValues.includeFilters = input.includeFilters;
 
       if (mappingChanged) {
         const nextImportConfig = {
@@ -347,6 +364,8 @@ export const catalogRouter = createTRPCRouter({
             input.exactMatchFields ?? currentImportConfig!.exactMatchFields,
           filterableFields:
             input.filterableFields ?? currentImportConfig!.filterableFields,
+          includeFilters:
+            input.includeFilters ?? currentImportConfig!.includeFilters,
         };
         const { env } = await import("cloudflare:workers");
         let lastProgressReportAt = 0;
@@ -454,6 +473,7 @@ export const catalogRouter = createTRPCRouter({
             titleField: input.titleField ?? config.titleField,
             searchableFields: input.searchableFields ?? config.searchableFields,
             exactMatchFields: input.exactMatchFields ?? config.exactMatchFields,
+            includeFilters: input.includeFilters ?? config.includeFilters,
             updatedAt: new Date(),
           })
           .where(eq(catalogSyncConfig.catalogConfigId, config.id));
@@ -558,6 +578,7 @@ export const catalogRouter = createTRPCRouter({
         searchableFields: input.searchableFields,
         exactMatchFields: input.exactMatchFields,
         filterableFields: input.filterableFields,
+        includeFilters: input.includeFilters,
         createdAt: now,
         updatedAt: now,
       });

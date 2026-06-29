@@ -59,6 +59,7 @@ interface KnowledgeSourceActionsProps {
     searchableFields: string[] | null;
     exactMatchFields: string[] | null;
     filterableFields: string[] | null;
+    includeFilters?: Array<{ fieldPath: string; values: string[] }> | null;
     syncIntervalDays?: number | null;
     scheduleWeekdayUtc?: number | null;
     scheduleHourUtc?: number | null;
@@ -328,6 +329,7 @@ export function KnowledgeSourceActions({
               searchableFields: catalogConfig.searchableFields,
               exactMatchFields: catalogConfig.exactMatchFields,
               filterableFields: catalogConfig.filterableFields,
+              includeFilters: catalogConfig.includeFilters,
               syncIntervalDays: catalogConfig.syncIntervalDays ?? 7,
               scheduleWeekdayUtc: catalogConfig.scheduleWeekdayUtc ?? 1,
               scheduleHourUtc: catalogConfig.scheduleHourUtc ?? 3,
