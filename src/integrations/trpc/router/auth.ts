@@ -2,10 +2,7 @@ import type { TRPCRouterRecord } from "@trpc/server";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import {
-  isStagingAuthEnabled,
-  shouldAutoAdminSignUps,
-} from "@/auth/env";
+import { isStagingAuthEnabled, shouldAutoAdminSignUps } from "@/auth/env";
 import { auth } from "@/auth/server";
 import { ensureStagingAdminSession } from "@/auth/staging-admin";
 import { user } from "@/db/schema";

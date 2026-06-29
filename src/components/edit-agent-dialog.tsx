@@ -162,9 +162,7 @@ export function EditAgentDialog({ agent, trigger }: EditAgentDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <div onClick={() => setOpen(true)}>{trigger}</div>
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="sm:max-w-[525px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Agent Settings</DialogTitle>

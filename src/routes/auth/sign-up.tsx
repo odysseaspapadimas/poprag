@@ -1,12 +1,12 @@
+import { useMutation } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { type FormEvent, useState } from "react";
+import { toast } from "sonner";
 import { normalizeAuthRedirect } from "@/auth/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTRPC } from "@/integrations/trpc/react";
-import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { FormEvent, useState } from "react";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth/sign-up")({
   validateSearch: (search): { redirect?: string } => {

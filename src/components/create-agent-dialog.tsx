@@ -119,9 +119,7 @@ export function CreateAgentDialog({ trigger }: CreateAgentDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <div onClick={() => setOpen(true)}>{trigger}</div>
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="sm:max-w-[525px]">
         <DialogHeader>
           <DialogTitle>Create New Agent</DialogTitle>

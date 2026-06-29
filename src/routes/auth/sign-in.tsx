@@ -1,8 +1,8 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { authClient } from "@/auth/client";
 import { normalizeAuthRedirect } from "@/auth/redirect";
 import { Button } from "@/components/ui/button";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth/sign-in")({
   validateSearch: (search): { redirect?: string } => {

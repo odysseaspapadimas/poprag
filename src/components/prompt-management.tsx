@@ -66,9 +66,10 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
                 </p>
               ) : (
                 prompts.map((prompt) => (
-                  <div
+                  <button
                     key={prompt.id}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                    type="button"
+                    className={`w-full p-3 rounded-lg border text-left transition-colors ${
                       selectedPromptId === prompt.id
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted/50"
@@ -86,7 +87,7 @@ export function PromptManagement({ agentId }: PromptManagementProps) {
                       </div>
                       <Badge variant="outline">{prompt.key}</Badge>
                     </div>
-                  </div>
+                  </button>
                 ))
               )}
             </div>

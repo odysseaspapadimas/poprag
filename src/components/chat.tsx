@@ -314,7 +314,8 @@ export function Chat({
   });
 
   const supportsImageUpload = modelCapabilities?.supportsImage ?? false;
-  const isInspectingSavedConversation = !!initialConversationId || !!initialRunId;
+  const isInspectingSavedConversation =
+    !!initialConversationId || !!initialRunId;
 
   const isFullySetUp =
     setupStatus?.hasModelAlias &&

@@ -22,17 +22,13 @@ export async function loadSourceCapabilities(options: {
   agentId: string;
   knowledgeSourceIds?: string[];
 }): Promise<SourceCapabilities> {
-  const [
-    activeProductCount,
-    fieldCapabilities,
-    filterValueSummaries,
-    scopes,
-  ] = await Promise.all([
-    countActiveCatalogProducts(options),
-    listCatalogFieldCapabilities(options),
-    listCatalogFilterValueSummaries(options),
-    listCatalogScopes(options),
-  ]);
+  const [activeProductCount, fieldCapabilities, filterValueSummaries, scopes] =
+    await Promise.all([
+      countActiveCatalogProducts(options),
+      listCatalogFieldCapabilities(options),
+      listCatalogFilterValueSummaries(options),
+      listCatalogScopes(options),
+    ]);
   const indexedDocumentChunkCount = await countIndexedDocumentChunks(options);
 
   return {

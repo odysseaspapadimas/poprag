@@ -18,7 +18,10 @@ export async function ensureStagingAdminSession<T extends SessionWithUser>(
   if (!shouldAutoAdminSignUps() || !session?.user?.id) return session;
   if (session.user.isAdmin === true) return session;
 
-  await db.update(user).set({ isAdmin: true }).where(eq(user.id, session.user.id));
+  await db
+    .update(user)
+    .set({ isAdmin: true })
+    .where(eq(user.id, session.user.id));
 
   return {
     ...session,

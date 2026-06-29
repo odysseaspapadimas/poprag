@@ -29,7 +29,9 @@ export interface CatalogMapping {
   includeFilters?: CatalogIncludeFilter[] | null;
 }
 
-export interface CatalogImportConfig extends CatalogMapping, CatalogScopeConfig {
+export interface CatalogImportConfig
+  extends CatalogMapping,
+    CatalogScopeConfig {
   id: string;
   agentId: string;
   knowledgeSourceId: string;

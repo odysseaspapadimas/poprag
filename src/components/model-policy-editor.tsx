@@ -59,11 +59,14 @@ export function ModelPolicyEditor({ agentId }: ModelPolicyEditorProps) {
   }, [policy]);
 
   // If there is no selected model alias yet, default to the first available alias
+  const firstModelAlias = modelAliases?.[0]?.alias;
+
   useEffect(() => {
-    if (!formState.modelAlias && modelAliases && modelAliases.length > 0) {
-      setFormState((s) => ({ ...s, modelAlias: modelAliases[0].alias }));
-    }
-  }, [modelAliases]);
+    if (!firstModelAlias) return;
+    setFormState((s) =>
+      s.modelAlias ? s : { ...s, modelAlias: firstModelAlias },
+    );
+  }, [firstModelAlias]);
 
   // Check if selected model is a reasoning model (derived from already-loaded modelAliases)
   const selectedModel = modelAliases?.find(

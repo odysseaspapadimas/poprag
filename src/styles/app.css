@@ -6,16 +6,16 @@
 
 body {
   @apply m-0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
+    "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
-    monospace;
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 :root {
@@ -73,8 +73,8 @@ code {
   --sidebar-border: oklch(0.9 0.03 255);
   --sidebar-ring: oklch(0.6231 0.188 259.8145);
 
-  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  --font-sans:
+    Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-serif: "Source Serif 4", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -90,10 +90,10 @@ code {
 
   --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.06);
   --shadow-xs: 0 2px 4px 0px hsl(0 0% 0% / 0.06);
-  --shadow-sm: 0 4px 8px 0px hsl(0 0% 0% / 0.08),
-    0 2px 4px -2px hsl(0 0% 0% / 0.08);
-  --shadow: 0 6px 12px 0px hsl(0 0% 0% / 0.1),
-    0 3px 6px -2px hsl(0 0% 0% / 0.08);
+  --shadow-sm:
+    0 4px 8px 0px hsl(0 0% 0% / 0.08), 0 2px 4px -2px hsl(0 0% 0% / 0.08);
+  --shadow:
+    0 6px 12px 0px hsl(0 0% 0% / 0.1), 0 3px 6px -2px hsl(0 0% 0% / 0.08);
   --shadow-md: 0 8px 18px -4px hsl(0 0% 0% / 0.12);
   --shadow-lg: 0 14px 30px -6px hsl(0 0% 0% / 0.14);
   --shadow-xl: 0 20px 40px -10px hsl(0 0% 0% / 0.16);
@@ -149,8 +149,8 @@ code {
 
   --radius: 0.5rem;
 
-  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  --font-sans:
+    Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-serif: "Source Serif 4", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -166,15 +166,14 @@ code {
 
   --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.2);
   --shadow-xs: 0 2px 4px 0px hsl(0 0% 0% / 0.22);
-  --shadow-sm: 0 4px 8px 0px hsl(0 0% 0% / 0.24),
-    0 2px 4px -2px hsl(0 0% 0% / 0.24);
+  --shadow-sm:
+    0 4px 8px 0px hsl(0 0% 0% / 0.24), 0 2px 4px -2px hsl(0 0% 0% / 0.24);
   --shadow: 0 8px 18px -4px hsl(0 0% 0% / 0.26);
   --shadow-md: 0 12px 26px -6px hsl(0 0% 0% / 0.28);
   --shadow-lg: 0 18px 36px -10px hsl(0 0% 0% / 0.3);
   --shadow-xl: 0 24px 50px -14px hsl(0 0% 0% / 0.34);
   --shadow-2xl: 0 32px 72px -18px hsl(0 0% 0% / 0.4);
 }
-
 
 @theme inline {
   --color-background: var(--background);

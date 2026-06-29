@@ -223,9 +223,16 @@ function isShortFocusListMessage(message: string) {
     tokens.length <= 5 &&
     tokens.every((token) => FOCUS_LIST_MESSAGE_TOKENS.has(token)) &&
     tokens.some((token) =>
-      ["which", "ones", "them", "ποια", "ποιεσ", "ποιοι", "αυτα", "αυτεσ"].includes(
-        token,
-      ),
+      [
+        "which",
+        "ones",
+        "them",
+        "ποια",
+        "ποιεσ",
+        "ποιοι",
+        "αυτα",
+        "αυτεσ",
+      ].includes(token),
     )
   );
 }

@@ -308,17 +308,22 @@ export function UserDetailsModal({
                                                     {message.content}
                                                   </p>
                                                   {message.imageUrl && (
-                                                    <img
-                                                      src={message.imageUrl}
-                                                      alt="Message attachment"
-                                                      className="mt-2 rounded max-w-xs max-h-48 object-contain cursor-pointer hover:opacity-80 transition-opacity"
+                                                    <button
+                                                      type="button"
+                                                      className="mt-2 block rounded cursor-pointer transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                                       onClick={() =>
                                                         message.imageUrl &&
                                                         setSelectedImage(
                                                           message.imageUrl,
                                                         )
                                                       }
-                                                    />
+                                                    >
+                                                      <img
+                                                        src={message.imageUrl}
+                                                        alt="Message attachment"
+                                                        className="max-w-xs max-h-48 rounded object-contain"
+                                                      />
+                                                    </button>
                                                   )}
                                                 </div>
                                               );

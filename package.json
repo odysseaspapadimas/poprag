@@ -22,7 +22,7 @@
   "scripts": {
     "build": "vite build && tsc --noEmit",
     "build:staging": "CLOUDFLARE_ENV=staging vite build && tsc --noEmit",
-    "check": "npx @biomejs/biome check --write .",
+    "check": "npx @biomejs/biome check .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply poprag",
     "db:migrate:prod": "wrangler d1 migrations apply poprag --remote",
