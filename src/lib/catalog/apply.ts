@@ -21,6 +21,7 @@ import {
   makeCatalogProductId,
   type NormalizedCatalogProduct,
   normalizeCatalogFactValue,
+  normalizeCatalogIncludeFilters,
   normalizeCatalogRecord,
   stringifyValue,
   uniqueFieldList,
@@ -802,6 +803,9 @@ function buildProductChunks(
     ...(config.exactMatchFields ?? []),
     ...(config.searchableFields ?? []),
     ...(config.filterableFields ?? []),
+    ...normalizeCatalogIncludeFilters(config.includeFilters).map(
+      (filter) => filter.fieldPath,
+    ),
   ]);
 
   const headerLines = [

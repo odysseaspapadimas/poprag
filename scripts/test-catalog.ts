@@ -64,6 +64,25 @@ const inactive = await normalizeCatalogRecord(baseConfig, records[1]);
 assert.ok(inactive);
 assert.equal(inactive.active, false);
 
+const includedProduct = await normalizeCatalogRecord(
+  {
+    ...baseConfig,
+    includeFilters: [{ fieldPath: "contentType", values: ["Product"] }],
+  },
+  { sku: "S-3", name: "Product row", status: "active", contentType: "Product" },
+);
+assert.ok(includedProduct);
+assert.equal(includedProduct.recordKey, "S-3");
+
+const skippedBrand = await normalizeCatalogRecord(
+  {
+    ...baseConfig,
+    includeFilters: [{ fieldPath: "contentType", values: ["Product"] }],
+  },
+  { sku: "B-1", name: "Brand row", status: "active", contentType: "Brand" },
+);
+assert.equal(skippedBrand, null);
+
 const facts = collectCatalogFacts(baseConfig, active);
 assert.ok(
   facts.some(

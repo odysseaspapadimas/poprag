@@ -12,6 +12,11 @@ export interface CatalogScopeConfig {
   scopeAliases?: string[] | null;
 }
 
+export interface CatalogIncludeFilter {
+  fieldPath: string;
+  values: string[];
+}
+
 export interface CatalogMapping {
   stableKeyField: string;
   updatedAtField?: string | null;
@@ -21,6 +26,7 @@ export interface CatalogMapping {
   searchableFields?: string[] | null;
   exactMatchFields?: string[] | null;
   filterableFields?: string[] | null;
+  includeFilters?: CatalogIncludeFilter[] | null;
 }
 
 export interface CatalogImportConfig extends CatalogMapping, CatalogScopeConfig {
@@ -474,6 +480,48 @@ export function uniqueFieldList(fields: Array<string | null | undefined>) {
   );
 }
 
+export function normalizeCatalogIncludeFilters(
+  filters: CatalogIncludeFilter[] | null | undefined,
+): CatalogIncludeFilter[] {
+  if (!Array.isArray(filters)) return [];
+
+  return filters
+    .map((filter) => {
+      const fieldPath = filter?.fieldPath?.trim();
+      const values = Array.isArray(filter?.values)
+        ? Array.from(
+            new Set(
+              filter.values
+                .map((value) => stringifyScalar(value))
+                .filter(Boolean),
+            ),
+          )
+        : [];
+      return fieldPath && values.length > 0 ? { fieldPath, values } : null;
+    })
+    .filter((filter): filter is CatalogIncludeFilter => filter !== null);
+}
+
+export function catalogRecordMatchesIncludeFilters(
+  mapping: Pick<CatalogMapping, "includeFilters">,
+  record: Record<string, unknown>,
+): boolean {
+  const filters = normalizeCatalogIncludeFilters(mapping.includeFilters);
+  if (filters.length === 0) return true;
+
+  return filters.every((filter) => {
+    const recordValues = extractCatalogFieldValues(
+      getPathValue(record, filter.fieldPath),
+    ).map(normalizeCatalogValue);
+    if (recordValues.length === 0) return false;
+
+    const allowedValues = filter.values.map(normalizeCatalogValue);
+    return recordValues.some((recordValue) =>
+      allowedValues.includes(recordValue),
+    );
+  });
+}
+
 export function buildCatalogSearchText(
   mapping: CatalogMapping,
   data: Record<string, unknown>,
@@ -486,6 +534,9 @@ export function buildCatalogSearchText(
     ...(mapping.exactMatchFields ?? []),
     ...(mapping.searchableFields ?? []),
     ...(mapping.filterableFields ?? []),
+    ...normalizeCatalogIncludeFilters(mapping.includeFilters).map(
+      (filter) => filter.fieldPath,
+    ),
   ]);
   const lines = [`Product: ${title}`, `Record key: ${recordKey}`];
 
@@ -502,6 +553,8 @@ export async function normalizeCatalogRecord(
   record: unknown,
 ): Promise<NormalizedCatalogProduct | null> {
   if (!isRecord(record)) return null;
+
+  if (!catalogRecordMatchesIncludeFilters(config, record)) return null;
 
   const recordKey = stringifyScalar(
     getPathValue(record, config.stableKeyField),

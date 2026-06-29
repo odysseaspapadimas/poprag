@@ -696,6 +696,9 @@ export const catalogConfig = sqliteTable(
     filterableFields: text("filterable_fields", { mode: "json" })
       .$type<string[]>()
       .default(sql`('[]')`),
+    includeFilters: text("include_filters", { mode: "json" })
+      .$type<Array<{ fieldPath: string; values: string[] }>>()
+      .default(sql`('[]')`),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -796,6 +799,9 @@ export const catalogSyncConfig = sqliteTable(
       .default(sql`('[]')`),
     exactMatchFields: text("exact_match_fields", { mode: "json" })
       .$type<string[]>()
+      .default(sql`('[]')`),
+    includeFilters: text("include_filters", { mode: "json" })
+      .$type<Array<{ fieldPath: string; values: string[] }>>()
       .default(sql`('[]')`),
     syncIntervalDays: integer("sync_interval_days").default(7).notNull(),
     scheduleWeekdayUtc: integer("schedule_weekday_utc").default(1).notNull(),

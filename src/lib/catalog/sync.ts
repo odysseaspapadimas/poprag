@@ -57,6 +57,7 @@ type CatalogSyncConfigRow = CatalogSyncConfig & {
   catalogSearchableFields: string[] | null;
   catalogExactMatchFields: string[] | null;
   catalogFilterableFields: string[] | null;
+  catalogIncludeFilters: Array<{ fieldPath: string; values: string[] }> | null;
 };
 
 const MAX_CATALOG_PAGES = 200;
@@ -263,6 +264,26 @@ export async function syncCatalogConfig(
       { rawR2Key },
     );
 
+    if (resolvedMode === "diff" && records.length === 0) {
+      await finishCatalogRun(loaded, runId, "succeeded", stats, {
+        rawR2Key,
+        nextCursorAt: now,
+        nextRunAt: computeNextCatalogRunAt(loaded, now),
+      });
+      await db
+        .update(knowledgeSource)
+        .set({
+          status: "indexed",
+          progress: 100,
+          progressMessage: "Catalog sync complete: no changes",
+          parserErrors: [],
+          updatedAt: new Date(),
+        })
+        .where(eq(knowledgeSource.id, loaded.knowledgeSourceId));
+
+      return { runId, status: "succeeded", stats };
+    }
+
     let processedRecords = 0;
     let lastProgressReportAt = 0;
     importConfig = loaded.catalogConfigId
@@ -439,6 +460,7 @@ async function loadCatalogSyncConfig(
       titleField: catalogSyncConfig.titleField,
       searchableFields: catalogSyncConfig.searchableFields,
       exactMatchFields: catalogSyncConfig.exactMatchFields,
+      includeFilters: catalogSyncConfig.includeFilters,
       syncIntervalDays: catalogSyncConfig.syncIntervalDays,
       scheduleWeekdayUtc: catalogSyncConfig.scheduleWeekdayUtc,
       scheduleHourUtc: catalogSyncConfig.scheduleHourUtc,
@@ -467,6 +489,7 @@ async function loadCatalogSyncConfig(
       catalogSearchableFields: catalogConfig.searchableFields,
       catalogExactMatchFields: catalogConfig.exactMatchFields,
       catalogFilterableFields: catalogConfig.filterableFields,
+      catalogIncludeFilters: catalogConfig.includeFilters,
     })
     .from(catalogSyncConfig)
     .innerJoin(
@@ -506,6 +529,7 @@ function toCatalogImportConfig(
     exactMatchFields:
       config.catalogExactMatchFields ?? config.exactMatchFields ?? [],
     filterableFields: config.catalogFilterableFields ?? [],
+    includeFilters: config.catalogIncludeFilters ?? config.includeFilters ?? [],
     sourceFileName: config.sourceFileName,
     sourceR2Key: config.sourceR2Key,
   };

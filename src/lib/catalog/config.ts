@@ -37,6 +37,7 @@ export async function loadCatalogImportConfigById(
       searchableFields: catalogConfig.searchableFields,
       exactMatchFields: catalogConfig.exactMatchFields,
       filterableFields: catalogConfig.filterableFields,
+      includeFilters: catalogConfig.includeFilters,
       activeIndexVersion: catalogConfig.activeIndexVersion,
       createdAt: catalogConfig.createdAt,
       updatedAt: catalogConfig.updatedAt,
@@ -78,6 +79,7 @@ export async function loadCatalogImportConfigBySourceId(
       searchableFields: catalogConfig.searchableFields,
       exactMatchFields: catalogConfig.exactMatchFields,
       filterableFields: catalogConfig.filterableFields,
+      includeFilters: catalogConfig.includeFilters,
       activeIndexVersion: catalogConfig.activeIndexVersion,
       createdAt: catalogConfig.createdAt,
       updatedAt: catalogConfig.updatedAt,
@@ -117,6 +119,7 @@ export function toCatalogImportConfig(
     searchableFields: row.searchableFields,
     exactMatchFields: row.exactMatchFields,
     filterableFields: row.filterableFields,
+    includeFilters: row.includeFilters,
     sourceFileName: row.sourceFileName,
     sourceR2Key: row.sourceR2Key,
   };
@@ -137,6 +140,7 @@ export function getCatalogMapping(config: CatalogMapping): CatalogMapping {
     searchableFields: config.searchableFields ?? [],
     exactMatchFields: config.exactMatchFields ?? [],
     filterableFields: config.filterableFields ?? [],
+    includeFilters: config.includeFilters ?? [],
   };
 }
 
